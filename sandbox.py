@@ -6,6 +6,52 @@ l2Commitments = []
 l3Commitments = []
 l4Commitments = []
 
+"""
+
+left frag + right frag + sb and eb in same C'
+    - 1 L1 commitment for sb - eb
+    - no need upper layer
+
+
+left frag + right frag + sb and eb in different C':
+    - 1 L1 commitment for sb - leftFragEnd
+    - 1 L1 commitment for rightFragStart - eb
+    - need upper layer if block remaining in between leftFragEnd+1 - rightFragStart-1 
+
+
+left frag only + sb and eb in same C'
+    - 1 L1 commitment for sb - leftFragEnd
+    - (NO NEED) need upper layer if block remaining in between leftFragEnd+1 - eb 
+
+left frag only + sb and eb in different C'
+    - 1 L1 commitment for sb - leftFragEnd
+    - need upper layer if block remaining in between leftFragEnd+1 - eb 
+
+
+right frag only + sb and eb in same C':
+    - 1 L1 commitment for rightFragStart - eb
+    - (NO NEED) need upper layer if block remaining in between sb - rightFragStart-1
+
+
+right frag only + sb and eb in different C':
+    - 1 L1 commitment for rightFragStart - eb
+    - need upper layer if block remaining in between sb - rightFragStart-1
+
+
+
+
+
+
+
+no frag + sb and eb in same C': ✅
+    - No L1 commitment
+
+no frag + sb and eb in different C': ✅
+    - No L1 commitment
+
+
+"""
+
 
 def getCommitments(startingBlock, endingBlock):
     sb = startingBlock
@@ -15,6 +61,59 @@ def getCommitments(startingBlock, endingBlock):
 
     hasL1LeftFragment = sb % 2048 != 0
     hasL1RightFragment = eb % 2048 != 2047
+
+    if not hasL1LeftFragment and not hasL1RightFragment:
+        # No l1 commitment, move to upper layer
+        pass
+
+    leftCommitmentIndex = sb // 2048
+    rightCommitIndex = eb // 2048
+
+    if leftCommitmentIndex == rightCommitIndex:
+        l1Commitments.append(f"Commitment for {sb} - {eb}")
+        return
+
+    if hasL1LeftFragment and hasL1RightFragment:
+        leftCommitmentIndex = sb // 2048
+        rightCommitIndex = eb // 2048
+
+        if leftCommitmentIndex == rightCommitIndex:
+            l1Commitments.append(f"Commitment for {sb} - {eb}")
+            return
+        else:
+            leftFragmentStart = sb
+            leftFragmentEnd = (leftCommitmentIndex + 1) * 2048 - 1
+            rightFragmentStart = rightCommitIndex * 2048
+            rightFragmentEnd = eb
+            l1Commitments.append(
+                f"Commitment for {leftFragmentStart} - {leftFragmentEnd}"
+            )
+            l1Commitments.append(
+                f"Commitment for {rightFragmentStart} - {rightFragmentEnd}"
+            )
+
+    elif hasL1LeftFragment:
+        leftCommitmentIndex = sb // 2048
+        rightCommitIndex = eb // 2048
+
+        if leftCommitmentIndex == rightCommitIndex:
+            l1Commitments.append(f"Commitment for {sb} - {eb}")
+            return
+        else:
+            leftFragmentStart = sb
+            leftFragmentEnd = (leftCommitmentIndex + 1) * 2048 - 1
+            rightFragmentStart = rightCommitIndex * 2048
+            rightFragmentEnd = eb
+            l1Commitments.append(
+                f"Commitment for {leftFragmentStart} - {leftFragmentEnd}"
+            )
+            l1Commitments.append(
+                f"Commitment for {rightFragmentStart} - {rightFragmentEnd}"
+            )
+    elif hasL1RightFragment:
+        pass
+    else:
+        pass
 
     if hasL1LeftFragment:
         l1CommitmentIndex = sb // 2048
