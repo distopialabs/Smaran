@@ -1,5 +1,5 @@
-startingBlock = 1024
-endingBlock = 6100
+startingBlock = 6_100
+endingBlock = 22_000_000
 
 l1Commitments = []
 l2Commitments = []
@@ -7,10 +7,28 @@ l3Commitments = []
 l4Commitments = []
 
 """
+no frag + sb and eb in same C': ✅
+    - No L1 commitment
+    - need upper layer
 
-left frag + right frag + sb and eb in same C'
+no frag + sb and eb in different C': ✅
+    - No L1 commitment
+    - need upper layer
+
+
+left frag + right frag + sb and eb in same C'✅
     - 1 L1 commitment for sb - eb
     - no need upper layer
+
+left frag only + sb and eb in same C'✅
+    - 1 L1 commitment for sb - leftFragEnd (eb)
+    - (NO NEED) need upper layer if block remaining in between leftFragEnd+1 - eb 
+
+right frag only + sb and eb in same C':✅
+    - 1 L1 commitment for rightFragStart (sb) - eb
+    - (NO NEED) need upper layer if block remaining in between sb - rightFragStart-1
+
+
 
 
 left frag + right frag + sb and eb in different C':
@@ -19,18 +37,12 @@ left frag + right frag + sb and eb in different C':
     - need upper layer if block remaining in between leftFragEnd+1 - rightFragStart-1 
 
 
-left frag only + sb and eb in same C'
-    - 1 L1 commitment for sb - leftFragEnd
-    - (NO NEED) need upper layer if block remaining in between leftFragEnd+1 - eb 
 
 left frag only + sb and eb in different C'
     - 1 L1 commitment for sb - leftFragEnd
     - need upper layer if block remaining in between leftFragEnd+1 - eb 
 
 
-right frag only + sb and eb in same C':
-    - 1 L1 commitment for rightFragStart - eb
-    - (NO NEED) need upper layer if block remaining in between sb - rightFragStart-1
 
 
 right frag only + sb and eb in different C':
@@ -42,18 +54,10 @@ right frag only + sb and eb in different C':
 
 
 
-
-no frag + sb and eb in same C': ✅
-    - No L1 commitment
-
-no frag + sb and eb in different C': ✅
-    - No L1 commitment
-
-
 """
 
 
-def getCommitments(startingBlock, endingBlock):
+def getCommitments(startingBlock, endingBlock, layer=1):
     sb = startingBlock
     eb = endingBlock
 
@@ -64,88 +68,95 @@ def getCommitments(startingBlock, endingBlock):
 
     if not hasL1LeftFragment and not hasL1RightFragment:
         # No l1 commitment, move to upper layer
-        pass
+        # getLxCommitments(sb,eb,2)
+        print(f"Need upper layer commitments for {sb} - {eb}")
+        # TODO: need upper layer commitments for sb-eb
+        return
 
     leftCommitmentIndex = sb // 2048
     rightCommitIndex = eb // 2048
 
+    #  sb and eb in same C', no need upper layer commitments
     if leftCommitmentIndex == rightCommitIndex:
-        l1Commitments.append(f"Commitment for {sb} - {eb}")
+        l1Commitments.append(f"L1 Commitment for {sb} - {eb}")
+        # No need upper layer
         return
 
-    if hasL1LeftFragment and hasL1RightFragment:
-        leftCommitmentIndex = sb // 2048
-        rightCommitIndex = eb // 2048
-
-        if leftCommitmentIndex == rightCommitIndex:
-            l1Commitments.append(f"Commitment for {sb} - {eb}")
-            return
-        else:
-            leftFragmentStart = sb
-            leftFragmentEnd = (leftCommitmentIndex + 1) * 2048 - 1
-            rightFragmentStart = rightCommitIndex * 2048
-            rightFragmentEnd = eb
-            l1Commitments.append(
-                f"Commitment for {leftFragmentStart} - {leftFragmentEnd}"
-            )
-            l1Commitments.append(
-                f"Commitment for {rightFragmentStart} - {rightFragmentEnd}"
-            )
-
-    elif hasL1LeftFragment:
-        leftCommitmentIndex = sb // 2048
-        rightCommitIndex = eb // 2048
-
-        if leftCommitmentIndex == rightCommitIndex:
-            l1Commitments.append(f"Commitment for {sb} - {eb}")
-            return
-        else:
-            leftFragmentStart = sb
-            leftFragmentEnd = (leftCommitmentIndex + 1) * 2048 - 1
-            rightFragmentStart = rightCommitIndex * 2048
-            rightFragmentEnd = eb
-            l1Commitments.append(
-                f"Commitment for {leftFragmentStart} - {leftFragmentEnd}"
-            )
-            l1Commitments.append(
-                f"Commitment for {rightFragmentStart} - {rightFragmentEnd}"
-            )
-    elif hasL1RightFragment:
-        pass
-    else:
-        pass
-
+    # has either leftfragment or right fragment or both
+    # sb and eb in different C'
     if hasL1LeftFragment:
-        l1CommitmentIndex = sb // 2048
-        l1LeftFragmentStart = sb
-        l1LeftFragmentEnd = (l1CommitmentIndex + 1) * 2048 - 1
-
-        if endingBlock <= l1LeftFragmentEnd:
-            l1Commitments.append(
-                f"Commitment for {l1LeftFragmentStart} - {endingBlock}"
-            )
-            return
-
+        leftFragmentStart = sb
+        leftFragmentEnd = (leftCommitmentIndex + 1) * 2048 - 1
         l1Commitments.append(
-            f"Commitment for {l1LeftFragmentStart} - {l1LeftFragmentEnd}"
+            f"L1 Commitment for {leftFragmentStart} - {leftFragmentEnd}"
         )
-        sb = l1LeftFragmentEnd + 1
+        sb = leftFragmentEnd + 1
 
     if hasL1RightFragment:
-        l1CommitIndex = eb // 2048
-        l1RightFragmentStart = l1CommitIndex * 2048
-        l1RightFragmentEnd = eb
-
-        if l1RightFragmentStart <= startingBlock:
-            l1Commitments.append(
-                f"Commitment from {startingBlock} - {l1RightFragmentEnd}"
-            )
-            return
+        rightFragmentStart = rightCommitIndex * 2048
+        rightFragmentEnd = eb
         l1Commitments.append(
-            f"Commitment from {l1RightFragmentStart} - {l1RightFragmentEnd}"
+            f"L1 Commitment for {rightFragmentStart} - {rightFragmentEnd}"
         )
-        eb = l1RightFragmentStart - 1
+        eb = rightFragmentStart - 1
 
+    if sb < eb:
+        print(f"nneed upper layer commitments for {sb} - {eb}")
+
+        # TODO: need upper layer commitments for sb-eb
+        pass
+
+
+def getLxCommitments(sb, eb, layer=1):
+    # For L1
+
+    hasLeftFragment = sb % (2048 * pow(1365, layer - 1)) != 0
+    hasRightFragment = eb % (2048 * pow(1365, layer - 1)) != (
+        2048 * pow(1365, layer - 1) - 1
+    )
+
+    if not hasLeftFragment and not hasRightFragment:
+        # No l1 commitment, move to upper layer
+        # getLxCommitments(sb,eb,2)
+        # TODO: need upper layer commitments for sb-eb
+        getLxCommitments(sb, eb, layer + 1)
+        return
+
+    leftCommitmentIndex = sb // (2048 * pow(1365, layer - 1))
+    rightCommitIndex = eb // (2048 * pow(1365, layer - 1))
+
+    #  sb and eb in same C', no need upper layer commitments
+    if leftCommitmentIndex == rightCommitIndex and (
+        hasLeftFragment or hasRightFragment
+    ):
+        l1Commitments.append(f"Layer{layer} Commitment for {sb} - {eb}")
+        # No need upper layer
+        return
+
+    # has either leftfragment or right fragment or both
+    # sb and eb in different C'
+    if hasLeftFragment:
+        leftFragmentStart = sb
+        leftFragmentEnd = (leftCommitmentIndex + 1) * 2048 * pow(1365, layer - 1) - 1
+        l1Commitments.append(
+            f"Layer{layer} Commitment for {leftFragmentStart} - {leftFragmentEnd}"
+        )
+        sb = leftFragmentEnd + 1
+
+    if hasRightFragment:
+        rightFragmentStart = rightCommitIndex * 2048 * pow(1365, layer - 1)
+        rightFragmentEnd = eb
+        l1Commitments.append(
+            f"Layer{layer} Commitment for {rightFragmentStart} - {rightFragmentEnd}"
+        )
+        eb = rightFragmentStart - 1
+
+    if sb < eb:
+        # TODO: need upper layer commitments for sb-eb
+        getLxCommitments(sb, eb, layer + 1)
+
+
+def getL2Commitments(sb, eb, layer=2):
     # For L2
 
     hasL2Fragment = sb % (2048 * 1365) != 0
@@ -193,7 +204,8 @@ def getCommitments(startingBlock, endingBlock):
         sb = l4FragmentEnd + 1
 
 
-getCommitments(startingBlock, endingBlock)
+getLxCommitments(startingBlock, endingBlock, 1)
+# getCommitments(startingBlock, endingBlock, 1)
 
 
 print(l1Commitments)
