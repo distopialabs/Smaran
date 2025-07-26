@@ -30,20 +30,49 @@ func verifyPolynomial(p polynomial.Polynomial, balanceStore []*big.Int) {
 }
 
 func main() {
-	fmt.Println("Starting Samurai...")
-	// cachedPolynomial := make(polynomial.Polynomial, 4096)
-	// var cachedCommitment gnark_kzg.Digest
 	V, weights := polynomial.LoadBarycentricData(polynomial.DataDir)
-
 	srs, err := kzg.SetupSRS(4096)
 	if err != nil {
 		log.Fatalf("failed to setup SRS: %v", err)
 	}
 
+	// segmentTree := generateSegmentTreeAndCommitments(V, weights, srs)
+	// _ = segmentTree
+	// storage := segmentTree.Storage
+	storage := segmenttree.LoadStorage()
+	start := time.Now()
+
+	rangeProofs := getRangeProof(40, 1000, storage, V, weights, srs)
+	_ = rangeProofs
+	fmt.Println("Time taken to get range proofs", time.Since(start))
+	// for _, proof := range rangeProofs {
+	// 	fmt.Printf("Proof for %d - %d\n", proof.startingBlock, proof.endingBlock)
+	// 	fmt.Printf("Commitment: %s\n", proof.Commitment.String())
+	// 	fmt.Printf("Proof: %s\n", proof.Proof.String())
+	// 	fmt.Printf("ZCommit: %s\n", proof.ZCommit.String())
+	// 	fmt.Printf("ICommit: %s\n", proof.ICommit.String())
+	// 	fmt.Println()
+	// 	// fmt.Println(proof.Commitment)
+	// 	// fmt.Println(proof.Proof)
+	// 	// fmt.Println(proof.ZCommit)
+	// 	// fmt.Println(proof.ICommit)
+	// }
+}
+func generateSegmentTreeAndCommitments(V polynomial.Polynomial, weights []fr.Element, srs *kzg.MultiSRS) *segmenttree.LayeredSegmentTree {
+	fmt.Println("Starting Samurai...")
+	// cachedPolynomial := make(polynomial.Polynomial, 4096)
+	// var cachedCommitment gnark_kzg.Digest
+	// V, weights := polynomial.LoadBarycentricData(polynomial.DataDir)
+
+	// srs, err := kzg.SetupSRS(4096)
+	// if err != nil {
+	// 	log.Fatalf("failed to setup SRS: %v", err)
+	// }
+
 	segmentTree := segmenttree.NewLayeredSegmentTree(V, weights, srs)
 
 	totalStart := time.Now()
-	for blockNumber := range 1365 {
+	for blockNumber := range 1300 {
 		// fmt.Println("Processing block", blockNumber, "...")
 		balance := big.NewInt(1000000000000000000)
 		segmentTree.Update(blockNumber, balance)
@@ -113,11 +142,15 @@ func main() {
 
 		// // === KZG multiproof section removed to simplify and resolve compilation issues ===
 	}
+
+	// dump the storage
+	segmentTree.DumpStorage()
+
 	// verify the polynomial
 	// verifyPolynomial(cachedPolynomial, balanceStore)
 	elapsed := time.Since(totalStart)
 	fmt.Println("Total time:", elapsed)
 
 	// data structure of storing commitment of many accounts per block
-
+	return segmentTree
 }

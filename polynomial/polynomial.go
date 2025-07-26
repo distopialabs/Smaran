@@ -11,6 +11,7 @@ type Polynomial = polynomial.Polynomial
 
 // hashToFieldElement converts a common.Hash to a field element
 func HashToFieldElement(hash common.Hash) fr.Element {
+	// return fr.NewElement(uint64(hash.Big().Uint64()))
 	var element fr.Element
 	element.SetBytes(hash.Bytes())
 	return element
@@ -57,4 +58,25 @@ func Interpolate(xValues []int, yValues []fr.Element, V Polynomial, weights []fr
 	}
 
 	return poly
+}
+
+// VanishingPolynomial returns Z(X) = ∏(X - xs[i])
+// TODO: make this accept ints instead of fr.Element
+func VanishingPolynomial(xs []int) Polynomial {
+	z := []fr.Element{{}}
+	// z := make([]fr.Element, len(xs))
+	z[0].SetOne()
+	for _, x := range xs {
+		newZ := make([]fr.Element, len(z)+1)
+		for i := range z {
+			newZ[i+1].Add(&newZ[i+1], &z[i])
+			var tmp fr.Element
+			xFr := fr.NewElement(uint64(x))
+			tmp.Mul(&z[i], &xFr).Neg(&tmp)
+			newZ[i].Add(&newZ[i], &tmp)
+		}
+		z = newZ
+
+	}
+	return z
 }

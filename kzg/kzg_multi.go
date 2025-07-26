@@ -111,20 +111,20 @@ func ProveMultiPoints(P []fr.Element, xs []fr.Element, srs *MultiSRS) (*KZGMulti
 		ys[i] = polynomialEval(P, x)
 	}
 
-	Z := vanishingPolynomial(xs)
+	Z := VanishingPolynomial(xs)
 	ZCommit, err := kzg.Commit(Z, srs.Inner.Pk)
 	if err != nil {
 		return nil, err
 	}
 
-	I := interpolate(xs, ys)
+	I := Interpolate(xs, ys)
 	ICommit, err := kzg.Commit(I, srs.Inner.Pk)
 	if err != nil {
 		return nil, err
 	}
 
-	diff := subtractPolys(P, I)
-	Q := polyDiv(diff, Z)
+	diff := SubtractPolys(P, I)
+	Q := PolyDiv(diff, Z)
 
 	proofG2 := CommitG2(Q, srs.G2Powers)
 
@@ -152,8 +152,8 @@ type KZGMultiProof struct {
 
 func (mp *KZGMultiProof) Verify(srs *MultiSRS) error {
 
-	recomputedZ := vanishingPolynomial(mp.Xs)
-	recomputedI := interpolate(mp.Xs, mp.Ys)
+	recomputedZ := VanishingPolynomial(mp.Xs)
+	recomputedI := Interpolate(mp.Xs, mp.Ys)
 
 	zc, err := kzg.Commit(recomputedZ, srs.Inner.Pk)
 	if err != nil {

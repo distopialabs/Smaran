@@ -5,8 +5,9 @@ import (
 	"github.com/nepal80m/samurai/polynomial"
 )
 
-// vanishingPolynomial returns Z(X) = ∏(X - xs[i])
-func vanishingPolynomial(xs []fr.Element) polynomial.Polynomial {
+// VanishingPolynomial returns Z(X) = ∏(X - xs[i])
+// TODO: make this accept ints instead of fr.Element
+func VanishingPolynomial(xs []fr.Element) polynomial.Polynomial {
 	z := []fr.Element{{}}
 	z[0].SetOne()
 	for _, x := range xs {
@@ -22,8 +23,8 @@ func vanishingPolynomial(xs []fr.Element) polynomial.Polynomial {
 	return z
 }
 
-// interpolate constructs R(X) such that R(xs[i]) = ys[i]
-func interpolate(xs, ys []fr.Element) []fr.Element {
+// Interpolate constructs R(X) such that R(xs[i]) = ys[i]
+func Interpolate(xs, ys []fr.Element) []fr.Element {
 	n := len(xs)
 	res := make([]fr.Element, n)
 	for i := 0; i < n; i++ {
@@ -59,8 +60,8 @@ func interpolate(xs, ys []fr.Element) []fr.Element {
 	return res
 }
 
-// subtractPolys computes A - B
-func subtractPolys(a, b []fr.Element) []fr.Element {
+// SubtractPolys computes A - B
+func SubtractPolys(a, b []fr.Element) []fr.Element {
 	n := len(a)
 	if len(b) > n {
 		n = len(b)
@@ -79,8 +80,8 @@ func subtractPolys(a, b []fr.Element) []fr.Element {
 	return out
 }
 
-// polyDiv divides num by denom, returns quotient (exact division assumed)
-func polyDiv(num, denom []fr.Element) []fr.Element {
+// PolyDiv divides num by denom, returns quotient (exact division assumed)
+func PolyDiv(num, denom []fr.Element) []fr.Element {
 	d := len(denom) - 1
 	m := len(num) - 1
 	rem := make([]fr.Element, len(num))
