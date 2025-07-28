@@ -25,6 +25,8 @@ const L1BatchSize = 8
 
 const L2BatchSize = 5
 
+const MaxLayer = 4
+
 const SegmentTreeSize = L1BatchSize * 2 //2048 * 2 = 4096
 
 type Storage struct {

@@ -10,6 +10,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/nepal80m/samurai/kzg"
 	"github.com/nepal80m/samurai/polynomial"
+	"github.com/nepal80m/samurai/proof"
 	"github.com/nepal80m/samurai/segmenttree"
 )
 
@@ -42,7 +43,9 @@ func main() {
 	storage := segmenttree.LoadStorage()
 	start := time.Now()
 
-	rangeProofs := getRangeProof(40, 1000, storage, V, weights, srs)
+	rangeProofs := proof.GetRangeProofs(20, 1000, storage, V, weights, srs)
+
+	proof.VerifyRangeProofs(20, 1000, rangeProofs, V, weights, srs, storage)
 	_ = rangeProofs
 	fmt.Println("Time taken to get range proofs", time.Since(start))
 	// for _, proof := range rangeProofs {

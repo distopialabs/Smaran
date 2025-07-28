@@ -155,6 +155,14 @@ def findSegmentTree(idx, layer):
     return f"{start} - {end}: size {end-start+1}"
 
 
+def findCommitmentsCoveringRange(sb, eb):
+    pass
+
+
+def findCommitmentInterpolatingLXm1Commitment(commitIdx):
+    pass
+
+
 def findRequiredCommitments(sb, eb, layer=1):
 
     l0BatchSize = 2048 * pow(1365, layer - 1)
