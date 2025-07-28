@@ -17,13 +17,13 @@ import (
 	fr "github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
 )
 
-// const L1BatchSize = 2048
+const L1BatchSize = 2048
 
-const L1BatchSize = 8
+// const L1BatchSize = 8
 
-// const L2BatchSize = 1365
+const L2BatchSize = 1365
 
-const L2BatchSize = 5
+// const L2BatchSize = 5
 
 const MaxLayer = 4
 
@@ -121,22 +121,22 @@ func (segmentTree *LayeredSegmentTree) Update(blockNumber int, balance *big.Int)
 
 	if blockNumber%L1BatchSize == 0 {
 		// if idx0 == 0 {
-		fmt.Println("resetting layer 1 tree")
+		// fmt.Println("resetting layer 1 tree")
 		segmentTree.Layer1Tree = make([]common.Hash, SegmentTreeSize)
 	}
 	if blockNumber%(L1BatchSize*L2BatchSize) == 0 {
 		// if idx1 == 0 && len(segmentTree.Layer2Tree) > 0 {
-		fmt.Println("resetting layer 2 tree")
+		// fmt.Println("resetting layer 2 tree")
 		segmentTree.Layer2Tree = make([]common.Hash, SegmentTreeSize)
 	}
 	if blockNumber%(L1BatchSize*L2BatchSize*L2BatchSize) == 0 {
 		// if idx2 == 0 && len(segmentTree.Layer3Tree) > 0 {
-		fmt.Println("resetting layer 3 tree")
+		// fmt.Println("resetting layer 3 tree")
 		segmentTree.Layer3Tree = make([]common.Hash, SegmentTreeSize)
 	}
 	if blockNumber%(L1BatchSize*L2BatchSize*L2BatchSize*L2BatchSize) == 0 {
 		// if idx3 == 0 && len(segmentTree.Layer4Tree) > 0 {
-		fmt.Println("resetting layer 4 tree")
+		// fmt.Println("resetting layer 4 tree")
 		segmentTree.Layer4Tree = make([]common.Hash, SegmentTreeSize)
 	}
 

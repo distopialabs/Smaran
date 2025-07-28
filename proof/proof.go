@@ -64,7 +64,7 @@ func GetRangeProofs(startingBlock, endingBlock int, storage *segmenttree.Storage
 		layer := reqCommit.layer
 		idx := reqCommit.idx
 
-		nodesToInterpolate := findNodesToInterpolate(reqCommit)
+		nodesToInterpolate := findNodesToInterpolate(reqCommit, true)
 
 		fmt.Printf("\n\nidx: %d, layer: %d, \n", reqCommit.idx, reqCommit.layer)
 		if reqCommit.BlockRange == nil {
@@ -246,18 +246,20 @@ func findRangeCoveringCommitments(sb, eb int, layer int) []RangeCommitment {
 
 }
 
-func findNodesToInterpolate(commitment RangeCommitment) []int {
+func findNodesToInterpolate(commitment RangeCommitment, includeDependentCommitments bool) []int {
 
 	layer := commitment.layer
 	idx := commitment.idx
 
 	nodesToInterpolate := make([]int, 0)
-	for _, depCommitIdx := range commitment.dependentCommitments {
-		if layer <= 1 {
-			panic("layer1 cannot have dependents")
+	if includeDependentCommitments {
+		for _, depCommitIdx := range commitment.dependentCommitments {
+			if layer <= 1 {
+				panic("layer1 cannot have dependents")
+			}
+			modDepCommitIdx := 2*segmenttree.L2BatchSize - 1 + (depCommitIdx % segmenttree.L2BatchSize)
+			nodesToInterpolate = append(nodesToInterpolate, modDepCommitIdx)
 		}
-		modDepCommitIdx := 2*segmenttree.L2BatchSize - 1 + (depCommitIdx % segmenttree.L2BatchSize)
-		nodesToInterpolate = append(nodesToInterpolate, modDepCommitIdx)
 	}
 
 	if commitment.BlockRange == nil {
