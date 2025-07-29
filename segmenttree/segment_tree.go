@@ -17,13 +17,13 @@ import (
 	fr "github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
 )
 
-const L1BatchSize = 2048
+// const L1BatchSize = 2048
 
-// const L1BatchSize = 8
+const L1BatchSize = 8
 
-const L2BatchSize = 1365
+// const L2BatchSize = 1365
 
-// const L2BatchSize = 5
+const L2BatchSize = 5
 
 const MaxLayer = 4
 
@@ -185,10 +185,14 @@ func (segmentTree *LayeredSegmentTree) Update(blockNumber int, balance *big.Int)
 	segmentTree.Storage.L4Tree[l4CommitIndex] = make([]common.Hash, SegmentTreeSize)
 	copy(segmentTree.Storage.L4Tree[l4CommitIndex], segmentTree.Layer4Tree)
 
-	segmentTree.Storage.L1Polynomial[l1CommitIndex] = segmentTree.Layer1Polynomial
-	segmentTree.Storage.L2Polynomial[l2CommitIndex] = segmentTree.Layer2Polynomial
-	segmentTree.Storage.L3Polynomial[l3CommitIndex] = segmentTree.Layer3Polynomial
-	segmentTree.Storage.L4Polynomial[l4CommitIndex] = segmentTree.Layer4Polynomial
+	segmentTree.Storage.L1Polynomial[l1CommitIndex] = make(polynomial.Polynomial, SegmentTreeSize)
+	copy(segmentTree.Storage.L1Polynomial[l1CommitIndex], segmentTree.Layer1Polynomial)
+	segmentTree.Storage.L2Polynomial[l2CommitIndex] = make(polynomial.Polynomial, SegmentTreeSize)
+	copy(segmentTree.Storage.L2Polynomial[l2CommitIndex], segmentTree.Layer2Polynomial)
+	segmentTree.Storage.L3Polynomial[l3CommitIndex] = make(polynomial.Polynomial, SegmentTreeSize)
+	copy(segmentTree.Storage.L3Polynomial[l3CommitIndex], segmentTree.Layer3Polynomial)
+	segmentTree.Storage.L4Polynomial[l4CommitIndex] = make(polynomial.Polynomial, SegmentTreeSize)
+	copy(segmentTree.Storage.L4Polynomial[l4CommitIndex], segmentTree.Layer4Polynomial)
 
 }
 

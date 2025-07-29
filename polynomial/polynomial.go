@@ -48,7 +48,7 @@ func Interpolate(xValues []int, yValues []fr.Element, V Polynomial, weights []fr
 
 	for i, x := range xValues {
 		SyntheticDivideInt(quot, V, x) // quot = V/(x-i)
-
+		// TODO: should it be weights[i] or weights[x]? review this later
 		scale.Mul(&yValues[i], &weights[i]) // scale = y_i * w_i
 		for k := range 4096 {
 			var t fr.Element

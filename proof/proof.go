@@ -66,7 +66,7 @@ func GetRangeProofs(startingBlock, endingBlock int, storage *segmenttree.Storage
 
 		nodesToInterpolate := findNodesToInterpolate(reqCommit, true)
 
-		fmt.Printf("\n\nidx: %d, layer: %d, \n", reqCommit.idx, reqCommit.layer)
+		fmt.Printf("\n\nlayer: %d, idx: %d, \n", reqCommit.layer, reqCommit.idx)
 		if reqCommit.BlockRange == nil {
 			fmt.Printf("Commitment is not covering any range.\n")
 		} else {
@@ -77,37 +77,68 @@ func GetRangeProofs(startingBlock, endingBlock int, storage *segmenttree.Storage
 
 		// commitment := lxCommitments[layer][idx]
 		tree := lxTrees[layer][idx]
+
 		P := lxPolynomials[layer][idx]
 
 		commitment, err := gnark_kzg.Commit(P, srs.Inner.Pk)
 		if err != nil {
 			panic(err)
 		}
+		commitmentBytes := commitment.Bytes()
+		commitmentHash := common.BytesToHash(commitmentBytes[:])
+		fmt.Printf("pCommitHash: %v\n", commitmentHash)
 
-		Z := polynomial.VanishingPolynomial(nodesToInterpolate)
-		ZCommit, err := gnark_kzg.Commit(Z, srs.Inner.Pk)
-		_ = ZCommit
-		if err != nil {
-			panic(err)
+		if layer < segmenttree.MaxLayer {
+			modDepCommitIdx := 2*segmenttree.L2BatchSize - 1 + (idx % segmenttree.L2BatchSize)
+			storedCommitmentHash := lxTrees[layer+1][idx/segmenttree.L2BatchSize][modDepCommitIdx]
+			fmt.Printf("storedCommitmentHash: %v\n", storedCommitmentHash)
+			if storedCommitmentHash != commitmentHash {
+				panic("commitment hash does not match")
+			} else {
+				fmt.Println("commitment hash matches with the commitment stored in upper layer storage")
+			}
 		}
 
+		Z := polynomial.VanishingPolynomial(nodesToInterpolate)
+		ZCommit := kzg.CommitG2(Z, srs.G2Powers)
+
+		zCommitBytes := ZCommit.Bytes()
+		zCommitHash := common.BytesToHash(zCommitBytes[:])
+		fmt.Printf("zCommitHash: %s\n", zCommitHash)
+
+		xs := make([]fr.Element, len(nodesToInterpolate))
 		ys := make([]fr.Element, len(nodesToInterpolate))
 		for i, v := range nodesToInterpolate {
+			xs[i] = fr.NewElement(uint64(v))
 			ys[i] = polynomial.HashToFieldElement(tree[v])
 		}
 
-		I := polynomial.Interpolate(nodesToInterpolate, ys, V, weights)
+		// I := polynomial.Interpolate(nodesToInterpolate, ys, V, weights)
+		I := kzg.Interpolate(xs, ys)
 		ICommit, err := gnark_kzg.Commit(I, srs.Inner.Pk)
-		_ = ICommit
 		if err != nil {
 			panic(err)
 		}
+		iCommitBytes := ICommit.Bytes()
+		iCommitHash := common.BytesToHash(iCommitBytes[:])
+		fmt.Printf("iCommitmentHash: %s\n", iCommitHash)
 
 		diff := kzg.SubtractPolys(P, I)
 		Q := kzg.PolyDiv(diff, Z)
 		QCommit, err := gnark_kzg.Commit(Q, srs.Inner.Pk)
 		if err != nil {
 			panic(err)
+		}
+		qCommitBytes := QCommit.Bytes()
+		qCommitHash := common.BytesToHash(qCommitBytes[:])
+		fmt.Printf("qCommitmentHash: %s\n", qCommitHash)
+
+		ok, err := PairingCheck(commitment, QCommit, ICommit, ZCommit, srs)
+		if err != nil {
+			panic(err)
+		}
+		if !ok {
+			panic("pairing check failed.")
 		}
 
 		rangeProof := &RangeProof{
@@ -120,6 +151,15 @@ func GetRangeProofs(startingBlock, endingBlock int, storage *segmenttree.Storage
 		}
 
 		allRangeProofs = append(allRangeProofs, rangeProof)
+
+		for i, v := range nodesToInterpolate {
+			fmt.Printf("ys[%d]: %v\n", i, tree[v])
+		}
+		if QCommit == (bls.G1Affine{}) {
+			fmt.Printf("I: %v\n", I)
+			fmt.Printf("Z: %v\n", Z)
+			panic("Proof is zero")
+		}
 
 	}
 

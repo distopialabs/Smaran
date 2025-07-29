@@ -1,8 +1,11 @@
 package proof
 
 import (
+	"encoding/json"
 	"fmt"
+	"log"
 	"math/big"
+	"os"
 	"slices"
 
 	bls "github.com/consensys/gnark-crypto/ecc/bls12-381"
@@ -29,6 +32,8 @@ type RebuiltLayeredSegmentTree struct {
 	Layer2Tree []common.Hash
 	Layer3Tree []common.Hash
 	Layer4Tree []common.Hash
+
+	Storage *segmenttree.Storage
 }
 
 func NewRebuiltLayeredSegmentTree() *RebuiltLayeredSegmentTree {
@@ -37,10 +42,17 @@ func NewRebuiltLayeredSegmentTree() *RebuiltLayeredSegmentTree {
 		Layer2Tree: make([]common.Hash, SegmentTreeSize),
 		Layer3Tree: make([]common.Hash, SegmentTreeSize),
 		Layer4Tree: make([]common.Hash, SegmentTreeSize),
+		Storage: &segmenttree.Storage{
+			L1Tree: make(map[int][]common.Hash),
+			L2Tree: make(map[int][]common.Hash),
+			L3Tree: make(map[int][]common.Hash),
+			L4Tree: make(map[int][]common.Hash),
+		},
 	}
 }
 
-func VerifyRangeProofs(startingBlock, endingBlock int, rangeProofs []*RangeProof, V polynomial.Polynomial, weights []fr.Element, srs *kzg.MultiSRS) {
+func VerifyRangeProofs(startingBlock, endingBlock int, rangeProofs []*RangeProof, V polynomial.Polynomial, weights []fr.Element, srs *kzg.MultiSRS, storage *segmenttree.Storage) {
+	fmt.Println("\n\nVerifying range proofs...")
 
 	proofHashMap := make(map[string]*RangeProof, len(rangeProofs))
 	for _, proof := range rangeProofs {
@@ -49,7 +61,7 @@ func VerifyRangeProofs(startingBlock, endingBlock int, rangeProofs []*RangeProof
 	}
 
 	reqCommits := findCommitmentsCoveringRange(startingBlock, endingBlock)
-	nodesValuesHashMap := RebuildSegmentTree(startingBlock, endingBlock, reqCommits, proofHashMap)
+	nodesValuesHashMap := RebuildSegmentTree(startingBlock, endingBlock, reqCommits, proofHashMap, storage)
 
 	// sort reqCommits by layer and idx
 	slices.SortFunc(reqCommits, func(a, b RangeCommitment) int {
@@ -62,7 +74,6 @@ func VerifyRangeProofs(startingBlock, endingBlock int, rangeProofs []*RangeProof
 	isVerified := make(map[string]bool, len(rangeProofs))
 
 	// loop from last item to first item
-	// fmt.Println("\n\nVerifying range proofs...")
 	for i := len(reqCommits) - 1; i >= 0; i-- {
 		reqCommit := reqCommits[i]
 
@@ -79,42 +90,83 @@ func VerifyRangeProofs(startingBlock, endingBlock int, rangeProofs []*RangeProof
 		nodesToInterpolate := findNodesToInterpolate(reqCommit, true)
 		rangeProof := proofHashMap[reqCommitKey]
 
+		fmt.Printf("\n\nlayer: %d, idx: %d, \n", reqCommit.layer, reqCommit.idx)
+		if reqCommit.BlockRange == nil {
+			fmt.Printf("Commitment is not covering any range.\n")
+		} else {
+			fmt.Printf("sb: %d, eb: %d\n", reqCommit.BlockRange.Start, reqCommit.BlockRange.End)
+		}
+		fmt.Printf("dependentCommitments: %v\n", reqCommit.dependentCommitments)
+		fmt.Printf("nodesToInterpolate: %v\n", nodesToInterpolate)
+		for i, nodeIdx := range nodesToInterpolate {
+			nodeKey := fmt.Sprintf("%d:%d:%d", reqCommit.layer, reqCommit.idx, nodeIdx)
+			fmt.Printf("ys[%d]: %v\n", i, nodesValuesHashMap[nodeKey])
+		}
 		Commitment := rangeProof.Commitment
+
+		pCommitBytes := Commitment.Bytes()
+		pCommitHash := common.BytesToHash(pCommitBytes[:])
+		fmt.Printf("pCommitmentHash: %s\n", pCommitHash)
+
 		// TODO: reconstruct tree using given balance values
 		// tree := lxTrees[reqCommit.layer][reqCommit.idx]
 
 		Z := polynomial.VanishingPolynomial(nodesToInterpolate)
-		ZCommit, err := gnark_kzg.Commit(Z, srs.Inner.Pk)
-		_ = ZCommit
-		if err != nil {
-			panic(err)
-		}
+		// ZCommit, err := gnark_kzg.Commit(Z, srs.Inner.Pk)
+		ZCommit := kzg.CommitG2(Z, srs.G2Powers)
 
+		zCommitBytes := ZCommit.Bytes()
+		zCommitHash := common.BytesToHash(zCommitBytes[:])
+		fmt.Printf("zCommitmentHash: %s\n", zCommitHash)
+
+		// _ = ZCommit
+		// if err != nil {
+		// 	panic(err)
+		// }
+
+		xs := make([]fr.Element, len(nodesToInterpolate))
 		ys := make([]fr.Element, len(nodesToInterpolate))
 		for i, nodeIdx := range nodesToInterpolate {
+			xs[i] = fr.NewElement(uint64(nodeIdx))
 			nodeKey := fmt.Sprintf("%d:%d:%d", reqCommit.layer, reqCommit.idx, nodeIdx)
 			ys[i] = polynomial.HashToFieldElement(nodesValuesHashMap[nodeKey])
 		}
 
-		I := polynomial.Interpolate(nodesToInterpolate, ys, V, weights)
+		// I := polynomial.Interpolate(nodesToInterpolate, ys, V, weights)
+		I := kzg.Interpolate(xs, ys)
 		ICommit, err := gnark_kzg.Commit(I, srs.Inner.Pk)
-		_ = ICommit
 		if err != nil {
 			panic(err)
 		}
 
+		iCommitBytes := ICommit.Bytes()
+		iCommitHash := common.BytesToHash(iCommitBytes[:])
+		fmt.Printf("iCommitmentHash: %s\n", iCommitHash)
+
 		QCommit := rangeProof.Proof
+		qCommitBytes := QCommit.Bytes()
+		qCommitHash := common.BytesToHash(qCommitBytes[:])
+		fmt.Printf("qCommitmentHash: %s\n", qCommitHash)
+
+		// fmt.Printf("Commitment: %v\n", Commitment)
+		// fmt.Printf("Proof: %v\n", QCommit)
+		// fmt.Printf("ys: %v\n", ys)
+
+		// fmt.Printf("I: %v\n", I)
+		// fmt.Printf("Z: %v\n", Z)
+
 		// TODO: Pairing check using G1 elements only
-		ok, err := PairingCheck(Commitment, QCommit, ICommit, ZCommit, srs)
+		_, err = PairingCheck(Commitment, QCommit, ICommit, ZCommit, srs)
 		if err != nil {
 			panic(err)
-		}
-		if !ok {
-			panic("pairing check failed: invalid proof")
-		}
-		for _, depCommitIdx := range reqCommit.dependentCommitments {
-			depCommitKey := fmt.Sprintf("%d:%d", reqCommit.layer-1, depCommitIdx)
-			isVerified[depCommitKey] = true
+			// fmt.Printf("pairing check failed: invalid proof\n")
+			// panic("pairing check failed: invalid proof")
+		} else {
+			fmt.Println("pairing check passed✅")
+			for _, depCommitIdx := range reqCommit.dependentCommitments {
+				depCommitKey := fmt.Sprintf("%d:%d", reqCommit.layer-1, depCommitIdx)
+				isVerified[depCommitKey] = true
+			}
 		}
 
 		// nodesToInterpolate := findNodesToInterpolate(rangeProof)
@@ -137,7 +189,7 @@ func (r *RequiredNode) GetKey() string {
 	return fmt.Sprintf("%d:%d:%d", r.layer, r.commitIdx, r.nodeIdx)
 }
 
-func RebuildSegmentTree(startingBlock, endingBlock int, reqCommits []RangeCommitment, proofHashMap map[string]*RangeProof) map[string]common.Hash {
+func RebuildSegmentTree(startingBlock, endingBlock int, reqCommits []RangeCommitment, proofHashMap map[string]*RangeProof, storage *segmenttree.Storage) map[string]common.Hash {
 
 	// sort reqCommits by layer and idx
 	// rangeCoveringCommits := make([]RangeCommitment, 0)
@@ -149,6 +201,7 @@ func RebuildSegmentTree(startingBlock, endingBlock int, reqCommits []RangeCommit
 	// slices.SortFunc(rangeCoveringCommits, func(a, b RangeCommitment) int {
 	// 	return a.BlockRange.Start - b.BlockRange.Start
 	// })
+	segmentTree := NewRebuiltLayeredSegmentTree()
 
 	// requiredNodesHashMap := make(map[string]bool)
 	nodesValuesHashMap := make(map[string]common.Hash)
@@ -161,12 +214,22 @@ func RebuildSegmentTree(startingBlock, endingBlock int, reqCommits []RangeCommit
 			proofKey := fmt.Sprintf("%d:%d", commit.layer, commit.idx)
 			commitment := proofHashMap[proofKey].Commitment
 			commitmentBytes := commitment.Bytes()
-			commitmentHash := common.Hash(commitmentBytes[:])
+			commitmentHash := common.BytesToHash(commitmentBytes[:])
 
 			modCommitIdx := 2*segmenttree.L2BatchSize - 1 + (commit.idx % segmenttree.L2BatchSize)
 			parentCommitIdx := commit.idx / segmenttree.L2BatchSize
 			nodeKey := fmt.Sprintf("%d:%d:%d", commit.layer+1, parentCommitIdx, modCommitIdx)
 			nodesValuesHashMap[nodeKey] = commitmentHash
+
+			// if commit.layer == 1 {
+			// 	storage.L2Tree[parentCommitIdx][modCommitIdx] = commitmentHash
+			// }
+			// if commit.layer == 2 {
+			// 	storage.L3Tree[parentCommitIdx][modCommitIdx] = commitmentHash
+			// }
+			// if commit.layer == 3 {
+			// 	storage.L4Tree[parentCommitIdx][modCommitIdx] = commitmentHash
+			// }
 
 		}
 
@@ -204,8 +267,6 @@ func RebuildSegmentTree(startingBlock, endingBlock int, reqCommits []RangeCommit
 
 	}
 
-	segmentTree := NewRebuiltLayeredSegmentTree()
-
 	for blockNumber := startingBlock; blockNumber <= endingBlock; blockNumber++ {
 		balance := big.NewInt(1000000000000000000)
 		segmentTree.Update(blockNumber, balance)
@@ -213,8 +274,10 @@ func RebuildSegmentTree(startingBlock, endingBlock int, reqCommits []RangeCommit
 		l2CommitIndex := blockNumber / (L1BatchSize * L2BatchSize)
 		l3CommitIndex := blockNumber / (L1BatchSize * L2BatchSize * L2BatchSize)
 		l4CommitIndex := blockNumber / (L1BatchSize * L2BatchSize * L2BatchSize * L2BatchSize)
+
 		for _, node := range requiredNodes {
 			key := node.GetKey()
+
 			if nodesValuesHashMap[key] != (common.Hash{}) {
 				continue
 			}
@@ -234,6 +297,35 @@ func RebuildSegmentTree(startingBlock, endingBlock int, reqCommits []RangeCommit
 
 	}
 
+	for _, commit := range reqCommits {
+
+		if commit.layer < segmenttree.MaxLayer {
+			proofKey := fmt.Sprintf("%d:%d", commit.layer, commit.idx)
+			commitment := proofHashMap[proofKey].Commitment
+			commitmentBytes := commitment.Bytes()
+			// commitmentHash := common.Hash(commitmentBytes[:])
+			commitmentHash := common.BytesToHash(commitmentBytes[:])
+
+			modCommitIdx := 2*segmenttree.L2BatchSize - 1 + (commit.idx % segmenttree.L2BatchSize)
+			parentCommitIdx := commit.idx / segmenttree.L2BatchSize
+			// nodeKey := fmt.Sprintf("%d:%d:%d", commit.layer+1, parentCommitIdx, modCommitIdx)
+			// nodesValuesHashMap[nodeKey] = commitmentHash
+
+			if commit.layer == 1 {
+				segmentTree.Storage.L2Tree[parentCommitIdx][modCommitIdx] = commitmentHash
+			}
+			if commit.layer == 2 {
+				segmentTree.Storage.L3Tree[parentCommitIdx][modCommitIdx] = commitmentHash
+			}
+			if commit.layer == 3 {
+				segmentTree.Storage.L4Tree[parentCommitIdx][modCommitIdx] = commitmentHash
+			}
+
+		}
+	}
+
+	segmentTree.DumpStorage()
+
 	// for _, node := range requiredNodes {
 	// 	key := node.GetKey()
 	// 	if nodesValuesHashMap[key] == (common.Hash{}) {
@@ -242,6 +334,31 @@ func RebuildSegmentTree(startingBlock, endingBlock int, reqCommits []RangeCommit
 
 	// 	fmt.Printf("required node (layer: %d, idx: %d, node: %d) value: %s\n", node.layer, node.commitIdx, node.nodeIdx, nodesValuesHashMap[key])
 	// }
+
+	for _, commit := range reqCommits {
+		nodesToInterpolate := findNodesToInterpolate(commit, true)
+		for _, nodeIdx := range nodesToInterpolate {
+			nodeKey := fmt.Sprintf("%d:%d:%d", commit.layer, commit.idx, nodeIdx)
+			calculatedValue := nodesValuesHashMap[nodeKey]
+
+			lxTrees := map[int]map[int][]common.Hash{
+				1: storage.L1Tree,
+				2: storage.L2Tree,
+				3: storage.L3Tree,
+				4: storage.L4Tree,
+			}
+			tree := lxTrees[commit.layer][commit.idx]
+
+			actualValue := tree[nodeIdx]
+
+			if calculatedValue != actualValue {
+				fmt.Printf("layer: %d, idx: %d, node: %d\n", commit.layer, commit.idx, nodeIdx)
+				fmt.Printf("calculatedValue: %s\n", calculatedValue)
+				fmt.Printf("actualValue: %s\n", actualValue)
+				panic("calculated value does not match actual value")
+			}
+		}
+	}
 
 	return nodesValuesHashMap
 
@@ -298,11 +415,22 @@ func (segmentTree *RebuiltLayeredSegmentTree) Update(blockNumber int, balance *b
 	segmentTree.UpdateLayerX(L2BatchSize-1+idx3, l3RootHash, 4)
 	// _ = l4CommitHash
 
-	// l1CommitIndex := blockNumber / L1BatchSize
-	// l2CommitIndex := blockNumber / (L1BatchSize * L2BatchSize)
-	// l3CommitIndex := blockNumber / (L1BatchSize * L2BatchSize * L2BatchSize)
-	// l4CommitIndex := blockNumber / (L1BatchSize * L2BatchSize * L2BatchSize * L2BatchSize)
+	l1CommitIndex := blockNumber / L1BatchSize
+	l2CommitIndex := blockNumber / (L1BatchSize * L2BatchSize)
+	l3CommitIndex := blockNumber / (L1BatchSize * L2BatchSize * L2BatchSize)
+	l4CommitIndex := blockNumber / (L1BatchSize * L2BatchSize * L2BatchSize * L2BatchSize)
 
+	segmentTree.Storage.L1Tree[l1CommitIndex] = make([]common.Hash, SegmentTreeSize)
+	copy(segmentTree.Storage.L1Tree[l1CommitIndex], segmentTree.Layer1Tree)
+
+	segmentTree.Storage.L2Tree[l2CommitIndex] = make([]common.Hash, SegmentTreeSize)
+	copy(segmentTree.Storage.L2Tree[l2CommitIndex], segmentTree.Layer2Tree)
+
+	segmentTree.Storage.L3Tree[l3CommitIndex] = make([]common.Hash, SegmentTreeSize)
+	copy(segmentTree.Storage.L3Tree[l3CommitIndex], segmentTree.Layer3Tree)
+
+	segmentTree.Storage.L4Tree[l4CommitIndex] = make([]common.Hash, SegmentTreeSize)
+	copy(segmentTree.Storage.L4Tree[l4CommitIndex], segmentTree.Layer4Tree)
 }
 
 func (segmentTree *RebuiltLayeredSegmentTree) UpdateLayerX(idx int, val common.Hash, layer int) {
@@ -348,6 +476,77 @@ func (segmentTree *RebuiltLayeredSegmentTree) UpdateLayerX(idx int, val common.H
 
 }
 
-func PairingCheck(commit bls.G1Affine, proof bls.G1Affine, iCommit bls.G1Affine, zCommit bls.G1Affine, srs *kzg.MultiSRS) (bool, error) {
+func PairingCheck(commit bls.G1Affine, proof bls.G1Affine, iCommit bls.G1Affine, zCommit bls.G2Affine, srs *kzg.MultiSRS) (bool, error) {
+
+	var lhsG1 bls.G1Affine
+	lhsG1.Sub(&commit, &iCommit)
+
+	lhsNegZ := zCommit
+	lhsNegZ.Neg(&lhsNegZ)
+
+	P := []bls.G1Affine{lhsG1, proof}
+	// Q := make([]bls.G2Affine, 2)
+	Q := []bls.G2Affine{srs.G2Powers[0], lhsNegZ}
+
+	ok, err := bls.PairingCheck(P, Q)
+	if err != nil {
+		return false, err
+	}
+	if !ok {
+		return false, fmt.Errorf("pairing check failed: invalid multiproof")
+	}
 	return true, nil
+}
+
+func (segmentTree *RebuiltLayeredSegmentTree) DumpTrees() {
+
+	// dump trees to a json file
+	l1Tree := segmentTree.Storage.L1Tree
+	l2Tree := segmentTree.Storage.L2Tree
+	l3Tree := segmentTree.Storage.L3Tree
+	l4Tree := segmentTree.Storage.L4Tree
+
+	// dump trees to a json file
+	l1TreeJSON, err := json.Marshal(l1Tree)
+	if err != nil {
+		log.Fatalf("failed to marshal l1Tree: %v", err)
+	}
+	err = os.WriteFile("l1TreeRebuilt.json", l1TreeJSON, 0644)
+	if err != nil {
+		log.Fatalf("failed to write l1Tree to file: %v", err)
+	}
+
+	l2TreeJSON, err := json.Marshal(l2Tree)
+	if err != nil {
+		log.Fatalf("failed to marshal l2Tree: %v", err)
+	}
+	err = os.WriteFile("l2TreeRebuilt.json", l2TreeJSON, 0644)
+	if err != nil {
+		log.Fatalf("failed to write l2Tree to file: %v", err)
+	}
+
+	l3TreeJSON, err := json.Marshal(l3Tree)
+	if err != nil {
+		log.Fatalf("failed to marshal l3Tree: %v", err)
+	}
+	err = os.WriteFile("l3TreeRebuilt.json", l3TreeJSON, 0644)
+	if err != nil {
+		log.Fatalf("failed to write l3Tree to file: %v", err)
+	}
+
+	l4TreeJSON, err := json.Marshal(l4Tree)
+	if err != nil {
+		log.Fatalf("failed to marshal l4Tree: %v", err)
+	}
+	err = os.WriteFile("l4TreeRebuilt.json", l4TreeJSON, 0644)
+	if err != nil {
+		log.Fatalf("failed to write l4Tree to file: %v", err)
+	}
+
+	fmt.Println("Dumped trees to json files")
+
+}
+
+func (segmentTree *RebuiltLayeredSegmentTree) DumpStorage() {
+	segmentTree.DumpTrees()
 }
