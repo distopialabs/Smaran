@@ -6,7 +6,7 @@ import (
 )
 
 // VanishingPolynomial returns Z(X) = ∏(X - xs[i])
-// TODO: make this accept ints instead of fr.Element
+// TODO: make this accept ints instead of fr.Element, remove this?
 func VanishingPolynomial(xs []fr.Element) polynomial.Polynomial {
 	z := []fr.Element{{}}
 	z[0].SetOne()

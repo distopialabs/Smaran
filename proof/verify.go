@@ -13,7 +13,6 @@ import (
 	fr "github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
 	gnark_kzg "github.com/consensys/gnark-crypto/ecc/bls12-381/kzg"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/nepal80m/samurai/kzg"
 	"github.com/nepal80m/samurai/polynomial"
 	"github.com/nepal80m/samurai/segmenttree"
@@ -113,7 +112,7 @@ func VerifyRangeProofs(startingBlock, endingBlock int, rangeProofs []*RangeProof
 
 		Z := polynomial.VanishingPolynomial(nodesToInterpolate)
 		// ZCommit, err := gnark_kzg.Commit(Z, srs.Inner.Pk)
-		ZCommit := kzg.CommitG2(Z, srs.G2Powers)
+		ZCommit, _ := kzg.CommitG2(Z, srs.G2Powers)
 
 		zCommitBytes := ZCommit.Bytes()
 		zCommitHash := common.BytesToHash(zCommitBytes[:])
@@ -213,8 +212,9 @@ func RebuildSegmentTree(startingBlock, endingBlock int, reqCommits []RangeCommit
 		if commit.layer < segmenttree.MaxLayer {
 			proofKey := fmt.Sprintf("%d:%d", commit.layer, commit.idx)
 			commitment := proofHashMap[proofKey].Commitment
-			commitmentBytes := commitment.Bytes()
-			commitmentHash := common.BytesToHash(commitmentBytes[:])
+			commitmentHash := segmenttree.CommitmentToHash(commitment)
+			// commitmentBytes := commitment.Bytes()
+			// commitmentHash := common.BytesToHash(commitmentBytes[:])
 
 			modCommitIdx := 2*segmenttree.L2BatchSize - 1 + (commit.idx % segmenttree.L2BatchSize)
 			parentCommitIdx := commit.idx / segmenttree.L2BatchSize
@@ -460,11 +460,12 @@ func (segmentTree *RebuiltLayeredSegmentTree) UpdateLayerX(idx int, val common.H
 			if (lChild == common.Hash{} || rChild == common.Hash{}) {
 				break
 			}
-
-			tree[parentIdx] = crypto.Keccak256Hash(
-				lChild.Bytes(),
-				rChild.Bytes(),
-			)
+			tree[parentIdx] = segmenttree.BytesToPoseidonHash(lChild.Bytes(), rChild.Bytes())
+			// tree[parentIdx] = segmenttree.GetParentHash(lChild, rChild)
+			// tree[parentIdx] = crypto.Keccak256Hash(
+			// 	lChild.Bytes(),
+			// 	rChild.Bytes(),
+			// )
 
 			updatedIndices = append(updatedIndices, parentIdx)
 

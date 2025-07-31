@@ -8,22 +8,22 @@ import (
 	"os"
 
 	gnark_kzg "github.com/consensys/gnark-crypto/ecc/bls12-381/kzg"
+
 	"github.com/nepal80m/samurai/kzg"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/nepal80m/samurai/polynomial"
 
 	fr "github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
 )
 
-// const L1BatchSize = 2048
+const L1BatchSize = 2048
 
-const L1BatchSize = 8
+// const L1BatchSize = 8
 
-// const L2BatchSize = 1365
+const L2BatchSize = 1365
 
-const L2BatchSize = 5
+// const L2BatchSize = 5
 
 const MaxLayer = 4
 
@@ -123,21 +123,29 @@ func (segmentTree *LayeredSegmentTree) Update(blockNumber int, balance *big.Int)
 		// if idx0 == 0 {
 		// fmt.Println("resetting layer 1 tree")
 		segmentTree.Layer1Tree = make([]common.Hash, SegmentTreeSize)
+		segmentTree.Layer1Polynomial = make(polynomial.Polynomial, SegmentTreeSize)
+		segmentTree.prevL1CommitIncPoly = make(polynomial.Polynomial, SegmentTreeSize)
 	}
 	if blockNumber%(L1BatchSize*L2BatchSize) == 0 {
 		// if idx1 == 0 && len(segmentTree.Layer2Tree) > 0 {
 		// fmt.Println("resetting layer 2 tree")
 		segmentTree.Layer2Tree = make([]common.Hash, SegmentTreeSize)
+		segmentTree.Layer2Polynomial = make(polynomial.Polynomial, SegmentTreeSize)
+		segmentTree.prevL2CommitIncPoly = make(polynomial.Polynomial, SegmentTreeSize)
 	}
 	if blockNumber%(L1BatchSize*L2BatchSize*L2BatchSize) == 0 {
 		// if idx2 == 0 && len(segmentTree.Layer3Tree) > 0 {
 		// fmt.Println("resetting layer 3 tree")
 		segmentTree.Layer3Tree = make([]common.Hash, SegmentTreeSize)
+		segmentTree.Layer3Polynomial = make(polynomial.Polynomial, SegmentTreeSize)
+		segmentTree.prevL3CommitIncPoly = make(polynomial.Polynomial, SegmentTreeSize)
 	}
 	if blockNumber%(L1BatchSize*L2BatchSize*L2BatchSize*L2BatchSize) == 0 {
 		// if idx3 == 0 && len(segmentTree.Layer4Tree) > 0 {
 		// fmt.Println("resetting layer 4 tree")
 		segmentTree.Layer4Tree = make([]common.Hash, SegmentTreeSize)
+		segmentTree.Layer4Polynomial = make(polynomial.Polynomial, SegmentTreeSize)
+		// segmentTree.prevL4CommitIncPoly = make(polynomial.Polynomial, SegmentTreeSize)
 	}
 
 	// updating layer 1
@@ -147,21 +155,98 @@ func (segmentTree *LayeredSegmentTree) Update(blockNumber int, balance *big.Int)
 	l1CommitHash := segmentTree.CalculateCommitment(segmentTree.Layer1Polynomial)
 	l1RootHash := segmentTree.Layer1Tree[0]
 
+	// // Manual interpolation
+	// xs := make([]int, SegmentTreeSize)
+	// ys := make([]fr.Element, SegmentTreeSize)
+	// for i := 0; i < SegmentTreeSize; i++ {
+	// 	xs[i] = i
+	// 	ys[i] = polynomial.HashToFieldElement(segmentTree.Layer1Tree[i])
+	// }
+
+	// manualPoly := polynomial.Interpolate(xs, ys, segmentTree.CachedData.V, segmentTree.CachedData.Weights)
+	// if manualPoly.Equal(segmentTree.Layer1Polynomial) {
+	// 	fmt.Println("manual poly matches with inc poly ✅")
+	// } else {
+	// 	fmt.Println("manual poly does not match inc poly ❌")
+	// 	fmt.Println("manual poly length", len(manualPoly))
+	// 	// fmt.Println("calculated poly", segmentTree.Layer1Polynomial)
+	// 	fmt.Println("calculated poly length", len(segmentTree.Layer1Polynomial))
+	// 	panic("manual poly does not match calculated poly")
+	// }
+	// // END Manual interpolation
+
 	// TODO: use loop to update all layers
 	// updating layer 2
 	segmentTree.UpdateLayerX(L2BatchSize-1+idx1, l1RootHash, l1CommitHash, 2)
 	l2CommitHash := segmentTree.CalculateCommitment(segmentTree.Layer2Polynomial)
 	l2RootHash := segmentTree.Layer2Tree[0]
 
+	// // Manual interpolation
+	// xs := make([]int, SegmentTreeSize)
+	// ys := make([]fr.Element, SegmentTreeSize)
+	// for i := 0; i < SegmentTreeSize; i++ {
+	// 	xs[i] = i
+	// 	ys[i] = polynomial.HashToFieldElement(segmentTree.Layer2Tree[i])
+	// }
+
+	// manualPoly := polynomial.Interpolate(xs, ys, segmentTree.CachedData.V, segmentTree.CachedData.Weights)
+	// if manualPoly.Equal(segmentTree.Layer2Polynomial) {
+	// 	fmt.Println("manual poly matches with inc poly ✅")
+	// } else {
+	// 	fmt.Println("manual poly does not match inc poly ❌")
+	// 	fmt.Println("manual poly", manualPoly)
+	// 	fmt.Println("calculated poly", segmentTree.Layer2Polynomial)
+	// 	panic("manual poly does not match calculated poly")
+	// }
+	// // END Manual interpolation
+
 	// updating layer 3
 	segmentTree.UpdateLayerX(L2BatchSize-1+idx2, l2RootHash, l2CommitHash, 3)
 	l3CommitHash := segmentTree.CalculateCommitment(segmentTree.Layer3Polynomial)
 	l3RootHash := segmentTree.Layer3Tree[0]
 
+	// // Manual interpolation
+	// xs := make([]int, SegmentTreeSize)
+	// ys := make([]fr.Element, SegmentTreeSize)
+	// for i := 0; i < SegmentTreeSize; i++ {
+	// 	xs[i] = i
+	// 	ys[i] = polynomial.HashToFieldElement(segmentTree.Layer3Tree[i])
+	// }
+
+	// manualPoly := polynomial.Interpolate(xs, ys, segmentTree.CachedData.V, segmentTree.CachedData.Weights)
+	// if manualPoly.Equal(segmentTree.Layer3Polynomial) {
+	// 	fmt.Println("manual poly matches with inc poly ✅")
+	// } else {
+	// 	fmt.Println("manual poly does not match inc poly ❌")
+	// 	fmt.Println("manual poly", manualPoly)
+	// 	fmt.Println("calculated poly", segmentTree.Layer3Polynomial)
+	// 	panic("manual poly does not match calculated poly")
+	// }
+	// // END Manual interpolation
+
 	// updating layer 4
 	segmentTree.UpdateLayerX(L2BatchSize-1+idx3, l3RootHash, l3CommitHash, 4)
 	l4CommitHash := segmentTree.CalculateCommitment(segmentTree.Layer4Polynomial)
 	_ = l4CommitHash
+
+	// // Manual interpolation
+	// xs := make([]int, SegmentTreeSize)
+	// ys := make([]fr.Element, SegmentTreeSize)
+	// for i := 0; i < SegmentTreeSize; i++ {
+	// 	xs[i] = i
+	// 	ys[i] = polynomial.HashToFieldElement(segmentTree.Layer4Tree[i])
+	// }
+
+	// manualPoly := polynomial.Interpolate(xs, ys, segmentTree.CachedData.V, segmentTree.CachedData.Weights)
+	// if manualPoly.Equal(segmentTree.Layer4Polynomial) {
+	// 	fmt.Println("manual poly matches with inc poly ✅")
+	// } else {
+	// 	fmt.Println("manual poly does not match inc poly ❌")
+	// 	fmt.Println("manual poly", manualPoly)
+	// 	fmt.Println("calculated poly", segmentTree.Layer4Polynomial)
+	// 	panic("manual poly does not match calculated poly")
+	// }
+	// // END Manual interpolation
 
 	l1CommitIndex := blockNumber / L1BatchSize
 	l2CommitIndex := blockNumber / (L1BatchSize * L2BatchSize)
@@ -187,6 +272,23 @@ func (segmentTree *LayeredSegmentTree) Update(blockNumber int, balance *big.Int)
 
 	segmentTree.Storage.L1Polynomial[l1CommitIndex] = make(polynomial.Polynomial, SegmentTreeSize)
 	copy(segmentTree.Storage.L1Polynomial[l1CommitIndex], segmentTree.Layer1Polynomial)
+	// // Manual interpolation
+	// xs := make([]int, SegmentTreeSize)
+	// ys := make([]fr.Element, SegmentTreeSize)
+	// for i := 0; i < SegmentTreeSize; i++ {
+	// 	xs[i] = i
+	// 	ys[i] = polynomial.HashToFieldElement(segmentTree.Layer1Tree[i])
+	// }
+
+	// manualPoly := polynomial.Interpolate(xs, ys, segmentTree.CachedData.V, segmentTree.CachedData.Weights)
+	// copy(segmentTree.Storage.L1Polynomial[l1CommitIndex], manualPoly)
+	// if manualPoly.Equal(segmentTree.Layer1Polynomial) {
+	// 	fmt.Println("manual poly matches with inc poly ✅")
+	// } else {
+	// 	fmt.Println("manual poly does not match inc poly ❌")
+	// }
+	// // END Manual interpolation
+
 	segmentTree.Storage.L2Polynomial[l2CommitIndex] = make(polynomial.Polynomial, SegmentTreeSize)
 	copy(segmentTree.Storage.L2Polynomial[l2CommitIndex], segmentTree.Layer2Polynomial)
 	segmentTree.Storage.L3Polynomial[l3CommitIndex] = make(polynomial.Polynomial, SegmentTreeSize)
@@ -202,13 +304,21 @@ func (segmentTree *LayeredSegmentTree) CalculateCommitment(poly polynomial.Polyn
 	if err != nil {
 		log.Fatalf("failed to commit: %v", err)
 	}
-	commitmentBytes := commitment.Bytes()
-	commitmentHash := common.BytesToHash(commitmentBytes[:])
-	return commitmentHash
+	return CommitmentToHash(commitment)
+	// commitmentBytes := commitment.Bytes()
+	// commitmentHash := common.BytesToHash(commitmentBytes[:])
+
+	// return commitmentHash
 }
 
 func (segmentTree *LayeredSegmentTree) UpdateLayerX(idx int, val common.Hash, l1CommitHash common.Hash, layer int) {
 
+	polysPointers := map[int]*polynomial.Polynomial{
+		1: &segmentTree.Layer1Polynomial,
+		2: &segmentTree.Layer2Polynomial,
+		3: &segmentTree.Layer3Polynomial,
+		4: &segmentTree.Layer4Polynomial,
+	}
 	polys := map[int]polynomial.Polynomial{
 		1: segmentTree.Layer1Polynomial,
 		2: segmentTree.Layer2Polynomial,
@@ -230,6 +340,8 @@ func (segmentTree *LayeredSegmentTree) UpdateLayerX(idx int, val common.Hash, l1
 
 	tree := trees[layer]
 	poly := polys[layer]
+	// fmt.Printf("layer %d poly length: %d\n", layer, len(poly))
+	// fmt.Printf("layer %d poly: %v\n", layer, poly)
 
 	if layer > 1 {
 		// updating lower layer commitment value and polynomial
@@ -245,7 +357,14 @@ func (segmentTree *LayeredSegmentTree) UpdateLayerX(idx int, val common.Hash, l1
 		incPoly := polynomial.Interpolate([]int{L2BatchSize + idx}, []fr.Element{polynomial.HashToFieldElement(l1CommitHash)}, segmentTree.CachedData.V, segmentTree.CachedData.Weights)
 		copy(prevCommitIncPoly, incPoly)
 		// prevCommitIncPoly = incPoly
+
+		// fmt.Println("adding inc poly of commitment to poly")
 		poly.Add(poly, incPoly)
+
+		// fmt.Printf("layer %d poly length: %d\n", layer, len(poly))
+		// fmt.Printf("layer %d poly: %v\n", layer, poly)
+		polyPointer := polysPointers[layer]
+		*polyPointer = poly
 	}
 
 	if (val != common.Hash{}) {
@@ -263,35 +382,48 @@ func (segmentTree *LayeredSegmentTree) UpdateLayerX(idx int, val common.Hash, l1
 			if (lChild == common.Hash{} || rChild == common.Hash{}) {
 				break
 			}
-
-			tree[parentIdx] = crypto.Keccak256Hash(
-				lChild.Bytes(),
-				rChild.Bytes(),
-			)
+			// tree[parentIdx] = GetParentHash(lChild, rChild)
+			tree[parentIdx] = BytesToPoseidonHash(lChild.Bytes(), rChild.Bytes())
+			// tree[parentIdx] = crypto.Keccak256Hash(
+			// 	lChild.Bytes(),
+			// 	rChild.Bytes(),
+			// )
 
 			updatedIndices = append(updatedIndices, parentIdx)
 
 			idx = parentIdx
 
 		}
+		// fmt.Println("inc poly length", len(poly))
+
 		// update the polynomial
 
 		incPoly := GenerateIncrementalPolynomial(updatedIndices, segmentTree.CachedData.V, segmentTree.CachedData.Weights, tree)
+		// fmt.Println("inc poly", incPoly)
 
+		// fmt.Println("adding inc poly of value to poly")
 		poly.Add(poly, incPoly)
+
+		// fmt.Printf("layer %d poly length: %d\n", layer, len(poly))
+		// fmt.Printf("layer %d poly: %v\n", layer, poly)
+		// polys[layer] = poly
+		polyPointer := polysPointers[layer]
+		*polyPointer = poly
+		// polysPointers[layer] = &poly
+		// fmt.Println("inc poly", incPoly)
 
 	}
 
 }
 
-func GenerateIncrementalPolynomial(indexToProcess []int, V polynomial.Polynomial, weights []fr.Element, segmentTree SegmentTree) polynomial.Polynomial {
+func GenerateIncrementalPolynomial(indexToProcess []int, V polynomial.Polynomial, weights []fr.Element, tree []common.Hash) polynomial.Polynomial {
 
 	xValues := make([]int, len(indexToProcess))
 	yValues := make([]fr.Element, len(indexToProcess))
 
 	for i, index := range indexToProcess {
 		xValues[i] = index
-		yValues[i] = polynomial.HashToFieldElement(segmentTree[index])
+		yValues[i] = polynomial.HashToFieldElement(tree[index])
 	}
 
 	incPoly := polynomial.Interpolate(xValues, yValues, V, weights)
@@ -596,11 +728,13 @@ func (segmentTree *LayeredSegmentTree) OldUpdateLayerX(idx int, val common.Hash,
 		if (lChild == common.Hash{} || rChild == common.Hash{}) {
 			break
 		}
+		tree[parentIdx] = BytesToPoseidonHash(lChild.Bytes(), rChild.Bytes())
+		// tree[parentIdx] = GetParentHash(lChild, rChild)
 
-		tree[parentIdx] = crypto.Keccak256Hash(
-			lChild.Bytes(),
-			rChild.Bytes(),
-		)
+		// tree[parentIdx] = crypto.Keccak256Hash(
+		// 	lChild.Bytes(),
+		// 	rChild.Bytes(),
+		// )
 
 		updatedIndices = append(updatedIndices, parentIdx)
 

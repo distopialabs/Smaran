@@ -12,24 +12,27 @@ import (
 )
 
 const (
-	domainSize      = 4096
-	DataDir         = "polynomial/data"
-	weightsFileName = "bary_weights_4096.bin"
-	vanishFileName  = "vanishing_poly_4096.bin"
-	fieldBytes      = 32 // size of a serialized fr.Element
+	// domainSize      = 4096
+	// domainSize = 16
+	DataDir = "polynomial/data"
+	// weightsFileName = "bary_weights_4096.bin"
+	// vanishFileName  = "vanishing_poly_4096.bin"
+	weightsFileNamePlaceholder = "bary_weights_%d.bin"
+	vanishFileNamePlaceholder  = "vanishing_poly_%d.bin"
+	fieldBytes                 = 32 // size of a serialized fr.Element
 )
 
 // Computes the vanishing polynomial and the barycentric weights
 // and stores them as raw binary files (32 bytes per field element).
-func PrecomputeBarycentricData(dir string) error {
-	wPath := filepath.Join(dir, weightsFileName)
-	vPath := filepath.Join(dir, vanishFileName)
-	// Skip if files already exist.
-	if _, err := os.Stat(wPath); err == nil {
-		if _, err := os.Stat(vPath); err == nil {
-			return nil
-		}
-	}
+func PrecomputeBarycentricData(domainSize int, wPath string, vPath string) error {
+	// wPath := filepath.Join(dir, weightsFileName)
+	// vPath := filepath.Join(dir, vanishFileName)
+	// // Skip if files already exist.
+	// if _, err := os.Stat(wPath); err == nil {
+	// 	if _, err := os.Stat(vPath); err == nil {
+	// 		return nil
+	// 	}
+	// }
 
 	fmt.Println("[barycentric] precomputing vanishing polynomial and weights …")
 
@@ -83,16 +86,26 @@ func PrecomputeBarycentricData(dir string) error {
 	if err := dumpFieldSlice(vPath, V); err != nil {
 		return err
 	}
-	fmt.Println("[barycentric] precomputation done, data saved to", dir)
+	fmt.Println("[barycentric] precomputation done, data saved to", wPath, vPath)
 	return nil
 }
 
-func LoadBarycentricData(dir string) (V polynomial.Polynomial, weights []fr.Element) {
-	if err := PrecomputeBarycentricData(dir); err != nil {
-		panic(err)
+func LoadBarycentricData(domainSize int) (V polynomial.Polynomial, weights []fr.Element) {
+	weightsFileName := fmt.Sprintf(weightsFileNamePlaceholder, domainSize)
+	vanishFileName := fmt.Sprintf(vanishFileNamePlaceholder, domainSize)
+
+	wPath := filepath.Join(DataDir, weightsFileName)
+	vPath := filepath.Join(DataDir, vanishFileName)
+	// Skip if files already exist.
+
+	_, wErr := os.Stat(wPath)
+	_, vErr := os.Stat(vPath)
+
+	if wErr != nil || vErr != nil {
+		if err := PrecomputeBarycentricData(domainSize, wPath, vPath); err != nil {
+			panic(err)
+		}
 	}
-	wPath := filepath.Join(dir, weightsFileName)
-	vPath := filepath.Join(dir, vanishFileName)
 
 	start := time.Now()
 	weights = readFieldSlice(wPath, domainSize)
@@ -102,7 +115,7 @@ func LoadBarycentricData(dir string) (V polynomial.Polynomial, weights []fr.Elem
 	return
 }
 
-func Interpolate4096(yValues []fr.Element, currentBlockNumber int, cachedPolynomial Polynomial, V Polynomial, weights []fr.Element) Polynomial {
+func Interpolate4096(yValues []fr.Element, currentBlockNumber int, cachedPolynomial Polynomial, V Polynomial, weights []fr.Element, domainSize int) Polynomial {
 	if len(yValues) != domainSize {
 		panic(fmt.Sprint("Interpolate4096 expects exactly", domainSize, "y-values"))
 	}

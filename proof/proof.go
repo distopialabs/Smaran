@@ -79,13 +79,13 @@ func GetRangeProofs(startingBlock, endingBlock int, storage *segmenttree.Storage
 		tree := lxTrees[layer][idx]
 
 		P := lxPolynomials[layer][idx]
-
 		commitment, err := gnark_kzg.Commit(P, srs.Inner.Pk)
 		if err != nil {
 			panic(err)
 		}
-		commitmentBytes := commitment.Bytes()
-		commitmentHash := common.BytesToHash(commitmentBytes[:])
+		commitmentHash := segmenttree.CommitmentToHash(commitment)
+		// commitmentBytes := commitment.Bytes()
+		// commitmentHash := common.BytesToHash(commitmentBytes[:])
 		fmt.Printf("pCommitHash: %v\n", commitmentHash)
 
 		if layer < segmenttree.MaxLayer {
@@ -100,7 +100,7 @@ func GetRangeProofs(startingBlock, endingBlock int, storage *segmenttree.Storage
 		}
 
 		Z := polynomial.VanishingPolynomial(nodesToInterpolate)
-		ZCommit := kzg.CommitG2(Z, srs.G2Powers)
+		ZCommit, _ := kzg.CommitG2(Z, srs.G2Powers)
 
 		zCommitBytes := ZCommit.Bytes()
 		zCommitHash := common.BytesToHash(zCommitBytes[:])
@@ -110,7 +110,27 @@ func GetRangeProofs(startingBlock, endingBlock int, storage *segmenttree.Storage
 		ys := make([]fr.Element, len(nodesToInterpolate))
 		for i, v := range nodesToInterpolate {
 			xs[i] = fr.NewElement(uint64(v))
-			ys[i] = polynomial.HashToFieldElement(tree[v])
+
+			fmt.Printf("xs[%d]: %v\n", i, v)
+			fmt.Printf("ysHash[%d]: %v\n", i, tree[v])
+			fmt.Printf("ysHashEval[%d]: %v\n", i, polynomial.FieldElementToHash(P.Eval(&xs[i])))
+
+			// TODO: cannot recover fr from hash. modify this.
+			// ys[i] = polynomial.HashToFieldElement(tree[v])
+			// ys2 := P.Eval(&xs[i])
+
+			ys2 := polynomial.HashToFieldElement(tree[v])
+			ys[i] = P.Eval(&xs[i])
+			if ys[i] != ys2 {
+				// panic("ys[i] != ys2")
+				fmt.Println("ys[i] != ys2 ❌ ")
+
+			} else {
+				// fmt.Printf("ys[%d]: %v\n", i, ys[i])
+				// fmt.Printf("ys2[%d]: %v\n", i, ys2)
+				fmt.Println("ys[i] == ys2 ✅")
+
+			}
 		}
 
 		// I := polynomial.Interpolate(nodesToInterpolate, ys, V, weights)
@@ -139,6 +159,8 @@ func GetRangeProofs(startingBlock, endingBlock int, storage *segmenttree.Storage
 		}
 		if !ok {
 			panic("pairing check failed.")
+		} else {
+			fmt.Println("Pairing check passed.✅")
 		}
 
 		rangeProof := &RangeProof{

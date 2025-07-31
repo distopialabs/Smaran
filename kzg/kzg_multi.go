@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/consensys/gnark-crypto/ecc"
 	bls "github.com/consensys/gnark-crypto/ecc/bls12-381"
 	fr "github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
 	kzg "github.com/consensys/gnark-crypto/ecc/bls12-381/kzg"
@@ -56,27 +57,27 @@ func polynomialEval(poly []fr.Element, point fr.Element) fr.Element {
 	return acc
 }
 
-func CommitG1(coeffs []fr.Element, g1Powers []bls.G1Affine) bls.G1Affine {
-	var acc bls.G1Jac
-	for i, c := range coeffs {
-		if c.IsZero() {
-			continue
-		}
-		var term bls.G1Affine
-		var bigc big.Int
-		c.BigInt(&bigc)
-		term.ScalarMultiplication(&g1Powers[i], &bigc)
+// func CommitG1(coeffs []fr.Element, g1Powers []bls.G1Affine) bls.G1Affine {
+// 	var acc bls.G1Jac
+// 	for i, c := range coeffs {
+// 		if c.IsZero() {
+// 			continue
+// 		}
+// 		var term bls.G1Affine
+// 		var bigc big.Int
+// 		c.BigInt(&bigc)
+// 		term.ScalarMultiplication(&g1Powers[i], &bigc)
 
-		var termJac bls.G1Jac
-		termJac.FromAffine(&term)
-		acc.AddAssign(&termJac)
-	}
-	var res bls.G1Affine
-	res.FromJacobian(&acc)
-	return res
-}
+// 		var termJac bls.G1Jac
+// 		termJac.FromAffine(&term)
+// 		acc.AddAssign(&termJac)
+// 	}
+// 	var res bls.G1Affine
+// 	res.FromJacobian(&acc)
+// 	return res
+// }
 
-func CommitG2(coeffs []fr.Element, g2Powers []bls.G2Affine) bls.G2Affine {
+func OldCommitG2(coeffs []fr.Element, g2Powers []bls.G2Affine) bls.G2Affine {
 	var acc bls.G2Jac
 	for i, c := range coeffs {
 		if c.IsZero() {
@@ -94,6 +95,40 @@ func CommitG2(coeffs []fr.Element, g2Powers []bls.G2Affine) bls.G2Affine {
 	var res bls.G2Affine
 	res.FromJacobian(&acc)
 	return res
+}
+
+func CommitG2(coeffs []fr.Element, g2Powers []bls.G2Affine) (bls.G2Affine, error) {
+
+	if len(coeffs) == 0 || len(coeffs) > len(g2Powers) {
+		return bls.G2Affine{}, fmt.Errorf("invalid coefficients length: %d, expected between 1 and %d", len(coeffs), len(g2Powers))
+	}
+
+	var res bls.G2Affine
+
+	config := ecc.MultiExpConfig{}
+
+	if _, err := res.MultiExp(g2Powers[:len(coeffs)], coeffs, config); err != nil {
+		return bls.G2Affine{}, err
+	}
+	return res, nil
+
+	// var acc bls.G2Jac
+	// for i, c := range coeffs {
+	// 	if c.IsZero() {
+	// 		continue
+	// 	}
+	// 	var term bls.G2Affine
+	// 	var bigc big.Int
+	// 	c.BigInt(&bigc)
+	// 	term.ScalarMultiplication(&g2Powers[i], &bigc)
+
+	// 	var termJac bls.G2Jac
+	// 	termJac.FromAffine(&term)
+	// 	acc.AddAssign(&termJac)
+	// }
+	// var res bls.G2Affine
+	// res.FromJacobian(&acc)
+	// return res
 }
 
 func ProveMultiPoints(P []fr.Element, xs []fr.Element, srs *MultiSRS) (*KZGMultiProof, error) {
@@ -126,7 +161,7 @@ func ProveMultiPoints(P []fr.Element, xs []fr.Element, srs *MultiSRS) (*KZGMulti
 	diff := SubtractPolys(P, I)
 	Q := PolyDiv(diff, Z)
 
-	proofG2 := CommitG2(Q, srs.G2Powers)
+	proofG2, _ := CommitG2(Q, srs.G2Powers)
 
 	return &KZGMultiProof{
 		Commitment: C,

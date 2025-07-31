@@ -5,7 +5,6 @@ import (
 	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/crypto"
 )
 
 type SegmentTree = []common.Hash
@@ -28,10 +27,12 @@ func New(balances []*big.Int) (SegmentTree, error) {
 		lChild := segmentTree[2*i+1]
 		rChild := segmentTree[2*i+2]
 		if (lChild != common.Hash{} && rChild != common.Hash{}) {
-			segmentTree[i] = crypto.Keccak256Hash(
-				segmentTree[2*i+1].Bytes(),
-				segmentTree[2*i+2].Bytes(),
-			)
+			segmentTree[i] = BytesToPoseidonHash(segmentTree[2*i+1].Bytes(), segmentTree[2*i+2].Bytes())
+			// segmentTree[i] = GetParentHash(segmentTree[2*i+1], segmentTree[2*i+2])
+			// segmentTree[i] = crypto.Keccak256Hash(
+			// 	segmentTree[2*i+1].Bytes(),
+			// 	segmentTree[2*i+2].Bytes(),
+			// )
 		}
 
 		// segmentTree[i] = segmentTree[2*i+1] + segmentTree[2*i+2]
