@@ -1,4 +1,4 @@
-package polynomial
+package kzg
 
 import (
 	"errors"
@@ -9,6 +9,7 @@ import (
 
 	fr "github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
 	"github.com/consensys/gnark-crypto/ecc/bls12-381/fr/polynomial"
+	gnark_kzg "github.com/consensys/gnark-crypto/ecc/bls12-381/kzg"
 )
 
 const (
@@ -27,15 +28,6 @@ const (
 // Computes the vanishing polynomial and the barycentric weights
 // and stores them as raw binary files (32 bytes per field element).
 func PrecomputeBarycentricData(domainSize int, wPath string, vPath string) error {
-	// wPath := filepath.Join(dir, weightsFileName)
-	// vPath := filepath.Join(dir, vanishFileName)
-	// // Skip if files already exist.
-	// if _, err := os.Stat(wPath); err == nil {
-	// 	if _, err := os.Stat(vPath); err == nil {
-	// 		return nil
-	// 	}
-	// }
-
 	fmt.Println("[barycentric] precomputing vanishing polynomial and weights …")
 
 	// Build vanishing polynomial V(x) incrementally.
@@ -92,7 +84,74 @@ func PrecomputeBarycentricData(domainSize int, wPath string, vPath string) error
 	return nil
 }
 
-func LoadBarycentricData(domainSize int) (V polynomial.Polynomial, weights []fr.Element) {
+func PrecomputeBarycentricCommits(domainSize int, wcPath string, srs *MultiSRS) error {
+
+	fmt.Println("[barycentric] precomputing vanishing polynomial and weights …")
+
+	// Build vanishing polynomial V(x) incrementally.
+	V := make(polynomial.Polynomial, 1)
+	V[0].SetOne()
+
+	for i := range domainSize {
+		// multiply V by (X - i)
+		deg := len(V)
+		tmpV := make(polynomial.Polynomial, deg+1)
+
+		// multiply by x; shift coefficients right by 1 position
+		// tmpV[k+1] = V[k]
+		copy(tmpV[1:], V)
+
+		// negI = -i
+		var negI fr.Element
+		negI.SetInt64(int64(-i))
+
+		// tmpV[k] += -i * V[k]
+		for k := range deg {
+			var t fr.Element
+			t.Mul(&V[k], &negI)
+			tmpV[k].Add(&tmpV[k], &t)
+		}
+		V = tmpV
+	}
+
+	// Compute V' (derivative), needed for weights.
+	Vprime := make(polynomial.Polynomial, len(V)-1)
+	for i := 1; i < len(V); i++ {
+		var iFr fr.Element
+		iFr.SetInt64(int64(i))
+		Vprime[i-1].Mul(&V[i], &iFr)
+	}
+
+	// Compute weights.
+	weights := make([]fr.Element, domainSize)
+	var xi fr.Element
+	for i := range domainSize {
+		xi.SetInt64(int64(i))
+		weights[i] = Vprime.Eval(&xi)
+	}
+	weights = fr.BatchInvert(weights)
+
+	weightCommits := make([]gnark_kzg.Digest, domainSize)
+
+	quot := make(polynomial.Polynomial, domainSize)
+	for i := range domainSize {
+		SyntheticDivideInt(quot, V, i)
+		for k := range domainSize {
+			quot[k].Mul(&quot[k], &weights[i])
+		}
+		weightCommits[i], _ = gnark_kzg.Commit(quot, srs.Inner.Pk)
+
+	}
+
+	// Write to files.
+	if err := dumpDigestSlice(wcPath, weightCommits); err != nil {
+		return err
+	}
+	fmt.Println("[barycentric] precomputation done, data saved to", wcPath)
+	return nil
+}
+
+func LoadBarycentricData(domainSize int, srs *MultiSRS) (V polynomial.Polynomial, weights []fr.Element, weightCommits []gnark_kzg.Digest) {
 	weightsFileName := fmt.Sprintf(weightsFileNamePlaceholder, domainSize)
 	weightCommitsFileName := fmt.Sprintf(weightCommitsFileNamePlaceholder, domainSize)
 	vanishFileName := fmt.Sprintf(vanishFileNamePlaceholder, domainSize)
@@ -110,10 +169,14 @@ func LoadBarycentricData(domainSize int) (V polynomial.Polynomial, weights []fr.
 		if err := PrecomputeBarycentricData(domainSize, wPath, vPath); err != nil {
 			panic(err)
 		}
+		if err := PrecomputeBarycentricCommits(domainSize, wcPath, srs); err != nil {
+			panic(err)
+		}
 	}
 
 	start := time.Now()
 	weights = readFieldSlice(wPath, domainSize)
+	weightCommits = readDigestSlice(wcPath, domainSize)
 	V = readFieldSlice(vPath, domainSize+1)
 
 	elapsed := time.Since(start)
@@ -121,7 +184,7 @@ func LoadBarycentricData(domainSize int) (V polynomial.Polynomial, weights []fr.
 	return
 }
 
-func Interpolate4096(yValues []fr.Element, currentBlockNumber int, cachedPolynomial Polynomial, V Polynomial, weights []fr.Element, domainSize int) Polynomial {
+func Interpolate4096(yValues []fr.Element, currentBlockNumber int, cachedPolynomial polynomial.Polynomial, V polynomial.Polynomial, weights []fr.Element, domainSize int) polynomial.Polynomial {
 	if len(yValues) != domainSize {
 		panic(fmt.Sprint("Interpolate4096 expects exactly", domainSize, "y-values"))
 	}
@@ -239,6 +302,43 @@ func readFieldSlice(path string, count int) []fr.Element {
 	out := make([]fr.Element, count)
 	for i := 0; i < count; i++ {
 		out[i].SetBytes(data[i*fieldBytes : (i+1)*fieldBytes])
+	}
+	return out
+}
+func dumpDigestSlice(path string, s []gnark_kzg.Digest) error {
+	// create directory if it doesn't exist
+	os.MkdirAll(filepath.Dir(path), 0755)
+
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	for i := range s {
+		b := s[i].Bytes()
+		if len(b) != digestBytes {
+			return errors.New("unexpected element length")
+		}
+		if _, err := f.Write(b[:]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func readDigestSlice(path string, count int) []gnark_kzg.Digest {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		panic(err)
+	}
+	expected := count * digestBytes
+	if len(data) != expected {
+		panic(fmt.Sprintf("corrupted file %s", path))
+	}
+	out := make([]gnark_kzg.Digest, count)
+	for i := 0; i < count; i++ {
+		out[i].SetBytes(data[i*digestBytes : (i+1)*digestBytes])
 	}
 	return out
 }

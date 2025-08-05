@@ -269,6 +269,7 @@ func RebuildSegmentTree(startingBlock, endingBlock int, reqCommits []RangeCommit
 
 	for blockNumber := startingBlock; blockNumber <= endingBlock; blockNumber++ {
 		balance := big.NewInt(1000000000000000000)
+		balance.Add(balance, big.NewInt(int64(blockNumber)))
 		segmentTree.Update(blockNumber, balance)
 		l1CommitIndex := blockNumber / L1BatchSize
 		l2CommitIndex := blockNumber / (L1BatchSize * L2BatchSize)

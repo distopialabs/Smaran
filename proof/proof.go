@@ -119,18 +119,18 @@ func GetRangeProofs(startingBlock, endingBlock int, storage *segmenttree.Storage
 			// ys[i] = polynomial.HashToFieldElement(tree[v])
 			// ys2 := P.Eval(&xs[i])
 
-			ys2 := polynomial.HashToFieldElement(tree[v])
-			ys[i] = P.Eval(&xs[i])
-			if ys[i] != ys2 {
-				// panic("ys[i] != ys2")
-				fmt.Println("ys[i] != ys2 ❌ ")
+			ys[i] = polynomial.HashToFieldElement(tree[v])
+			// ys2 := P.Eval(&xs[i])
+			// if ys[i] != ys2 {
+			// 	// panic("ys[i] != ys2")
+			// 	fmt.Println("ys[i] != ys2 ❌ ")
 
-			} else {
-				// fmt.Printf("ys[%d]: %v\n", i, ys[i])
-				// fmt.Printf("ys2[%d]: %v\n", i, ys2)
-				fmt.Println("ys[i] == ys2 ✅")
+			// } else {
+			// 	// fmt.Printf("ys[%d]: %v\n", i, ys[i])
+			// 	// fmt.Printf("ys2[%d]: %v\n", i, ys2)
+			// 	fmt.Println("ys[i] == ys2 ✅")
 
-			}
+			// }
 		}
 
 		// I := polynomial.Interpolate(nodesToInterpolate, ys, V, weights)

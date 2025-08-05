@@ -4,16 +4,20 @@ import (
 	"fmt"
 	"log"
 	"math/big"
+	"os"
+	"runtime/pprof"
 	"time"
 
 	fr "github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
+	gnark_kzg "github.com/consensys/gnark-crypto/ecc/bls12-381/kzg"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/nepal80m/samurai/kzg"
 	"github.com/nepal80m/samurai/polynomial"
-	"github.com/nepal80m/samurai/proof"
 
 	"github.com/nepal80m/samurai/segmenttree"
 )
+
+// var cpuprofile = flag.String("cpuprofile", "", "write cpu profile to file")
 
 // func verifyPolynomial(p polynomial.Polynomial, balanceStore []*big.Int) {
 // 	cVInt := big.Int{}
@@ -41,6 +45,17 @@ func HashToFr(h common.Hash) fr.Element {
 }
 
 func main() {
+	// flag.Parse()
+	// if *cpuprofile != "" {
+	f, err := os.Create("cpu.prof")
+	if err != nil {
+		panic(err)
+	}
+
+	defer f.Close()
+	pprof.StartCPUProfile(f)
+	defer pprof.StopCPUProfile()
+	// }
 	// val1 := big.NewInt(1000000000000000000)
 	// val2 := big.NewInt(2000000000000000000)
 
@@ -98,6 +113,7 @@ func main() {
 	// 	panic(err)
 	// }
 
+	// poseidon2.NewMerkleDamgardHasher()
 	// pCommitBytes := pCommit.Bytes()
 	// pCommitHash := common.BytesToHash(pCommitBytes[:])
 	// fmt.Println(pCommitHash)
@@ -146,55 +162,57 @@ func main() {
 }
 
 func main2() {
-	fmt.Println("Starting Samurai...\n")
+	// fmt.Println("Starting Samurai...\n")
 
 	start := time.Now()
 
-	V, weights := polynomial.LoadBarycentricData(segmenttree.SegmentTreeSize)
 	srs, err := kzg.SetupSRS(segmenttree.SegmentTreeSize)
 	if err != nil {
 		log.Fatalf("failed to setup SRS: %v", err)
 	}
+	// V, weights := polynomial.LoadBarycentricData(segmenttree.SegmentTreeSize)
+	V, weights, weightCommits := kzg.LoadBarycentricData(segmenttree.SegmentTreeSize, srs)
 	fmt.Println("Time taken to setup SRS", time.Since(start))
 
 	start = time.Now()
-	segmentTree := generateSegmentTreeAndCommitments(2050, V, weights, srs)
+	segmentTree := generateSegmentTreeAndCommitments(10000, V, weights, weightCommits, srs)
 	fmt.Println("Time taken to generate segment tree and commitments", time.Since(start))
+	_ = segmentTree
+	// start = time.Now()
+	// segmentTree.DumpStorage()
+	// fmt.Println("Time taken to dump storage", time.Since(start))
 
-	start = time.Now()
-	segmentTree.DumpStorage()
-	fmt.Println("Time taken to dump storage", time.Since(start))
+	// // storage := segmentTree.Storage
 
-	// storage := segmentTree.Storage
+	// start = time.Now()
+	// storage := segmenttree.LoadStorage()
+	// fmt.Println("Time taken to load storage", time.Since(start))
 
-	start = time.Now()
-	storage := segmenttree.LoadStorage()
-	fmt.Println("Time taken to load storage", time.Since(start))
+	// testPolynomials(storage)
 
-	testPolynomials(storage)
+	// queryStartBlock := 20
+	// queryEndBlock := 2049
 
-	queryStartBlock := 20
-	queryEndBlock := 2049
+	// start = time.Now()
+	// rangeProofs := proof.GetRangeProofs(queryStartBlock, queryEndBlock, storage, V, weights, srs)
+	// fmt.Println("Time taken to generate range proofs", time.Since(start))
 
-	start = time.Now()
-	rangeProofs := proof.GetRangeProofs(queryStartBlock, queryEndBlock, storage, V, weights, srs)
-	fmt.Println("Time taken to generate range proofs", time.Since(start))
-
-	start = time.Now()
-	proof.VerifyRangeProofs(queryStartBlock, queryEndBlock, rangeProofs, V, weights, srs, storage)
-	fmt.Println("Time taken to verify range proofs", time.Since(start))
+	// start = time.Now()
+	// proof.VerifyRangeProofs(queryStartBlock, queryEndBlock, rangeProofs, V, weights, srs, storage)
+	// fmt.Println("Time taken to verify range proofs", time.Since(start))
 
 	// _ = rangeProofs
 
 }
-func generateSegmentTreeAndCommitments(maxBlockNumber int, V polynomial.Polynomial, weights []fr.Element, srs *kzg.MultiSRS) *segmenttree.LayeredSegmentTree {
+func generateSegmentTreeAndCommitments(maxBlockNumber int, V polynomial.Polynomial, weights []fr.Element, weightCommits []gnark_kzg.Digest, srs *kzg.MultiSRS) *segmenttree.LayeredSegmentTree {
 
-	segmentTree := segmenttree.NewLayeredSegmentTree(V, weights, srs)
+	segmentTree := segmenttree.NewLayeredSegmentTree(V, weights, weightCommits, srs)
 
 	for blockNumber := range maxBlockNumber {
 		// fmt.Println("Processing block", blockNumber, "...")
 		// random balance
 		balance := big.NewInt(1000000000000000000)
+		balance.Add(balance, big.NewInt(int64(blockNumber)))
 		// balance := big.NewInt(rand.Int63n(1000000000000000000))
 
 		segmentTree.Update(blockNumber, balance)
