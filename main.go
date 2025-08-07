@@ -173,14 +173,14 @@ func main2() {
 	// V, weights := polynomial.LoadBarycentricData(segmenttree.SegmentTreeSize)
 	V, weights, weightCommits := kzg.LoadBarycentricData(segmenttree.SegmentTreeSize, srs)
 	fmt.Println("Time taken to setup SRS", time.Since(start))
-
+	_ = weightCommits
 	start = time.Now()
 	segmentTree := generateSegmentTreeAndCommitments(10000, V, weights, weightCommits, srs)
 	fmt.Println("Time taken to generate segment tree and commitments", time.Since(start))
 	_ = segmentTree
-	// start = time.Now()
-	// segmentTree.DumpStorage()
-	// fmt.Println("Time taken to dump storage", time.Since(start))
+	start = time.Now()
+	segmentTree.DumpStorage()
+	fmt.Println("Time taken to dump storage", time.Since(start))
 
 	// // storage := segmentTree.Storage
 
@@ -191,7 +191,7 @@ func main2() {
 	// testPolynomials(storage)
 
 	// queryStartBlock := 20
-	// queryEndBlock := 2049
+	// queryEndBlock := 8049
 
 	// start = time.Now()
 	// rangeProofs := proof.GetRangeProofs(queryStartBlock, queryEndBlock, storage, V, weights, srs)

@@ -8,6 +8,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/consensys/gnark-crypto/ecc"
 	bls "github.com/consensys/gnark-crypto/ecc/bls12-381"
 	gnark_kzg "github.com/consensys/gnark-crypto/ecc/bls12-381/kzg"
 
@@ -19,13 +20,13 @@ import (
 	fr "github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
 )
 
-// const L1BatchSize = 2048
+const L1BatchSize = 2048
 
-const L1BatchSize = 8
+// const L1BatchSize = 8
 
-// const L2BatchSize = 1365
+const L2BatchSize = 1365
 
-const L2BatchSize = 5
+// const L2BatchSize = 5
 
 const MaxLayer = 4
 
@@ -73,6 +74,7 @@ type LayeredSegmentTree struct {
 	prevL3CommitIncPoly polynomial.Polynomial
 
 	LXTreeV3               map[int][]common.Hash
+	LXPolynomialV3         map[int]polynomial.Polynomial
 	LXCommitmentV3         map[int]gnark_kzg.Digest
 	LXPrevCIncCommitmentV3 map[int]gnark_kzg.Digest
 
@@ -99,6 +101,12 @@ func NewLayeredSegmentTree(V polynomial.Polynomial, weights []fr.Element, weight
 			2: make([]common.Hash, SegmentTreeSize),
 			3: make([]common.Hash, SegmentTreeSize),
 			4: make([]common.Hash, SegmentTreeSize),
+		},
+		LXPolynomialV3: map[int]polynomial.Polynomial{
+			1: make(polynomial.Polynomial, SegmentTreeSize),
+			2: make(polynomial.Polynomial, SegmentTreeSize),
+			3: make(polynomial.Polynomial, SegmentTreeSize),
+			4: make(polynomial.Polynomial, SegmentTreeSize),
 		},
 		LXCommitmentV3:         make(map[int]gnark_kzg.Digest),
 		LXPrevCIncCommitmentV3: make(map[int]gnark_kzg.Digest),
@@ -163,6 +171,7 @@ func (segmentTree *LayeredSegmentTree) Update(blockNumber int, balance *big.Int)
 		segmentTree.prevL1CommitIncPoly = make(polynomial.Polynomial, SegmentTreeSize)
 
 		segmentTree.LXTreeV3[1] = make([]common.Hash, SegmentTreeSize)
+		segmentTree.LXPolynomialV3[1] = make(polynomial.Polynomial, SegmentTreeSize)
 		segmentTree.LXCommitmentV3[1] = gnark_kzg.Digest{}
 		segmentTree.LXPrevCIncCommitmentV3[2] = gnark_kzg.Digest{}
 	}
@@ -174,6 +183,7 @@ func (segmentTree *LayeredSegmentTree) Update(blockNumber int, balance *big.Int)
 		segmentTree.prevL2CommitIncPoly = make(polynomial.Polynomial, SegmentTreeSize)
 
 		segmentTree.LXTreeV3[2] = make([]common.Hash, SegmentTreeSize)
+		segmentTree.LXPolynomialV3[2] = make(polynomial.Polynomial, SegmentTreeSize)
 		segmentTree.LXCommitmentV3[2] = gnark_kzg.Digest{}
 		segmentTree.LXPrevCIncCommitmentV3[3] = gnark_kzg.Digest{}
 	}
@@ -185,6 +195,7 @@ func (segmentTree *LayeredSegmentTree) Update(blockNumber int, balance *big.Int)
 		segmentTree.prevL3CommitIncPoly = make(polynomial.Polynomial, SegmentTreeSize)
 
 		segmentTree.LXTreeV3[3] = make([]common.Hash, SegmentTreeSize)
+		segmentTree.LXPolynomialV3[3] = make(polynomial.Polynomial, SegmentTreeSize)
 		segmentTree.LXCommitmentV3[3] = gnark_kzg.Digest{}
 		segmentTree.LXPrevCIncCommitmentV3[4] = gnark_kzg.Digest{}
 	}
@@ -192,6 +203,7 @@ func (segmentTree *LayeredSegmentTree) Update(blockNumber int, balance *big.Int)
 		// if idx3 == 0 && len(segmentTree.Layer4Tree) > 0 {
 		// fmt.Println("resetting layer 4 tree")
 		segmentTree.Layer4Tree = make([]common.Hash, SegmentTreeSize)
+		segmentTree.LXPolynomialV3[4] = make(polynomial.Polynomial, SegmentTreeSize)
 		segmentTree.Layer4Polynomial = make(polynomial.Polynomial, SegmentTreeSize)
 		// segmentTree.prevL4CommitIncPoly = make(polynomial.Polynomial, SegmentTreeSize)
 
@@ -204,7 +216,7 @@ func (segmentTree *LayeredSegmentTree) Update(blockNumber int, balance *big.Int)
 
 	// // OPT 1
 	// start := time.Now()
-	// segmentTree.UpdateLayerX(L1BatchSize-1+idx0, common.BigToHash(balance), common.Hash{}, 1)
+	segmentTree.UpdateLayerX(L1BatchSize-1+idx0, common.BigToHash(balance), common.Hash{}, 1)
 	// l1CommitHash := segmentTree.CalculateCommitment(segmentTree.Layer1Polynomial)
 	// l1RootHash := segmentTree.Layer1Tree[0]
 	// fmt.Println("Time taken to calculate commitment for layer 1, V1:", time.Since(start))
@@ -245,7 +257,7 @@ func (segmentTree *LayeredSegmentTree) Update(blockNumber int, balance *big.Int)
 	// TODO: use loop to update all layers
 	// updating layer 2
 	// start = time.Now()
-	// segmentTree.UpdateLayerX(L2BatchSize-1+idx1, l1RootHash, l1CommitHash, 2)
+	segmentTree.UpdateLayerX(L2BatchSize-1+idx1, l1RootHashV3, l1CommitHashV3, 2)
 	// l2CommitHash := segmentTree.CalculateCommitment(segmentTree.Layer2Polynomial)
 	// l2RootHash := segmentTree.Layer2Tree[0]
 	// fmt.Println("Time taken to calculate commitment for layer 2, V1:", time.Since(start))
@@ -275,7 +287,7 @@ func (segmentTree *LayeredSegmentTree) Update(blockNumber int, balance *big.Int)
 
 	// updating layer 3
 	// start = time.Now()
-	// segmentTree.UpdateLayerX(L2BatchSize-1+idx2, l2RootHash, l2CommitHash, 3)
+	segmentTree.UpdateLayerX(L2BatchSize-1+idx2, l2RootHashV3, l2CommitHashV3, 3)
 	// l3CommitHash := segmentTree.CalculateCommitment(segmentTree.Layer3Polynomial)
 	// l3RootHash := segmentTree.Layer3Tree[0]
 	// fmt.Println("Time taken to calculate commitment for layer 3, V1:", time.Since(start))
@@ -301,7 +313,7 @@ func (segmentTree *LayeredSegmentTree) Update(blockNumber int, balance *big.Int)
 
 	// updating layer 4
 	// start = time.Now()
-	// segmentTree.UpdateLayerX(L2BatchSize-1+idx3, l3RootHash, l3CommitHash, 4)
+	segmentTree.UpdateLayerX(L2BatchSize-1+idx3, l3RootHashV3, l3CommitHashV3, 4)
 	// l4CommitHash := segmentTree.CalculateCommitment(segmentTree.Layer4Polynomial)
 	// l4RootHash := segmentTree.Layer4Tree[0]
 	// fmt.Println("Time taken to calculate commitment for layer 4, V1:", time.Since(start))
@@ -330,27 +342,27 @@ func (segmentTree *LayeredSegmentTree) Update(blockNumber int, balance *big.Int)
 	// OPT 3 END
 
 	start = time.Now()
-	// segmentTree.Storage.L1Tree[l1CommitIndex] = make([]common.Hash, SegmentTreeSize)
-	// copy(segmentTree.Storage.L1Tree[l1CommitIndex], segmentTree.Layer1Tree)
+	segmentTree.Storage.L1Tree[l1CommitIndex] = make([]common.Hash, SegmentTreeSize)
+	copy(segmentTree.Storage.L1Tree[l1CommitIndex], segmentTree.Layer1Tree)
 
-	// segmentTree.Storage.L2Tree[l2CommitIndex] = make([]common.Hash, SegmentTreeSize)
-	// copy(segmentTree.Storage.L2Tree[l2CommitIndex], segmentTree.Layer2Tree)
+	segmentTree.Storage.L2Tree[l2CommitIndex] = make([]common.Hash, SegmentTreeSize)
+	copy(segmentTree.Storage.L2Tree[l2CommitIndex], segmentTree.Layer2Tree)
 
-	// segmentTree.Storage.L3Tree[l3CommitIndex] = make([]common.Hash, SegmentTreeSize)
-	// copy(segmentTree.Storage.L3Tree[l3CommitIndex], segmentTree.Layer3Tree)
+	segmentTree.Storage.L3Tree[l3CommitIndex] = make([]common.Hash, SegmentTreeSize)
+	copy(segmentTree.Storage.L3Tree[l3CommitIndex], segmentTree.Layer3Tree)
 
-	// segmentTree.Storage.L4Tree[l4CommitIndex] = make([]common.Hash, SegmentTreeSize)
-	// copy(segmentTree.Storage.L4Tree[l4CommitIndex], segmentTree.Layer4Tree)
+	segmentTree.Storage.L4Tree[l4CommitIndex] = make([]common.Hash, SegmentTreeSize)
+	copy(segmentTree.Storage.L4Tree[l4CommitIndex], segmentTree.Layer4Tree)
 
-	// segmentTree.Storage.L1Polynomial[l1CommitIndex] = make(polynomial.Polynomial, SegmentTreeSize)
-	// copy(segmentTree.Storage.L1Polynomial[l1CommitIndex], segmentTree.Layer1Polynomial)
+	segmentTree.Storage.L1Polynomial[l1CommitIndex] = make(polynomial.Polynomial, SegmentTreeSize)
+	copy(segmentTree.Storage.L1Polynomial[l1CommitIndex], segmentTree.Layer1Polynomial)
 
-	// segmentTree.Storage.L2Polynomial[l2CommitIndex] = make(polynomial.Polynomial, SegmentTreeSize)
-	// copy(segmentTree.Storage.L2Polynomial[l2CommitIndex], segmentTree.Layer2Polynomial)
-	// segmentTree.Storage.L3Polynomial[l3CommitIndex] = make(polynomial.Polynomial, SegmentTreeSize)
-	// copy(segmentTree.Storage.L3Polynomial[l3CommitIndex], segmentTree.Layer3Polynomial)
-	// segmentTree.Storage.L4Polynomial[l4CommitIndex] = make(polynomial.Polynomial, SegmentTreeSize)
-	// copy(segmentTree.Storage.L4Polynomial[l4CommitIndex], segmentTree.Layer4Polynomial)
+	segmentTree.Storage.L2Polynomial[l2CommitIndex] = make(polynomial.Polynomial, SegmentTreeSize)
+	copy(segmentTree.Storage.L2Polynomial[l2CommitIndex], segmentTree.Layer2Polynomial)
+	segmentTree.Storage.L3Polynomial[l3CommitIndex] = make(polynomial.Polynomial, SegmentTreeSize)
+	copy(segmentTree.Storage.L3Polynomial[l3CommitIndex], segmentTree.Layer3Polynomial)
+	segmentTree.Storage.L4Polynomial[l4CommitIndex] = make(polynomial.Polynomial, SegmentTreeSize)
+	copy(segmentTree.Storage.L4Polynomial[l4CommitIndex], segmentTree.Layer4Polynomial)
 	fmt.Println("Time taken to store data in storage", time.Since(start))
 
 }
@@ -513,8 +525,12 @@ func (segmentTree *LayeredSegmentTree) UpdateLayerXTreeV3(idx int, val common.Ha
 
 		tree[L2BatchSize+idx] = lXm1CommitHash
 
+		// var incCommit bls.G1Affine
+		// incCommit.ScalarMultiplication(&segmentTree.CachedData.WeightCommits[L2BatchSize+idx], lXm1CommitHash.Big())
+		points := []bls.G1Affine{segmentTree.CachedData.WeightCommits[L2BatchSize+idx]}
+		scalars := []fr.Element{polynomial.HashToFieldElement(lXm1CommitHash)}
 		var incCommit bls.G1Affine
-		incCommit.ScalarMultiplication(&segmentTree.CachedData.WeightCommits[L2BatchSize+idx], lXm1CommitHash.Big())
+		incCommit.MultiExp(points, scalars, ecc.MultiExpConfig{})
 
 		newCommit.Add(&newCommit, &incCommit)
 		segmentTree.LXPrevCIncCommitmentV3[layer] = incCommit
@@ -544,13 +560,23 @@ func (segmentTree *LayeredSegmentTree) UpdateLayerXTreeV3(idx int, val common.Ha
 			idx = parentIdx
 
 		}
+		points := make([]bls.G1Affine, len(updatedXs))
+		scalars := make([]fr.Element, len(updatedXs))
+
+		fmt.Println("NUmber of updated indices:", len(updatedIndices))
 		for i, idx := range updatedIndices {
 
-			var incCommit bls.G1Affine
-			incCommit.ScalarMultiplication(&segmentTree.CachedData.WeightCommits[idx], updatedYs[i])
+			// var incCommit bls.G1Affine
+			// incCommit.ScalarMultiplication(&segmentTree.CachedData.WeightCommits[idx], updatedYs[i])
 
-			newCommit.Add(&newCommit, &incCommit)
+			// newCommit.Add(&newCommit, &incCommit)
+
+			points[i] = segmentTree.CachedData.WeightCommits[idx]
+			scalars[i] = polynomial.HashToFieldElement(tree[idx])
 		}
+		var tempIncCommit bls.G1Affine
+		tempIncCommit.MultiExp(points, scalars, ecc.MultiExpConfig{})
+		newCommit.Add(&newCommit, &tempIncCommit)
 	}
 	segmentTree.LXCommitmentV3[layer] = newCommit
 
