@@ -1,164 +1,134 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"math/big"
-	"os"
-	"runtime/pprof"
 	"time"
 
 	fr "github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
 	gnark_kzg "github.com/consensys/gnark-crypto/ecc/bls12-381/kzg"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/nepal80m/samurai/kzg"
 	"github.com/nepal80m/samurai/polynomial"
 
 	"github.com/nepal80m/samurai/segmenttree"
 )
 
-// var cpuprofile = flag.String("cpuprofile", "", "write cpu profile to file")
+func main() {
+	// f, err := os.Create("cpu.prof")
+	// if err != nil {
+	// 	panic(err)
+	// }
 
-// func verifyPolynomial(p polynomial.Polynomial, balanceStore []*big.Int) {
-// 	cVInt := big.Int{}
-// 	for i := range 2048 {
-// 		expectedValue := balanceStore[i]
-// 		var x fr.Element
-// 		x.SetUint64(uint64(2047 + i))
-// 		computedValue := p.Eval(&x)
-// 		fmt.Println(expectedValue)
-// 		fmt.Println(computedValue.BigInt(&cVInt))
-// 		fmt.Println()
-// 		if polynomial.HashToFieldElement(common.BigToHash(expectedValue)) != computedValue {
-// 			log.Fatalf("Polynomial verification failed at index %d", i)
-// 		}
-// 	}
-// }
+	// defer f.Close()
+	// pprof.StartCPUProfile(f)
+	// defer pprof.StopCPUProfile()
 
-func HashToFr(h common.Hash) fr.Element {
-	var e fr.Element
-	err := e.SetBytesCanonical(h[:])
+	// main1()
+	client, err := rpc.Dial("/mydata/erigon/mainnet/geth.ipc")
 	if err != nil {
-		panic(err)
+		log.Fatalf("Failed to connect to Erigon IPC: %v", err)
 	}
-	return e
+	defer client.Close()
+
+	config := Config{
+		// GethIPC:             "/mydata/erigon/mainnet/geth.ipc",
+		client:              client,
+		StartingBlockNumber: 18908895, // first block of 2024
+		EndingBlockNumber:   21525890, // last block of 2024
+	}
+	start := time.Now()
+	fmt.Println("Setting up tracked accounts...")
+	setTrackedAccounts(50, &config)
+	fmt.Println("Time taken to set tracked accounts:", time.Since(start))
+	time.Sleep(2 * time.Second)
+
+	for bn := config.StartingBlockNumber; bn <= config.EndingBlockNumber; bn++ {
+		fmt.Println("Processing block", bn)
+		start := time.Now()
+
+		balances, err := batchBalances(config.TrackedAccounts, bn, &config)
+		if err != nil {
+			log.Printf("failed to get balances at block %d: %v", bn, err)
+			continue
+		}
+		_ = balances
+		fmt.Printf("Time taken to get balances for block %d: %v\n", bn, time.Since(start))
+
+		// for i, addr := range config.TrackedAccounts {
+		// 	balance := balances[i]
+		// 	log.Printf("balance for account %s at block %d: %v", addr.Hex(), bn, balance)
+		// }
+	}
 }
 
-func main() {
-	// flag.Parse()
-	// if *cpuprofile != "" {
-	f, err := os.Create("cpu.prof")
-	if err != nil {
-		panic(err)
+func batchBalances(addrs []common.Address, blockNum uint64, config *Config) ([]*big.Int, error) {
+	client := config.client
+
+	elems := make([]rpc.BatchElem, len(addrs))
+	for i, addr := range addrs {
+		var bal hexutil.Big
+		elems[i] = rpc.BatchElem{
+			Method: "eth_getBalance",
+			Args:   []any{addr, hexutil.Uint64(blockNum)},
+			Result: &bal,
+		}
 	}
 
-	defer f.Close()
-	pprof.StartCPUProfile(f)
-	defer pprof.StopCPUProfile()
-	// }
-	// val1 := big.NewInt(1000000000000000000)
-	// val2 := big.NewInt(2000000000000000000)
+	if err := client.BatchCallContext(context.Background(), elems); err != nil {
+		return nil, err
+	}
 
-	// hash1 := common.BigToHash(val1)
-	// hash2 := common.BigToHash(val2)
+	balances := make([]*big.Int, len(elems))
+	for i, e := range elems {
+		balances[i] = e.Result.(*hexutil.Big).ToInt()
+	}
+	return balances, nil
+}
 
-	// hash3 := crypto.Keccak256Hash(hash1.Bytes(), hash2.Bytes())
+func setTrackedAccounts(count int, config *Config) []common.Address {
+	client := config.client
 
-	// fmt.Println(hash1)
-	// fmt.Println(hash2)
-	// fmt.Println(hash3)
+	accountAddrs := make([]common.Address, 0, count)
+	startKey := []byte{}
+	for {
+		var iteratorDump struct {
+			Root     string                 `json:"root"`
+			Accounts map[common.Address]any `json:"accounts"`
+			Next     []byte                 `json:"next"`
+		}
+		blockNumber := config.StartingBlockNumber
+		const batchSize = 256
+		if err := client.Call(
+			&iteratorDump,
+			"debug_accountRange",
+			blockNumber, // numeric block tag
+			startKey,    // starting key for pagination
+			batchSize,   // how many accounts to fetch per page
+			true,        // exclude code info in account?
+			true,        // exclude storage info in account?
+		); err != nil {
+			log.Fatalf("RPC error calling debug_accountRange: %v", err)
+		}
 
-	// msg := append(hash1.Bytes()[:], hash2.Bytes()[:]...)
-	// dst := []byte("pair-dst")
-	// els, err := fr.Hash(msg, dst, 1)
-	// elsBytes := els[0].Bytes()
-	// if err != nil {
-	// 	panic(err)
-	// }
-	// // fmt.Println(els)
-	// fmt.Println(els[0])
+		for addr := range iteratorDump.Accounts {
+			if len(accountAddrs) >= count {
+				break
+			}
+			accountAddrs = append(accountAddrs, addr)
+		}
+		if len(accountAddrs) >= count || len(iteratorDump.Next) == 0 {
+			break
+		}
+		startKey = iteratorDump.Next
+	}
+	config.TrackedAccounts = accountAddrs
+	return accountAddrs
 
-	// elsHash := common.BytesToHash(elsBytes[:])
-	// fmt.Println(elsHash)
-	// var element fr.Element
-	// element.SetBytes(elsHash.Bytes())
-	// fmt.Println(element)
-	// fmt.Println(segmenttree.BytesToPoseidonHash(hash1.Bytes()[:], hash2.Bytes()[:]))
-	// h := poseidon2.NewMerkleDamgardHasher()
-	// h.Write(hash1.Bytes()[:])
-	// h.Write(hash2.Bytes()[:])
-	// outBytes := h.Sum(nil)
-	// outHash := common.BytesToHash(outBytes)
-	// fmt.Println("Poseidon hash output:", outHash)
-	// var out fr.Element
-	// out.SetBytesCanonical(outBytes)
-	// fmt.Println(out)
-	// restoredOutFr := HashToFr(outHash)
-	// fmt.Println(restoredOutFr)
-
-	// Testing pairing check
-	// V, weights := polynomial.LoadBarycentricData(polynomial.DataDir)
-	// srs, err := kzg.SetupSRS(4096)
-	// if err != nil {
-	// 	panic(err)
-	// }
-
-	// start := time.Now()
-	// poly := polynomial.Interpolate([]int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}, []fr.Element{fr.NewElement(0), fr.NewElement(1), fr.NewElement(2), fr.NewElement(3), fr.NewElement(4), fr.NewElement(5), fr.NewElement(6), fr.NewElement(7), fr.NewElement(8), fr.NewElement(9), fr.NewElement(10), fr.NewElement(11), fr.NewElement(12), fr.NewElement(13), fr.NewElement(14), fr.NewElement(15)}, V, weights)
-
-	// nodesToInterpolate := []int{2, 8, 10}
-
-	// pCommit, err := gnark_kzg.Commit(poly, srs.Inner.Pk)
-	// if err != nil {
-	// 	panic(err)
-	// }
-
-	// poseidon2.NewMerkleDamgardHasher()
-	// pCommitBytes := pCommit.Bytes()
-	// pCommitHash := common.BytesToHash(pCommitBytes[:])
-	// fmt.Println(pCommitHash)
-
-	// pCommitHash2 := segmenttree.CommitmentToHash(pCommit)
-
-	// polynomial.HashToFieldElement(pCommitHash)
-	// polynomial.HashToFieldElement(pCommitHash2)
-
-	// Z := polynomial.VanishingPolynomial(nodesToInterpolate)
-	// ZCommit, _ := kzg.CommitG2(Z, srs.G2Powers)
-
-	// xs := make([]fr.Element, len(nodesToInterpolate))
-	// ys := make([]fr.Element, len(nodesToInterpolate))
-	// for i, nodeIdx := range nodesToInterpolate {
-	// 	xs[i] = fr.NewElement(uint64(nodeIdx))
-	// 	ys[i] = poly.Eval(&xs[i])
-	// }
-	// I := kzg.Interpolate(xs, ys)
-	// // I := polynomial.Interpolate(nodesToInterpolate, ys, V, weights)
-	// // I := bls_polynomial.InterpolateOnRange(ys)
-	// ICommit, err := gnark_kzg.Commit(I, srs.Inner.Pk)
-	// _ = ICommit
-	// if err != nil {
-	// 	panic(err)
-	// }
-
-	// diff := kzg.SubtractPolys(poly, I)
-	// qPoly := kzg.PolyDiv(diff, Z)
-	// qCommit, err := gnark_kzg.Commit(qPoly, srs.Inner.Pk)
-	// if err != nil {
-	// 	panic(err)
-	// }
-	// ok, err := proof.PairingCheck(pCommit, qCommit, ICommit, ZCommit, srs)
-	// if err != nil {
-	// 	panic(err)
-	// }
-	// if !ok {
-	// 	panic("pairing check failed.")
-	// } else {
-	// 	fmt.Println("Pairing check passed.")
-	// }
-	// fmt.Println("Time taken to compute commitments", time.Since(start))
-
-	main2()
 }
 
 func main2() {

@@ -37,7 +37,6 @@ func HashToFr(h common.Hash) fr.Element {
 	var e fr.Element
 	err := e.SetBytesCanonical(h[:])
 	if err != nil {
-		fmt.Println("Error in HashToFr:", err)
 		panic(err)
 	}
 	return e
