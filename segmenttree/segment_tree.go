@@ -16,13 +16,13 @@ import (
 	fr "github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
 )
 
-const L1BatchSize = 2048
+// const L1BatchSize = 2048
 
-// const L1BatchSize = 8
+const L1BatchSize = 8
 
-const L2BatchSize = 1365
+// const L2BatchSize = 1365
 
-// const L2BatchSize = 5
+const L2BatchSize = 5
 
 const MaxLayer = 4
 
@@ -55,6 +55,8 @@ type CachedData struct {
 }
 
 type LayeredSegmentTree struct {
+	Account common.Address
+
 	Layer1Tree []common.Hash
 	Layer2Tree []common.Hash
 	Layer3Tree []common.Hash
@@ -84,8 +86,9 @@ type LayeredSegmentTree struct {
 	Storage    *Storage
 }
 
-func NewLayeredSegmentTree(V polynomial.Polynomial, weights []fr.Element, weightCommits []gnark_kzg.Digest, srs *kzg.MultiSRS) *LayeredSegmentTree {
+func NewLayeredSegmentTree(account common.Address, V polynomial.Polynomial, weights []fr.Element, weightCommits []gnark_kzg.Digest, srs *kzg.MultiSRS) *LayeredSegmentTree {
 	return &LayeredSegmentTree{
+		Account:    account,
 		Layer1Tree: make([]common.Hash, SegmentTreeSize),
 		Layer2Tree: make([]common.Hash, SegmentTreeSize),
 		Layer3Tree: make([]common.Hash, SegmentTreeSize),
@@ -166,6 +169,10 @@ func (segmentTree *LayeredSegmentTree) Update(blockNumber int, balance *big.Int)
 		segmentTree.Layer1Polynomial = make(polynomial.Polynomial, SegmentTreeSize)
 		segmentTree.prevL1CommitIncPoly = make(polynomial.Polynomial, SegmentTreeSize)
 
+		if blockNumber != 0 {
+
+			WriteTreeSegment(StoragePath, segmentTree.Account, 1, l1CommitIndex-1, segmentTree.LXTreeV3[1])
+		}
 		segmentTree.LXTreeV3[1] = make([]common.Hash, SegmentTreeSize)
 		segmentTree.LXPolynomialV3[1] = make(polynomial.Polynomial, SegmentTreeSize)
 		segmentTree.LXCommitmentV3[1] = gnark_kzg.Digest{}
@@ -178,6 +185,10 @@ func (segmentTree *LayeredSegmentTree) Update(blockNumber int, balance *big.Int)
 		segmentTree.Layer2Polynomial = make(polynomial.Polynomial, SegmentTreeSize)
 		segmentTree.prevL2CommitIncPoly = make(polynomial.Polynomial, SegmentTreeSize)
 
+		if blockNumber != 0 {
+
+			WriteTreeSegment(StoragePath, segmentTree.Account, 2, l2CommitIndex-1, segmentTree.LXTreeV3[2])
+		}
 		segmentTree.LXTreeV3[2] = make([]common.Hash, SegmentTreeSize)
 		segmentTree.LXPolynomialV3[2] = make(polynomial.Polynomial, SegmentTreeSize)
 		segmentTree.LXCommitmentV3[2] = gnark_kzg.Digest{}
@@ -190,6 +201,10 @@ func (segmentTree *LayeredSegmentTree) Update(blockNumber int, balance *big.Int)
 		segmentTree.Layer3Polynomial = make(polynomial.Polynomial, SegmentTreeSize)
 		segmentTree.prevL3CommitIncPoly = make(polynomial.Polynomial, SegmentTreeSize)
 
+		if blockNumber != 0 {
+
+			WriteTreeSegment(StoragePath, segmentTree.Account, 3, l3CommitIndex-1, segmentTree.LXTreeV3[3])
+		}
 		segmentTree.LXTreeV3[3] = make([]common.Hash, SegmentTreeSize)
 		segmentTree.LXPolynomialV3[3] = make(polynomial.Polynomial, SegmentTreeSize)
 		segmentTree.LXCommitmentV3[3] = gnark_kzg.Digest{}
@@ -203,6 +218,10 @@ func (segmentTree *LayeredSegmentTree) Update(blockNumber int, balance *big.Int)
 		segmentTree.Layer4Polynomial = make(polynomial.Polynomial, SegmentTreeSize)
 		// segmentTree.prevL4CommitIncPoly = make(polynomial.Polynomial, SegmentTreeSize)
 
+		if blockNumber != 0 {
+
+			WriteTreeSegment(StoragePath, segmentTree.Account, 4, l4CommitIndex-1, segmentTree.LXTreeV3[4])
+		}
 		segmentTree.LXTreeV3[4] = make([]common.Hash, SegmentTreeSize)
 		segmentTree.LXCommitmentV3[4] = gnark_kzg.Digest{}
 		// segmentTree.LXPrevCIncCommitmentV3[4] = gnark_kzg.Digest{}
@@ -366,6 +385,10 @@ func (segmentTree *LayeredSegmentTree) Update(blockNumber int, balance *big.Int)
 	segmentTree.Storage.L4Polynomial[l4CommitIndex] = make(polynomial.Polynomial, SegmentTreeSize)
 	copy(segmentTree.Storage.L4Polynomial[l4CommitIndex], segmentTree.Layer4Polynomial)
 	// fmt.Println("Time taken to store data in storage", time.Since(start))
+	// WriteTreeSegment(StoragePath, common.HexToAddress("0x0000000000000000000000000000000000000001"), 1, l1CommitIndex, segmentTree.LXTreeV3[1])
+	// WriteTreeSegment(StoragePath, common.HexToAddress("0x0000000000000000000000000000000000000001"), 2, l2CommitIndex, segmentTree.LXTreeV3[2])
+	// WriteTreeSegment(StoragePath, common.HexToAddress("0x0000000000000000000000000000000000000001"), 3, l3CommitIndex, segmentTree.LXTreeV3[3])
+	// WriteTreeSegment(StoragePath, common.HexToAddress("0x0000000000000000000000000000000000000001"), 4, l4CommitIndex, segmentTree.LXTreeV3[4])
 
 }
 
@@ -725,4 +748,21 @@ func GenerateIncrementalPolynomial(indexToProcess []int, V polynomial.Polynomial
 	incPoly := polynomial.Interpolate(xValues, yValues, V, weights)
 
 	return incPoly
+}
+
+func (segmentTree *LayeredSegmentTree) FlushIfRemaining(blockNumber int) {
+	commitIdx := map[int]int{
+		1: blockNumber / L1BatchSize,
+		2: blockNumber / (L1BatchSize * L2BatchSize),
+		3: blockNumber / (L1BatchSize * L2BatchSize * L2BatchSize),
+		4: blockNumber / (L1BatchSize * L2BatchSize * L2BatchSize * L2BatchSize),
+	}
+
+	for layer := 1; layer <= MaxLayer; layer++ {
+		for i := 0; i < SegmentTreeSize; i++ {
+			if segmentTree.LXTreeV3[layer][i] != (common.Hash{}) {
+				WriteTreeSegment(StoragePath, segmentTree.Account, layer, commitIdx[layer], segmentTree.LXTreeV3[layer])
+			}
+		}
+	}
 }

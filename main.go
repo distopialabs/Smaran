@@ -31,40 +31,39 @@ func main() {
 	pprof.StartCPUProfile(f)
 	defer pprof.StopCPUProfile()
 
-	// // main1()
-	// client, err := rpc.Dial("/mydata/erigon/mainnet/geth.ipc")
-	// if err != nil {
-	// 	log.Fatalf("Failed to connect to Erigon IPC: %v", err)
-	// }
-	// defer client.Close()
+	// main1()
+	client, err := rpc.Dial("/mydata/erigon/mainnet/geth.ipc")
+	if err != nil {
+		log.Fatalf("Failed to connect to Erigon IPC: %v", err)
+	}
+	defer client.Close()
 
-	// config := Config{
-	// 	// GethIPC:             "/mydata/erigon/mainnet/geth.ipc",
-	// 	client:              client,
-	// 	StartingBlockNumber: 18908895,       // first block of 2024
-	// 	EndingBlockNumber:   18908895 + 100, // last block of 2024
-	// 	// EndingBlockNumber:   21525890, // last block of 2024
-	// }
+	config := Config{
+		// GethIPC:             "/mydata/erigon/mainnet/geth.ipc",
+		client:              client,
+		StartingBlockNumber: 18908895,        // first block of 2024
+		EndingBlockNumber:   18908895 + 2050, // last block of 2024
+		// EndingBlockNumber:   21525890, // last block of 2024
+	}
 	// start := time.Now()
 	// fmt.Println("Setting up tracked accounts...")
-	// setTrackedAccounts(100, &config)
+	// setTrackedAccounts(50, &config)
 	// fmt.Printf("Time taken to set %d tracked accounts: %v\n", len(config.TrackedAccounts), time.Since(start))
-	// time.Sleep(2 * time.Second)
 
-	// srs, err := kzg.SetupSRS(segmenttree.SegmentTreeSize)
-	// if err != nil {
-	// 	log.Fatalf("failed to setup SRS: %v", err)
-	// }
-	// // V, weights := polynomial.LoadBarycentricData(segmenttree.SegmentTreeSize)
-	// V, weights, weightCommits := kzg.LoadBarycentricData(segmenttree.SegmentTreeSize, srs)
-	// fmt.Println("Time taken to setup SRS", time.Since(start))
-	// _ = weightCommits
+	srs, err := kzg.SetupSRS(segmenttree.SegmentTreeSize)
+	if err != nil {
+		log.Fatalf("failed to setup SRS: %v", err)
+	}
+	// // // V, weights := polynomial.LoadBarycentricData(segmenttree.SegmentTreeSize)
+	V, weights, weightCommits := kzg.LoadBarycentricData(segmenttree.SegmentTreeSize, srs)
+	_ = weightCommits
 
 	// accountTrees := make(map[common.Address]*segmenttree.LayeredSegmentTree, len(config.TrackedAccounts))
 	// for _, addr := range config.TrackedAccounts {
-	// 	accountTrees[addr] = segmenttree.NewLayeredSegmentTree(V, weights, weightCommits, srs)
+	// 	accountTrees[addr] = segmenttree.NewLayeredSegmentTree(addr, V, weights, weightCommits, srs)
 	// }
 
+	// total_start := time.Now()
 	// for bn := config.StartingBlockNumber; bn <= config.EndingBlockNumber; bn += 1 {
 	// 	fmt.Println("Processing block", bn)
 
@@ -73,8 +72,6 @@ func main() {
 	// 	balances, err := batchBalances(config.TrackedAccounts, bn, &config)
 	// 	if err != nil {
 	// 		panic(err)
-	// 		// log.Printf("failed to get balances at block %d: %v", bn, err)
-	// 		// continue
 	// 	}
 	// 	fmt.Printf("Time taken to get balances for block %d: %v\n", bn, time.Since(start))
 
@@ -92,7 +89,25 @@ func main() {
 	// 	// }
 	// 	fmt.Printf("Time taken to process block %d: %v\n", bn, time.Since(total_start))
 	// }
-	main2()
+	// for _, addr := range config.TrackedAccounts {
+	// 	accountTrees[addr].FlushIfRemaining(int(config.EndingBlockNumber))
+	// }
+	// fmt.Printf("Time taken to process all blocks: %v\n", time.Since(total_start))
+
+	queryStartBlock := 20
+	queryEndBlock := 3000
+
+	start := time.Now()
+	rangeProofs := proof.GetRangeProofs(queryStartBlock, queryEndBlock, storage, V, weights, srs)
+	fmt.Println("Time taken to generate range proofs", time.Since(start))
+
+	start = time.Now()
+	proof.VerifyRangeProofs(queryStartBlock, queryEndBlock, rangeProofs, V, weights, srs, storage)
+	fmt.Println("Time taken to verify range proofs", time.Since(start))
+
+	_ = rangeProofs
+
+	// main2()
 }
 
 func batchBalances(addrs []common.Address, blockNum uint64, config *Config) ([]*big.Int, error) {
@@ -174,13 +189,22 @@ func main2() {
 	fmt.Println("Time taken to setup SRS", time.Since(start))
 	_ = weightCommits
 
-	// start = time.Now()
-	// segmentTree := generateSegmentTreeAndCommitments(5000, V, weights, weightCommits, srs)
-	// fmt.Println("Time taken to generate segment tree and commitments", time.Since(start))
-	// _ = segmentTree
-	// start = time.Now()
-	// segmentTree.DumpStorage()
-	// fmt.Println("Time taken to dump storage", time.Since(start))
+	start = time.Now()
+	segmentTree := generateSegmentTreeAndCommitments(3000, V, weights, weightCommits, srs)
+	fmt.Println("Time taken to generate segment tree and commitments", time.Since(start))
+	_ = segmentTree
+
+	segmentTree.FlushIfRemaining(3000)
+
+	// WriteTreeSegment(StoragePath, common.HexToAddress("0x0000000000000000000000000000000000000001"), 2, l2CommitIndex, segmentTree.LXTreeV3[2])
+	// WriteTreeSegment(StoragePath, common.HexToAddress("0x0000000000000000000000000000000000000001"), 3, l3CommitIndex, segmentTree.LXTreeV3[3])
+	// WriteTreeSegment(StoragePath, common.HexToAddress("0x0000000000000000000000000000000000000001"), 4, l4CommitIndex, segmentTree.LXTreeV3[4])
+
+	start = time.Now()
+	segmentTree.DumpStorage()
+	fmt.Println("Time taken to dump storage", time.Since(start))
+
+	// segmentTree.DumpStoragePacks(segmenttree.StoragePath, common.HexToAddress("0x0000000000000000000000000000000000000001"))
 
 	// // // storage := segmentTree.Storage
 
@@ -191,7 +215,7 @@ func main2() {
 	// testPolynomials(storage)
 
 	queryStartBlock := 20
-	queryEndBlock := 4999
+	queryEndBlock := 3000
 
 	start = time.Now()
 	rangeProofs := proof.GetRangeProofs(queryStartBlock, queryEndBlock, storage, V, weights, srs)
@@ -206,9 +230,9 @@ func main2() {
 }
 func generateSegmentTreeAndCommitments(maxBlockNumber int, V polynomial.Polynomial, weights []fr.Element, weightCommits []gnark_kzg.Digest, srs *kzg.MultiSRS) *segmenttree.LayeredSegmentTree {
 
-	segmentTree := segmenttree.NewLayeredSegmentTree(V, weights, weightCommits, srs)
+	segmentTree := segmenttree.NewLayeredSegmentTree(common.HexToAddress("0x0000000000000000000000000000000000000001"), V, weights, weightCommits, srs)
 
-	for blockNumber := range maxBlockNumber {
+	for blockNumber := range maxBlockNumber + 1 {
 		fmt.Println("Processing block", blockNumber, "...")
 		// random balance
 		balance := big.NewInt(1000000000000000000)

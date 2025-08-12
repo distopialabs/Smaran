@@ -98,6 +98,19 @@ func GetRangeProofs(startingBlock, endingBlock int, storage *segmenttree.Storage
 
 		storedCommitment := lxCommitments[layer][idx]
 		tree := lxTrees[layer][idx]
+		binTree, err := segmenttree.ReadTreeSegment(segmenttree.StoragePath, common.HexToAddress("0x0000000000000000000000000000000000000001"), layer, idx)
+		if err != nil {
+			panic(err)
+		}
+
+		if len(binTree) != len(tree) {
+			panic("tree length does not match")
+		}
+		for i := range binTree {
+			if binTree[i] != tree[i] {
+				panic("tree values do not match")
+			}
+		}
 
 		// P := lxPolynomials[layer][idx]
 		xs1 := make([]int, len(tree))
