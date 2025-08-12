@@ -35,12 +35,12 @@ type RangeProof struct {
 }
 
 func GetRangeProofs(startingBlock, endingBlock int, storage *segmenttree.Storage, V polynomial.Polynomial, weights []fr.Element, srs *kzg.MultiSRS) []*RangeProof {
-	// lxCommitments := map[int]map[int]common.Hash{
-	// 	1: storage.L1Commitments,
-	// 	2: storage.L2Commitments,
-	// 	3: storage.L3Commitments,
-	// 	4: storage.L4Commitments,
-	// }
+	lxCommitments := map[int]map[int]bls.G1Affine{
+		1: storage.L1Commitments,
+		2: storage.L2Commitments,
+		3: storage.L3Commitments,
+		4: storage.L4Commitments,
+	}
 
 	lxTrees := map[int]map[int][]common.Hash{
 		1: storage.L1Tree,
@@ -55,10 +55,31 @@ func GetRangeProofs(startingBlock, endingBlock int, storage *segmenttree.Storage
 		3: storage.L3Polynomial,
 		4: storage.L4Polynomial,
 	}
+	_ = lxPolynomials
+
+	// TODO: find the commits required to prove the range
+	// TODO: find relevant segment tree arrays (and fill them with commitment values)
+	// TODO: generate polynomial from the filled segment tree arrays
+	// TODO: generate proof for the polynomial
 
 	allRangeProofs := make([]*RangeProof, 0)
 
 	reqCommits := findCommitmentsCoveringRange(startingBlock, endingBlock)
+	for _, reqCommit := range reqCommits {
+		// layer := reqCommit.layer
+		// idx := reqCommit.idx
+
+		nodesToInterpolate := findNodesToInterpolate(reqCommit, true)
+
+		fmt.Printf("\n\nlayer: %d, idx: %d, \n", reqCommit.layer, reqCommit.idx)
+		if reqCommit.BlockRange == nil {
+			fmt.Printf("Commitment is not covering any range.\n")
+		} else {
+			fmt.Printf("sb: %d, eb: %d\n", reqCommit.BlockRange.Start, reqCommit.BlockRange.End)
+		}
+		fmt.Printf("dependentCommitments: %v\n", reqCommit.dependentCommitments)
+		fmt.Printf("nodesToInterpolate: %v\n", nodesToInterpolate)
+	}
 
 	for _, reqCommit := range reqCommits {
 		layer := reqCommit.layer
@@ -75,29 +96,43 @@ func GetRangeProofs(startingBlock, endingBlock int, storage *segmenttree.Storage
 		fmt.Printf("dependentCommitments: %v\n", reqCommit.dependentCommitments)
 		fmt.Printf("nodesToInterpolate: %v\n", nodesToInterpolate)
 
-		// commitment := lxCommitments[layer][idx]
+		storedCommitment := lxCommitments[layer][idx]
 		tree := lxTrees[layer][idx]
 
-		P := lxPolynomials[layer][idx]
-		commitment, err := gnark_kzg.Commit(P, srs.Inner.Pk)
+		// P := lxPolynomials[layer][idx]
+		xs1 := make([]int, len(tree))
+		ys1 := make([]fr.Element, len(tree))
+		for i, v := range tree {
+			xs1[i] = i
+			ys1[i] = polynomial.HashToFieldElement(v)
+		}
+		P := polynomial.Interpolate(xs1, ys1, V, weights)
+
+		computedCommitment, err := gnark_kzg.Commit(P, srs.Inner.Pk)
 		if err != nil {
 			panic(err)
 		}
-		commitmentHash := segmenttree.CommitmentToHash(commitment)
+		_ = computedCommitment
+
+		// if computedCommitment != storedCommitment {
+		// 	panic("commitment calculated from polynomial does not match with the stored commitment")
+		// }
+
+		// computedCommitmentHash := segmenttree.CommitmentToHash(computedCommitment)
 		// commitmentBytes := commitment.Bytes()
 		// commitmentHash := common.BytesToHash(commitmentBytes[:])
-		fmt.Printf("pCommitHash: %v\n", commitmentHash)
+		// fmt.Printf("pCommitHash: %v\n", computedCommitmentHash)
 
-		if layer < segmenttree.MaxLayer {
-			modDepCommitIdx := 2*segmenttree.L2BatchSize - 1 + (idx % segmenttree.L2BatchSize)
-			storedCommitmentHash := lxTrees[layer+1][idx/segmenttree.L2BatchSize][modDepCommitIdx]
-			fmt.Printf("storedCommitmentHash: %v\n", storedCommitmentHash)
-			if storedCommitmentHash != commitmentHash {
-				panic("commitment hash does not match")
-			} else {
-				fmt.Println("commitment hash matches with the commitment stored in upper layer storage")
-			}
-		}
+		// if layer < segmenttree.MaxLayer {
+		// 	modDepCommitIdx := 2*segmenttree.L2BatchSize - 1 + (idx % segmenttree.L2BatchSize)
+		// 	storedCommitmentHash := lxTrees[layer+1][idx/segmenttree.L2BatchSize][modDepCommitIdx]
+		// 	fmt.Printf("storedCommitmentHash: %v\n", storedCommitmentHash)
+		// 	if storedCommitmentHash != computedCommitmentHash {
+		// 		panic("commitment hash does not match")
+		// 	} else {
+		// 		fmt.Println("commitment hash matches with the commitment stored in upper layer storage")
+		// 	}
+		// }
 
 		Z := polynomial.VanishingPolynomial(nodesToInterpolate)
 		ZCommit, _ := kzg.CommitG2(Z, srs.G2Powers)
@@ -153,7 +188,7 @@ func GetRangeProofs(startingBlock, endingBlock int, storage *segmenttree.Storage
 		qCommitHash := common.BytesToHash(qCommitBytes[:])
 		fmt.Printf("qCommitmentHash: %s\n", qCommitHash)
 
-		ok, err := PairingCheck(commitment, QCommit, ICommit, ZCommit, srs)
+		ok, err := PairingCheck(storedCommitment, QCommit, ICommit, ZCommit, srs)
 		if err != nil {
 			panic(err)
 		}
@@ -166,7 +201,7 @@ func GetRangeProofs(startingBlock, endingBlock int, storage *segmenttree.Storage
 		rangeProof := &RangeProof{
 			idx:                  idx,
 			layer:                layer,
-			Commitment:           commitment,
+			Commitment:           storedCommitment,
 			Proof:                QCommit,
 			BlockRange:           reqCommit.BlockRange,
 			dependentCommitments: reqCommit.dependentCommitments,

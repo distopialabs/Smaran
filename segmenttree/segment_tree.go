@@ -1,12 +1,8 @@
 package segmenttree
 
 import (
-	"encoding/json"
-	"fmt"
 	"log"
 	"math/big"
-	"os"
-	"time"
 
 	"github.com/consensys/gnark-crypto/ecc"
 	bls "github.com/consensys/gnark-crypto/ecc/bls12-381"
@@ -235,7 +231,7 @@ func (segmentTree *LayeredSegmentTree) Update(blockNumber int, balance *big.Int)
 	// OPT 2 END
 
 	// OPT 3
-	start := time.Now()
+	// start := time.Now()
 	l1CommitV3 := segmentTree.UpdateLayerXTreeV3(L1BatchSize-1+idx0, common.BigToHash(balance), common.Hash{}, 1)
 	l1CommitHashV3 := CommitmentToHash(l1CommitV3)
 	l1RootHashV3 := segmentTree.LXTreeV3[1][0]
@@ -251,7 +247,7 @@ func (segmentTree *LayeredSegmentTree) Update(blockNumber int, balance *big.Int)
 	// 	fmt.Println("l1RootHashV3:", l1RootHashV3)
 	// 	panic("Root mismatch between OPT 2 and OPT 3")
 	// }
-	fmt.Println("Time taken to calculate commitment for layer 1, V3:", time.Since(start))
+	// fmt.Println("Time taken to calculate commitment for layer 1, V3:", time.Since(start))
 	// OPT 3 END
 
 	// TODO: use loop to update all layers
@@ -263,7 +259,7 @@ func (segmentTree *LayeredSegmentTree) Update(blockNumber int, balance *big.Int)
 	// fmt.Println("Time taken to calculate commitment for layer 2, V1:", time.Since(start))
 
 	// OPT 3
-	start = time.Now()
+	// start = time.Now()
 	l2CommitV3 := segmentTree.UpdateLayerXTreeV3(L2BatchSize-1+idx1, l1RootHashV3, l1CommitHashV3, 2)
 	l2CommitHashV3 := CommitmentToHash(l2CommitV3)
 	l2RootHashV3 := segmentTree.LXTreeV3[2][0]
@@ -282,7 +278,7 @@ func (segmentTree *LayeredSegmentTree) Update(blockNumber int, balance *big.Int)
 
 	// 	panic("Root mismatch between OPT 2 and OPT 3 in layer 2")
 	// }
-	fmt.Println("Time taken to calculate commitment for layer 2, V3:", time.Since(start))
+	// fmt.Println("Time taken to calculate commitment for layer 2, V3:", time.Since(start))
 	// OPT 3 END
 
 	// updating layer 3
@@ -292,7 +288,7 @@ func (segmentTree *LayeredSegmentTree) Update(blockNumber int, balance *big.Int)
 	// l3RootHash := segmentTree.Layer3Tree[0]
 	// fmt.Println("Time taken to calculate commitment for layer 3, V1:", time.Since(start))
 	// OPT 3
-	start = time.Now()
+	// start = time.Now()
 	l3CommitV3 := segmentTree.UpdateLayerXTreeV3(L2BatchSize-1+idx2, l2RootHashV3, l2CommitHashV3, 3)
 	l3CommitHashV3 := CommitmentToHash(l3CommitV3)
 	l3RootHashV3 := segmentTree.LXTreeV3[3][0]
@@ -308,7 +304,7 @@ func (segmentTree *LayeredSegmentTree) Update(blockNumber int, balance *big.Int)
 	// 	fmt.Println("l3RootHashV3:", l3RootHashV3)
 	// 	panic("Root mismatch between OPT 2 and OPT 3 in layer 3")
 	// }
-	fmt.Println("Time taken to calculate commitment for layer 3, V3:", time.Since(start))
+	// fmt.Println("Time taken to calculate commitment for layer 3, V3:", time.Since(start))
 	// OPT 3 END
 
 	// updating layer 4
@@ -319,7 +315,7 @@ func (segmentTree *LayeredSegmentTree) Update(blockNumber int, balance *big.Int)
 	// fmt.Println("Time taken to calculate commitment for layer 4, V1:", time.Since(start))
 
 	// OPT 3
-	start = time.Now()
+	// start = time.Now()
 	l4CommitV3 := segmentTree.UpdateLayerXTreeV3(L2BatchSize-1+idx3, l3RootHashV3, l3CommitHashV3, 4)
 	l4CommitHashV3 := CommitmentToHash(l4CommitV3)
 	l4RootHashV3 := segmentTree.LXTreeV3[4][0]
@@ -338,32 +334,38 @@ func (segmentTree *LayeredSegmentTree) Update(blockNumber int, balance *big.Int)
 	// 	panic("Root mismatch between OPT 2 and OPT 3 in layer 4")
 	// }
 
-	fmt.Println("Time taken to calculate commitment for layer 4, V3:", time.Since(start))
+	// fmt.Println("Time taken to calculate commitment for layer 4, V3:", time.Since(start))
 	// OPT 3 END
 
-	start = time.Now()
+	// start = time.Now()
+
+	segmentTree.Storage.L1Commitments[l1CommitIndex] = l1CommitV3
+	l1CommitV3.Bytes()
+	segmentTree.Storage.L2Commitments[l2CommitIndex] = l2CommitV3
+	segmentTree.Storage.L3Commitments[l3CommitIndex] = l3CommitV3
+	segmentTree.Storage.L4Commitments[l4CommitIndex] = l4CommitV3
+
 	segmentTree.Storage.L1Tree[l1CommitIndex] = make([]common.Hash, SegmentTreeSize)
-	copy(segmentTree.Storage.L1Tree[l1CommitIndex], segmentTree.Layer1Tree)
+	copy(segmentTree.Storage.L1Tree[l1CommitIndex], segmentTree.LXTreeV3[1])
 
 	segmentTree.Storage.L2Tree[l2CommitIndex] = make([]common.Hash, SegmentTreeSize)
-	copy(segmentTree.Storage.L2Tree[l2CommitIndex], segmentTree.Layer2Tree)
+	copy(segmentTree.Storage.L2Tree[l2CommitIndex], segmentTree.LXTreeV3[2])
 
 	segmentTree.Storage.L3Tree[l3CommitIndex] = make([]common.Hash, SegmentTreeSize)
-	copy(segmentTree.Storage.L3Tree[l3CommitIndex], segmentTree.Layer3Tree)
+	copy(segmentTree.Storage.L3Tree[l3CommitIndex], segmentTree.LXTreeV3[3])
 
 	segmentTree.Storage.L4Tree[l4CommitIndex] = make([]common.Hash, SegmentTreeSize)
-	copy(segmentTree.Storage.L4Tree[l4CommitIndex], segmentTree.Layer4Tree)
+	copy(segmentTree.Storage.L4Tree[l4CommitIndex], segmentTree.LXTreeV3[4])
 
 	segmentTree.Storage.L1Polynomial[l1CommitIndex] = make(polynomial.Polynomial, SegmentTreeSize)
 	copy(segmentTree.Storage.L1Polynomial[l1CommitIndex], segmentTree.Layer1Polynomial)
-
 	segmentTree.Storage.L2Polynomial[l2CommitIndex] = make(polynomial.Polynomial, SegmentTreeSize)
 	copy(segmentTree.Storage.L2Polynomial[l2CommitIndex], segmentTree.Layer2Polynomial)
 	segmentTree.Storage.L3Polynomial[l3CommitIndex] = make(polynomial.Polynomial, SegmentTreeSize)
 	copy(segmentTree.Storage.L3Polynomial[l3CommitIndex], segmentTree.Layer3Polynomial)
 	segmentTree.Storage.L4Polynomial[l4CommitIndex] = make(polynomial.Polynomial, SegmentTreeSize)
 	copy(segmentTree.Storage.L4Polynomial[l4CommitIndex], segmentTree.Layer4Polynomial)
-	fmt.Println("Time taken to store data in storage", time.Since(start))
+	// fmt.Println("Time taken to store data in storage", time.Since(start))
 
 }
 
@@ -525,12 +527,13 @@ func (segmentTree *LayeredSegmentTree) UpdateLayerXTreeV3(idx int, val common.Ha
 
 		tree[L2BatchSize+idx] = lXm1CommitHash
 
-		// var incCommit bls.G1Affine
-		// incCommit.ScalarMultiplication(&segmentTree.CachedData.WeightCommits[L2BatchSize+idx], lXm1CommitHash.Big())
-		points := []bls.G1Affine{segmentTree.CachedData.WeightCommits[L2BatchSize+idx]}
-		scalars := []fr.Element{polynomial.HashToFieldElement(lXm1CommitHash)}
 		var incCommit bls.G1Affine
-		incCommit.MultiExp(points, scalars, ecc.MultiExpConfig{})
+		incCommit.ScalarMultiplication(&segmentTree.CachedData.WeightCommits[L2BatchSize+idx], lXm1CommitHash.Big())
+		// ?: can we use multi expo here? ans: too much overhead
+		// points := []bls.G1Affine{segmentTree.CachedData.WeightCommits[L2BatchSize+idx]}
+		// scalars := []fr.Element{polynomial.HashToFieldElement(lXm1CommitHash)}
+		// var incCommit bls.G1Affine
+		// incCommit.MultiExp(points, scalars, ecc.MultiExpConfig{})
 
 		newCommit.Add(&newCommit, &incCommit)
 		segmentTree.LXPrevCIncCommitmentV3[layer] = incCommit
@@ -560,23 +563,30 @@ func (segmentTree *LayeredSegmentTree) UpdateLayerXTreeV3(idx int, val common.Ha
 			idx = parentIdx
 
 		}
-		points := make([]bls.G1Affine, len(updatedXs))
-		scalars := make([]fr.Element, len(updatedXs))
+		if len(updatedIndices) > 7 {
+			// Using multi expo for large number of updates
+			points := make([]bls.G1Affine, len(updatedXs))
+			scalars := make([]fr.Element, len(updatedXs))
+			for i, idx := range updatedIndices {
 
-		fmt.Println("NUmber of updated indices:", len(updatedIndices))
-		for i, idx := range updatedIndices {
+				points[i] = segmentTree.CachedData.WeightCommits[idx]
+				scalars[i] = polynomial.HashToFieldElement(tree[idx])
+			}
+			var tempIncCommit bls.G1Affine
+			tempIncCommit.MultiExp(points, scalars, ecc.MultiExpConfig{})
+			newCommit.Add(&newCommit, &tempIncCommit)
+		} else {
 
-			// var incCommit bls.G1Affine
-			// incCommit.ScalarMultiplication(&segmentTree.CachedData.WeightCommits[idx], updatedYs[i])
+			for i, idx := range updatedIndices {
 
-			// newCommit.Add(&newCommit, &incCommit)
+				var incCommit bls.G1Affine
+				incCommit.ScalarMultiplication(&segmentTree.CachedData.WeightCommits[idx], updatedYs[i])
 
-			points[i] = segmentTree.CachedData.WeightCommits[idx]
-			scalars[i] = polynomial.HashToFieldElement(tree[idx])
+				newCommit.Add(&newCommit, &incCommit)
+
+			}
 		}
-		var tempIncCommit bls.G1Affine
-		tempIncCommit.MultiExp(points, scalars, ecc.MultiExpConfig{})
-		newCommit.Add(&newCommit, &tempIncCommit)
+
 	}
 	segmentTree.LXCommitmentV3[layer] = newCommit
 
@@ -685,11 +695,7 @@ func (segmentTree *LayeredSegmentTree) UpdateLayerX(idx int, val common.Hash, l1
 	}
 	if layer > 1 {
 		if hasCommitValueAlready {
-			fmt.Println("prevCIncCommit is not zero, subtracting")
 			poly.Sub(poly, prevCommitIncPoly)
-		} else {
-			fmt.Println("prevCIncCommit is zero")
-
 		}
 		copy(prevCommitIncPoly, incPoly1)
 
@@ -719,322 +725,4 @@ func GenerateIncrementalPolynomial(indexToProcess []int, V polynomial.Polynomial
 	incPoly := polynomial.Interpolate(xValues, yValues, V, weights)
 
 	return incPoly
-}
-
-func (segmentTree *LayeredSegmentTree) DumpTrees() {
-
-	// dump trees to a json file
-	l1Tree := segmentTree.Storage.L1Tree
-	l2Tree := segmentTree.Storage.L2Tree
-	l3Tree := segmentTree.Storage.L3Tree
-	l4Tree := segmentTree.Storage.L4Tree
-
-	// dump trees to a json file
-	l1TreeJSON, err := json.Marshal(l1Tree)
-	if err != nil {
-		log.Fatalf("failed to marshal l1Tree: %v", err)
-	}
-	err = os.WriteFile("l1Tree.json", l1TreeJSON, 0644)
-	if err != nil {
-		log.Fatalf("failed to write l1Tree to file: %v", err)
-	}
-
-	l2TreeJSON, err := json.Marshal(l2Tree)
-	if err != nil {
-		log.Fatalf("failed to marshal l2Tree: %v", err)
-	}
-	err = os.WriteFile("l2Tree.json", l2TreeJSON, 0644)
-	if err != nil {
-		log.Fatalf("failed to write l2Tree to file: %v", err)
-	}
-
-	l3TreeJSON, err := json.Marshal(l3Tree)
-	if err != nil {
-		log.Fatalf("failed to marshal l3Tree: %v", err)
-	}
-	err = os.WriteFile("l3Tree.json", l3TreeJSON, 0644)
-	if err != nil {
-		log.Fatalf("failed to write l3Tree to file: %v", err)
-	}
-
-	l4TreeJSON, err := json.Marshal(l4Tree)
-	if err != nil {
-		log.Fatalf("failed to marshal l4Tree: %v", err)
-	}
-	err = os.WriteFile("l4Tree.json", l4TreeJSON, 0644)
-	if err != nil {
-		log.Fatalf("failed to write l4Tree to file: %v", err)
-	}
-
-	fmt.Println("Dumped trees to json files")
-
-}
-func (segmentTree *LayeredSegmentTree) DumpCommitments() {
-
-	// dump commitments to a json file
-	l1Commitments := segmentTree.Storage.L1Commitments
-	l2Commitments := segmentTree.Storage.L2Commitments
-	l3Commitments := segmentTree.Storage.L3Commitments
-	l4Commitments := segmentTree.Storage.L4Commitments
-
-	// store in separate json files
-	l1CommitmentsJSON, err := json.Marshal(l1Commitments)
-	if err != nil {
-		log.Fatalf("failed to marshal l1Commitments: %v", err)
-	}
-	err = os.WriteFile("l1Commitments.json", l1CommitmentsJSON, 0644)
-	if err != nil {
-		log.Fatalf("failed to write l1Commitments to file: %v", err)
-	}
-
-	l2CommitmentsJSON, err := json.Marshal(l2Commitments)
-	if err != nil {
-		log.Fatalf("failed to marshal l2Commitments: %v", err)
-	}
-	err = os.WriteFile("l2Commitments.json", l2CommitmentsJSON, 0644)
-	if err != nil {
-		log.Fatalf("failed to write l2Commitments to file: %v", err)
-	}
-
-	l3CommitmentsJSON, err := json.Marshal(l3Commitments)
-	if err != nil {
-		log.Fatalf("failed to marshal l3Commitments: %v", err)
-	}
-	err = os.WriteFile("l3Commitments.json", l3CommitmentsJSON, 0644)
-	if err != nil {
-		log.Fatalf("failed to write l3Commitments to file: %v", err)
-	}
-
-	l4CommitmentsJSON, err := json.Marshal(l4Commitments)
-	if err != nil {
-		log.Fatalf("failed to marshal l4Commitments: %v", err)
-	}
-	err = os.WriteFile("l4Commitments.json", l4CommitmentsJSON, 0644)
-	if err != nil {
-		log.Fatalf("failed to write l4Commitments to file: %v", err)
-	}
-
-}
-
-func (segmentTree *LayeredSegmentTree) DumpPolynomials() {
-
-	// dump polynomials to a json file
-	l1Polynomials := segmentTree.Storage.L1Polynomial
-	l2Polynomials := segmentTree.Storage.L2Polynomial
-	l3Polynomials := segmentTree.Storage.L3Polynomial
-	l4Polynomials := segmentTree.Storage.L4Polynomial
-
-	// store in separate json files
-	l1PolynomialsJSON, err := json.Marshal(l1Polynomials)
-	if err != nil {
-		log.Fatalf("failed to marshal l1Polynomials: %v", err)
-	}
-	err = os.WriteFile("l1Polynomials.json", l1PolynomialsJSON, 0644)
-	if err != nil {
-		log.Fatalf("failed to write l1Polynomials to file: %v", err)
-	}
-
-	l2PolynomialsJSON, err := json.Marshal(l2Polynomials)
-	if err != nil {
-		log.Fatalf("failed to marshal l2Polynomials: %v", err)
-	}
-	err = os.WriteFile("l2Polynomials.json", l2PolynomialsJSON, 0644)
-	if err != nil {
-		log.Fatalf("failed to write l2Polynomials to file: %v", err)
-	}
-
-	l3PolynomialsJSON, err := json.Marshal(l3Polynomials)
-	if err != nil {
-		log.Fatalf("failed to marshal l3Polynomials: %v", err)
-	}
-	err = os.WriteFile("l3Polynomials.json", l3PolynomialsJSON, 0644)
-	if err != nil {
-		log.Fatalf("failed to write l3Polynomials to file: %v", err)
-	}
-
-	l4PolynomialsJSON, err := json.Marshal(l4Polynomials)
-	if err != nil {
-		log.Fatalf("failed to marshal l4Polynomials: %v", err)
-	}
-	err = os.WriteFile("l4Polynomials.json", l4PolynomialsJSON, 0644)
-	if err != nil {
-		log.Fatalf("failed to write l4Polynomials to file: %v", err)
-	}
-
-	fmt.Println("Dumped polynomials to json files")
-
-}
-
-func (segmentTree *LayeredSegmentTree) DumpStorage() {
-	segmentTree.DumpTrees()
-	// segmentTree.DumpCommitments()
-	segmentTree.DumpPolynomials()
-}
-
-func (storage *Storage) LoadTrees() {
-
-	l1TreeJSON, err := os.ReadFile("l1Tree.json")
-	if err != nil {
-		log.Fatalf("failed to read l1Tree from file: %v", err)
-	}
-	err = json.Unmarshal(l1TreeJSON, &storage.L1Tree)
-	if err != nil {
-		log.Fatalf("failed to unmarshal l1Tree: %v", err)
-	}
-
-	l2TreeJSON, err := os.ReadFile("l2Tree.json")
-	if err != nil {
-		log.Fatalf("failed to read l2Tree from file: %v", err)
-	}
-	err = json.Unmarshal(l2TreeJSON, &storage.L2Tree)
-	if err != nil {
-		log.Fatalf("failed to unmarshal l2Tree: %v", err)
-	}
-
-	l3TreeJSON, err := os.ReadFile("l3Tree.json")
-	if err != nil {
-		log.Fatalf("failed to read l3Tree from file: %v", err)
-	}
-	err = json.Unmarshal(l3TreeJSON, &storage.L3Tree)
-	if err != nil {
-		log.Fatalf("failed to unmarshal l3Tree: %v", err)
-	}
-
-	l4TreeJSON, err := os.ReadFile("l4Tree.json")
-	if err != nil {
-		log.Fatalf("failed to read l4Tree from file: %v", err)
-	}
-	err = json.Unmarshal(l4TreeJSON, &storage.L4Tree)
-	if err != nil {
-		log.Fatalf("failed to unmarshal l4Tree: %v", err)
-	}
-
-}
-
-func (storage *Storage) LoadCommitments() {
-	l1CommitmentsJSON, err := os.ReadFile("l1Commitments.json")
-	if err != nil {
-		log.Fatalf("failed to read l1Commitments from file: %v", err)
-	}
-	err = json.Unmarshal(l1CommitmentsJSON, &storage.L1Commitments)
-	if err != nil {
-		log.Fatalf("failed to unmarshal l1Commitments: %v", err)
-	}
-
-	l2CommitmentsJSON, err := os.ReadFile("l2Commitments.json")
-	if err != nil {
-		log.Fatalf("failed to read l2Commitments from file: %v", err)
-	}
-	err = json.Unmarshal(l2CommitmentsJSON, &storage.L2Commitments)
-	if err != nil {
-		log.Fatalf("failed to unmarshal l2Commitments: %v", err)
-	}
-
-	l3CommitmentsJSON, err := os.ReadFile("l3Commitments.json")
-	if err != nil {
-		log.Fatalf("failed to read l3Commitments from file: %v", err)
-	}
-	err = json.Unmarshal(l3CommitmentsJSON, &storage.L3Commitments)
-	if err != nil {
-		log.Fatalf("failed to unmarshal l3Commitments: %v", err)
-	}
-
-	l4CommitmentsJSON, err := os.ReadFile("l4Commitments.json")
-	if err != nil {
-		log.Fatalf("failed to read l4Commitments from file: %v", err)
-	}
-	err = json.Unmarshal(l4CommitmentsJSON, &storage.L4Commitments)
-	if err != nil {
-		log.Fatalf("failed to unmarshal l4Commitments: %v", err)
-	}
-
-}
-
-func (storage *Storage) LoadPolynomials() {
-
-	l1PolynomialsJSON, err := os.ReadFile("l1Polynomials.json")
-	if err != nil {
-		log.Fatalf("failed to read l1Polynomials from file: %v", err)
-	}
-	err = json.Unmarshal(l1PolynomialsJSON, &storage.L1Polynomial)
-	if err != nil {
-		log.Fatalf("failed to unmarshal l1Polynomials: %v", err)
-	}
-
-	l2PolynomialsJSON, err := os.ReadFile("l2Polynomials.json")
-	if err != nil {
-		log.Fatalf("failed to read l2Polynomials from file: %v", err)
-	}
-	err = json.Unmarshal(l2PolynomialsJSON, &storage.L2Polynomial)
-	if err != nil {
-		log.Fatalf("failed to unmarshal l2Polynomials: %v", err)
-	}
-
-	l3PolynomialsJSON, err := os.ReadFile("l3Polynomials.json")
-	if err != nil {
-		log.Fatalf("failed to read l3Polynomials from file: %v", err)
-	}
-	err = json.Unmarshal(l3PolynomialsJSON, &storage.L3Polynomial)
-	if err != nil {
-		log.Fatalf("failed to unmarshal l3Polynomials: %v", err)
-	}
-
-	l4PolynomialsJSON, err := os.ReadFile("l4Polynomials.json")
-	if err != nil {
-		log.Fatalf("failed to read l4Polynomials from file: %v", err)
-	}
-	err = json.Unmarshal(l4PolynomialsJSON, &storage.L4Polynomial)
-	if err != nil {
-		log.Fatalf("failed to unmarshal l4Polynomials: %v", err)
-	}
-
-}
-
-func LoadStorage() *Storage {
-	storage := &Storage{}
-	storage.LoadTrees()
-	// storage.LoadCommitments()
-	storage.LoadPolynomials()
-	return storage
-}
-
-// Depricated
-func (segmentTree *LayeredSegmentTree) OldUpdateLayer1(idx int, val common.Hash) {
-
-	segmentTree.OldUpdateLayerX(idx, val, segmentTree.Layer1Tree, segmentTree.Layer1Polynomial)
-}
-
-// Depricated
-func (segmentTree *LayeredSegmentTree) OldUpdateLayerX(idx int, val common.Hash, tree []common.Hash, poly polynomial.Polynomial) {
-	//  update value at idx and its ancestors in the tree
-	tree[idx] = val
-
-	updatedIndices := []int{idx}
-	for idx > 0 {
-		parentIdx := GetParent(idx)
-
-		lChild := tree[2*parentIdx+1]
-		rChild := tree[2*parentIdx+2]
-		if (lChild == common.Hash{} || rChild == common.Hash{}) {
-			break
-		}
-		tree[parentIdx] = BytesToPoseidonHash(lChild.Bytes(), rChild.Bytes())
-		// tree[parentIdx] = GetParentHash(lChild, rChild)
-
-		// tree[parentIdx] = crypto.Keccak256Hash(
-		// 	lChild.Bytes(),
-		// 	rChild.Bytes(),
-		// )
-
-		updatedIndices = append(updatedIndices, parentIdx)
-
-		idx = parentIdx
-
-	}
-	// update the polynomial
-
-	incPoly := GenerateIncrementalPolynomial(updatedIndices, segmentTree.CachedData.V, segmentTree.CachedData.Weights, tree)
-
-	poly.Add(poly, incPoly)
-
 }

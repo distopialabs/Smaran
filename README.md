@@ -17,7 +17,7 @@ go install github.com/google/pprof@latest
 sudo apt-get update
 sudo apt-get install -y graphviz
 
-go build -o samurai main.go
+go build -o samurai .
 ./samurai
 go tool pprof -http=:8080 samurai cpu.prof
 ```

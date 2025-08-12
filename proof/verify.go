@@ -60,7 +60,7 @@ func VerifyRangeProofs(startingBlock, endingBlock int, rangeProofs []*RangeProof
 	}
 
 	reqCommits := findCommitmentsCoveringRange(startingBlock, endingBlock)
-	nodesValuesHashMap := RebuildSegmentTree(startingBlock, endingBlock, reqCommits, proofHashMap, storage)
+	nodesValuesHashMap := RebuildPartialSegmentTree(startingBlock, endingBlock, reqCommits, proofHashMap, storage)
 
 	// sort reqCommits by layer and idx
 	slices.SortFunc(reqCommits, func(a, b RangeCommitment) int {
@@ -188,7 +188,7 @@ func (r *RequiredNode) GetKey() string {
 	return fmt.Sprintf("%d:%d:%d", r.layer, r.commitIdx, r.nodeIdx)
 }
 
-func RebuildSegmentTree(startingBlock, endingBlock int, reqCommits []RangeCommitment, proofHashMap map[string]*RangeProof, storage *segmenttree.Storage) map[string]common.Hash {
+func RebuildPartialSegmentTree(startingBlock, endingBlock int, reqCommits []RangeCommitment, proofHashMap map[string]*RangeProof, storage *segmenttree.Storage) map[string]common.Hash {
 
 	// sort reqCommits by layer and idx
 	// rangeCoveringCommits := make([]RangeCommitment, 0)
