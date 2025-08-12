@@ -202,7 +202,6 @@ func (segmentTree *LayeredSegmentTree) Update(blockNumber int, balance *big.Int)
 		segmentTree.prevL3CommitIncPoly = make(polynomial.Polynomial, SegmentTreeSize)
 
 		if blockNumber != 0 {
-
 			WriteTreeSegment(StoragePath, segmentTree.Account, 3, l3CommitIndex-1, segmentTree.LXTreeV3[3])
 		}
 		segmentTree.LXTreeV3[3] = make([]common.Hash, SegmentTreeSize)
@@ -231,7 +230,7 @@ func (segmentTree *LayeredSegmentTree) Update(blockNumber int, balance *big.Int)
 
 	// // OPT 1
 	// start := time.Now()
-	segmentTree.UpdateLayerX(L1BatchSize-1+idx0, common.BigToHash(balance), common.Hash{}, 1)
+	// segmentTree.UpdateLayerX(L1BatchSize-1+idx0, common.BigToHash(balance), common.Hash{}, 1)
 	// l1CommitHash := segmentTree.CalculateCommitment(segmentTree.Layer1Polynomial)
 	// l1RootHash := segmentTree.Layer1Tree[0]
 	// fmt.Println("Time taken to calculate commitment for layer 1, V1:", time.Since(start))
@@ -272,7 +271,7 @@ func (segmentTree *LayeredSegmentTree) Update(blockNumber int, balance *big.Int)
 	// TODO: use loop to update all layers
 	// updating layer 2
 	// start = time.Now()
-	segmentTree.UpdateLayerX(L2BatchSize-1+idx1, l1RootHashV3, l1CommitHashV3, 2)
+	// segmentTree.UpdateLayerX(L2BatchSize-1+idx1, l1RootHashV3, l1CommitHashV3, 2)
 	// l2CommitHash := segmentTree.CalculateCommitment(segmentTree.Layer2Polynomial)
 	// l2RootHash := segmentTree.Layer2Tree[0]
 	// fmt.Println("Time taken to calculate commitment for layer 2, V1:", time.Since(start))
@@ -302,7 +301,7 @@ func (segmentTree *LayeredSegmentTree) Update(blockNumber int, balance *big.Int)
 
 	// updating layer 3
 	// start = time.Now()
-	segmentTree.UpdateLayerX(L2BatchSize-1+idx2, l2RootHashV3, l2CommitHashV3, 3)
+	// segmentTree.UpdateLayerX(L2BatchSize-1+idx2, l2RootHashV3, l2CommitHashV3, 3)
 	// l3CommitHash := segmentTree.CalculateCommitment(segmentTree.Layer3Polynomial)
 	// l3RootHash := segmentTree.Layer3Tree[0]
 	// fmt.Println("Time taken to calculate commitment for layer 3, V1:", time.Since(start))
@@ -328,7 +327,7 @@ func (segmentTree *LayeredSegmentTree) Update(blockNumber int, balance *big.Int)
 
 	// updating layer 4
 	// start = time.Now()
-	segmentTree.UpdateLayerX(L2BatchSize-1+idx3, l3RootHashV3, l3CommitHashV3, 4)
+	// segmentTree.UpdateLayerX(L2BatchSize-1+idx3, l3RootHashV3, l3CommitHashV3, 4)
 	// l4CommitHash := segmentTree.CalculateCommitment(segmentTree.Layer4Polynomial)
 	// l4RootHash := segmentTree.Layer4Tree[0]
 	// fmt.Println("Time taken to calculate commitment for layer 4, V1:", time.Since(start))
@@ -358,32 +357,33 @@ func (segmentTree *LayeredSegmentTree) Update(blockNumber int, balance *big.Int)
 
 	// start = time.Now()
 
-	segmentTree.Storage.L1Commitments[l1CommitIndex] = l1CommitV3
-	l1CommitV3.Bytes()
-	segmentTree.Storage.L2Commitments[l2CommitIndex] = l2CommitV3
-	segmentTree.Storage.L3Commitments[l3CommitIndex] = l3CommitV3
-	segmentTree.Storage.L4Commitments[l4CommitIndex] = l4CommitV3
+	// segmentTree.Storage.L1Commitments[l1CommitIndex] = l1CommitV3
+	// l1CommitV3.Bytes()
+	// segmentTree.Storage.L2Commitments[l2CommitIndex] = l2CommitV3
+	// segmentTree.Storage.L3Commitments[l3CommitIndex] = l3CommitV3
+	// segmentTree.Storage.L4Commitments[l4CommitIndex] = l4CommitV3
 
-	segmentTree.Storage.L1Tree[l1CommitIndex] = make([]common.Hash, SegmentTreeSize)
-	copy(segmentTree.Storage.L1Tree[l1CommitIndex], segmentTree.LXTreeV3[1])
+	// segmentTree.Storage.L1Tree[l1CommitIndex] = make([]common.Hash, SegmentTreeSize)
+	// copy(segmentTree.Storage.L1Tree[l1CommitIndex], segmentTree.LXTreeV3[1])
 
-	segmentTree.Storage.L2Tree[l2CommitIndex] = make([]common.Hash, SegmentTreeSize)
-	copy(segmentTree.Storage.L2Tree[l2CommitIndex], segmentTree.LXTreeV3[2])
+	// segmentTree.Storage.L2Tree[l2CommitIndex] = make([]common.Hash, SegmentTreeSize)
+	// copy(segmentTree.Storage.L2Tree[l2CommitIndex], segmentTree.LXTreeV3[2])
 
-	segmentTree.Storage.L3Tree[l3CommitIndex] = make([]common.Hash, SegmentTreeSize)
-	copy(segmentTree.Storage.L3Tree[l3CommitIndex], segmentTree.LXTreeV3[3])
+	// segmentTree.Storage.L3Tree[l3CommitIndex] = make([]common.Hash, SegmentTreeSize)
+	// copy(segmentTree.Storage.L3Tree[l3CommitIndex], segmentTree.LXTreeV3[3])
 
-	segmentTree.Storage.L4Tree[l4CommitIndex] = make([]common.Hash, SegmentTreeSize)
-	copy(segmentTree.Storage.L4Tree[l4CommitIndex], segmentTree.LXTreeV3[4])
+	// segmentTree.Storage.L4Tree[l4CommitIndex] = make([]common.Hash, SegmentTreeSize)
+	// copy(segmentTree.Storage.L4Tree[l4CommitIndex], segmentTree.LXTreeV3[4])
 
-	segmentTree.Storage.L1Polynomial[l1CommitIndex] = make(polynomial.Polynomial, SegmentTreeSize)
-	copy(segmentTree.Storage.L1Polynomial[l1CommitIndex], segmentTree.Layer1Polynomial)
-	segmentTree.Storage.L2Polynomial[l2CommitIndex] = make(polynomial.Polynomial, SegmentTreeSize)
-	copy(segmentTree.Storage.L2Polynomial[l2CommitIndex], segmentTree.Layer2Polynomial)
-	segmentTree.Storage.L3Polynomial[l3CommitIndex] = make(polynomial.Polynomial, SegmentTreeSize)
-	copy(segmentTree.Storage.L3Polynomial[l3CommitIndex], segmentTree.Layer3Polynomial)
-	segmentTree.Storage.L4Polynomial[l4CommitIndex] = make(polynomial.Polynomial, SegmentTreeSize)
-	copy(segmentTree.Storage.L4Polynomial[l4CommitIndex], segmentTree.Layer4Polynomial)
+	// segmentTree.Storage.L1Polynomial[l1CommitIndex] = make(polynomial.Polynomial, SegmentTreeSize)
+	// copy(segmentTree.Storage.L1Polynomial[l1CommitIndex], segmentTree.Layer1Polynomial)
+	// segmentTree.Storage.L2Polynomial[l2CommitIndex] = make(polynomial.Polynomial, SegmentTreeSize)
+	// copy(segmentTree.Storage.L2Polynomial[l2CommitIndex], segmentTree.Layer2Polynomial)
+	// segmentTree.Storage.L3Polynomial[l3CommitIndex] = make(polynomial.Polynomial, SegmentTreeSize)
+	// copy(segmentTree.Storage.L3Polynomial[l3CommitIndex], segmentTree.Layer3Polynomial)
+	// segmentTree.Storage.L4Polynomial[l4CommitIndex] = make(polynomial.Polynomial, SegmentTreeSize)
+	// copy(segmentTree.Storage.L4Polynomial[l4CommitIndex], segmentTree.Layer4Polynomial)
+
 	// fmt.Println("Time taken to store data in storage", time.Since(start))
 	// WriteTreeSegment(StoragePath, common.HexToAddress("0x0000000000000000000000000000000000000001"), 1, l1CommitIndex, segmentTree.LXTreeV3[1])
 	// WriteTreeSegment(StoragePath, common.HexToAddress("0x0000000000000000000000000000000000000001"), 2, l2CommitIndex, segmentTree.LXTreeV3[2])
@@ -539,28 +539,37 @@ func (segmentTree *LayeredSegmentTree) UpdateLayerXTreeV3(idx int, val common.Ha
 	// var newPrevCIncCommit bls.G1Affine
 
 	if layer > 1 {
-		prevCIncCommit := segmentTree.LXPrevCIncCommitmentV3[layer]
-		// TODO: use tree[L2BatchSize+idx] to calculate prevCIncCommit and subtract it from newCommit
-		// hasCommitValueAlready := tree[L2BatchSize+idx] != common.Hash{}
+		// OLD ------------
+		// prevCIncCommit := segmentTree.LXPrevCIncCommitmentV3[layer]
+		// // TODO: use tree[L2BatchSize+idx] to calculate prevCIncCommit and subtract it from newCommit
 
-		if (prevCIncCommit != bls.G1Affine{}) {
-			// if hasCommitValueAlready {
-			newCommit.Sub(&newCommit, &prevCIncCommit)
-		}
+		// if (prevCIncCommit != bls.G1Affine{}) {
+		// 	newCommit.Sub(&newCommit, &prevCIncCommit)
+		// }
+		// var incCommit bls.G1Affine
+		// incCommit.ScalarMultiplication(&segmentTree.CachedData.WeightCommits[L2BatchSize+idx], lXm1CommitHash.Big())
 
+		// newCommit.Add(&newCommit, &incCommit)
+		// segmentTree.LXPrevCIncCommitmentV3[layer] = incCommit
+		// // newPrevCIncCommit.Set(&incCommit)
+
+		// OLD END ------------
+
+		// NEW ------------
+
+		existingLXm1CommitHash := tree[L2BatchSize+idx]
 		tree[L2BatchSize+idx] = lXm1CommitHash
 
-		var incCommit bls.G1Affine
-		incCommit.ScalarMultiplication(&segmentTree.CachedData.WeightCommits[L2BatchSize+idx], lXm1CommitHash.Big())
-		// ?: can we use multi expo here? ans: too much overhead
-		// points := []bls.G1Affine{segmentTree.CachedData.WeightCommits[L2BatchSize+idx]}
-		// scalars := []fr.Element{polynomial.HashToFieldElement(lXm1CommitHash)}
-		// var incCommit bls.G1Affine
-		// incCommit.MultiExp(points, scalars, ecc.MultiExpConfig{})
+		incCommitBigInt := lXm1CommitHash.Big()
 
-		newCommit.Add(&newCommit, &incCommit)
-		segmentTree.LXPrevCIncCommitmentV3[layer] = incCommit
-		// newPrevCIncCommit.Set(&incCommit)
+		if (existingLXm1CommitHash != common.Hash{}) {
+			incCommitBigInt.Sub(incCommitBigInt, existingLXm1CommitHash.Big())
+		}
+
+		var incCommitNew bls.G1Affine
+		incCommitNew.ScalarMultiplication(&segmentTree.CachedData.WeightCommits[L2BatchSize+idx], incCommitBigInt)
+		newCommit.Add(&newCommit, &incCommitNew)
+		// NEW END ------------
 
 	}
 

@@ -1,12 +1,17 @@
 package proof
 
 import (
+	"context"
 	"fmt"
+	"log"
 	"math"
+	"math/big"
 
 	fr "github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
 	gnark_kzg "github.com/consensys/gnark-crypto/ecc/bls12-381/kzg"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/nepal80m/samurai/kzg"
 	"github.com/nepal80m/samurai/polynomial"
 	"github.com/nepal80m/samurai/segmenttree"
@@ -34,40 +39,42 @@ type RangeProof struct {
 	dependentCommitments []int
 }
 
-func GetRangeProofs(startingBlock, endingBlock int, storage *segmenttree.Storage, V polynomial.Polynomial, weights []fr.Element, srs *kzg.MultiSRS) []*RangeProof {
-	lxCommitments := map[int]map[int]bls.G1Affine{
-		1: storage.L1Commitments,
-		2: storage.L2Commitments,
-		3: storage.L3Commitments,
-		4: storage.L4Commitments,
-	}
+func GetRangeProofs(account common.Address, startingBlock, endingBlock int, V polynomial.Polynomial, weights []fr.Element, srs *kzg.MultiSRS, blockOffset uint64) ([]*RangeProof, []*big.Int) {
+	// lxCommitments := map[int]map[int]bls.G1Affine{
+	// 	1: storage.L1Commitments,
+	// 	2: storage.L2Commitments,
+	// 	3: storage.L3Commitments,
+	// 	4: storage.L4Commitments,
+	// }
 
-	lxTrees := map[int]map[int][]common.Hash{
-		1: storage.L1Tree,
-		2: storage.L2Tree,
-		3: storage.L3Tree,
-		4: storage.L4Tree,
-	}
+	// lxTrees := map[int]map[int][]common.Hash{
+	// 	1: storage.L1Tree,
+	// 	2: storage.L2Tree,
+	// 	3: storage.L3Tree,
+	// 	4: storage.L4Tree,
+	// }
 
-	lxPolynomials := map[int]map[int]polynomial.Polynomial{
-		1: storage.L1Polynomial,
-		2: storage.L2Polynomial,
-		3: storage.L3Polynomial,
-		4: storage.L4Polynomial,
-	}
-	_ = lxPolynomials
+	// lxPolynomials := map[int]map[int]polynomial.Polynomial{
+	// 	1: storage.L1Polynomial,
+	// 	2: storage.L2Polynomial,
+	// 	3: storage.L3Polynomial,
+	// 	4: storage.L4Polynomial,
+	// }
+	// _ = lxPolynomials
 
 	// TODO: find the commits required to prove the range
 	// TODO: find relevant segment tree arrays (and fill them with commitment values)
 	// TODO: generate polynomial from the filled segment tree arrays
 	// TODO: generate proof for the polynomial
+	balances, err := batchSingleUserBalances(account, uint64(startingBlock)+blockOffset, uint64(endingBlock)+blockOffset)
+	if err != nil {
+		panic(err)
+	}
 
 	allRangeProofs := make([]*RangeProof, 0)
 
 	reqCommits := findCommitmentsCoveringRange(startingBlock, endingBlock)
 	for _, reqCommit := range reqCommits {
-		// layer := reqCommit.layer
-		// idx := reqCommit.idx
 
 		nodesToInterpolate := findNodesToInterpolate(reqCommit, true)
 
@@ -80,7 +87,6 @@ func GetRangeProofs(startingBlock, endingBlock int, storage *segmenttree.Storage
 		fmt.Printf("dependentCommitments: %v\n", reqCommit.dependentCommitments)
 		fmt.Printf("nodesToInterpolate: %v\n", nodesToInterpolate)
 	}
-
 	for _, reqCommit := range reqCommits {
 		layer := reqCommit.layer
 		idx := reqCommit.idx
@@ -96,20 +102,10 @@ func GetRangeProofs(startingBlock, endingBlock int, storage *segmenttree.Storage
 		fmt.Printf("dependentCommitments: %v\n", reqCommit.dependentCommitments)
 		fmt.Printf("nodesToInterpolate: %v\n", nodesToInterpolate)
 
-		storedCommitment := lxCommitments[layer][idx]
-		tree := lxTrees[layer][idx]
-		binTree, err := segmenttree.ReadTreeSegment(segmenttree.StoragePath, common.HexToAddress("0x0000000000000000000000000000000000000001"), layer, idx)
+		// storedCommitment := lxCommitments[layer][idx]
+		tree, err := segmenttree.ReadTreeSegment(segmenttree.StoragePath, account, layer, idx)
 		if err != nil {
 			panic(err)
-		}
-
-		if len(binTree) != len(tree) {
-			panic("tree length does not match")
-		}
-		for i := range binTree {
-			if binTree[i] != tree[i] {
-				panic("tree values do not match")
-			}
 		}
 
 		// P := lxPolynomials[layer][idx]
@@ -201,7 +197,7 @@ func GetRangeProofs(startingBlock, endingBlock int, storage *segmenttree.Storage
 		qCommitHash := common.BytesToHash(qCommitBytes[:])
 		fmt.Printf("qCommitmentHash: %s\n", qCommitHash)
 
-		ok, err := PairingCheck(storedCommitment, QCommit, ICommit, ZCommit, srs)
+		ok, err := PairingCheck(computedCommitment, QCommit, ICommit, ZCommit, srs)
 		if err != nil {
 			panic(err)
 		}
@@ -214,7 +210,7 @@ func GetRangeProofs(startingBlock, endingBlock int, storage *segmenttree.Storage
 		rangeProof := &RangeProof{
 			idx:                  idx,
 			layer:                layer,
-			Commitment:           storedCommitment,
+			Commitment:           computedCommitment,
 			Proof:                QCommit,
 			BlockRange:           reqCommit.BlockRange,
 			dependentCommitments: reqCommit.dependentCommitments,
@@ -233,7 +229,7 @@ func GetRangeProofs(startingBlock, endingBlock int, storage *segmenttree.Storage
 
 	}
 
-	return allRangeProofs
+	return allRangeProofs, balances
 
 }
 
@@ -429,4 +425,31 @@ func findCoveringNodes(N, L, R int) []int {
 	}
 
 	return out
+}
+
+func batchSingleUserBalances(addr common.Address, startBlockNum, endBlockNum uint64) ([]*big.Int, error) {
+	client, err := rpc.Dial("/mydata/erigon/mainnet/geth.ipc")
+	if err != nil {
+		log.Fatalf("Failed to connect to Erigon IPC: %v", err)
+	}
+	defer client.Close()
+	elems := make([]rpc.BatchElem, endBlockNum-startBlockNum+1)
+	for i := range endBlockNum - startBlockNum + 1 {
+		var bal hexutil.Big
+		elems[i] = rpc.BatchElem{
+			Method: "eth_getBalance",
+			Args:   []any{addr, hexutil.Uint64(startBlockNum + uint64(i))},
+			Result: &bal,
+		}
+	}
+
+	if err := client.BatchCallContext(context.Background(), elems); err != nil {
+		return nil, err
+	}
+
+	balances := make([]*big.Int, len(elems))
+	for i, e := range elems {
+		balances[i] = e.Result.(*hexutil.Big).ToInt()
+	}
+	return balances, nil
 }

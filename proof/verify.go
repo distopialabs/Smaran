@@ -50,7 +50,7 @@ func NewRebuiltLayeredSegmentTree() *RebuiltLayeredSegmentTree {
 	}
 }
 
-func VerifyRangeProofs(startingBlock, endingBlock int, rangeProofs []*RangeProof, V polynomial.Polynomial, weights []fr.Element, srs *kzg.MultiSRS, storage *segmenttree.Storage) {
+func VerifyRangeProofs(startingBlock, endingBlock int, rangeProofs []*RangeProof, balances []*big.Int, V polynomial.Polynomial, weights []fr.Element, srs *kzg.MultiSRS) {
 	fmt.Println("\n\nVerifying range proofs...")
 
 	proofHashMap := make(map[string]*RangeProof, len(rangeProofs))
@@ -60,7 +60,7 @@ func VerifyRangeProofs(startingBlock, endingBlock int, rangeProofs []*RangeProof
 	}
 
 	reqCommits := findCommitmentsCoveringRange(startingBlock, endingBlock)
-	nodesValuesHashMap := RebuildPartialSegmentTree(startingBlock, endingBlock, reqCommits, proofHashMap, storage)
+	nodesValuesHashMap := RebuildPartialSegmentTree(startingBlock, endingBlock, reqCommits, proofHashMap, balances)
 
 	// sort reqCommits by layer and idx
 	slices.SortFunc(reqCommits, func(a, b RangeCommitment) int {
@@ -188,7 +188,7 @@ func (r *RequiredNode) GetKey() string {
 	return fmt.Sprintf("%d:%d:%d", r.layer, r.commitIdx, r.nodeIdx)
 }
 
-func RebuildPartialSegmentTree(startingBlock, endingBlock int, reqCommits []RangeCommitment, proofHashMap map[string]*RangeProof, storage *segmenttree.Storage) map[string]common.Hash {
+func RebuildPartialSegmentTree(startingBlock, endingBlock int, reqCommits []RangeCommitment, proofHashMap map[string]*RangeProof, balances []*big.Int) map[string]common.Hash {
 
 	// sort reqCommits by layer and idx
 	// rangeCoveringCommits := make([]RangeCommitment, 0)
@@ -268,8 +268,7 @@ func RebuildPartialSegmentTree(startingBlock, endingBlock int, reqCommits []Rang
 	}
 
 	for blockNumber := startingBlock; blockNumber <= endingBlock; blockNumber++ {
-		balance := big.NewInt(1000000000000000000)
-		balance.Add(balance, big.NewInt(int64(blockNumber)))
+		balance := balances[blockNumber-startingBlock]
 		segmentTree.Update(blockNumber, balance)
 		l1CommitIndex := blockNumber / L1BatchSize
 		l2CommitIndex := blockNumber / (L1BatchSize * L2BatchSize)
@@ -325,7 +324,7 @@ func RebuildPartialSegmentTree(startingBlock, endingBlock int, reqCommits []Rang
 		}
 	}
 
-	segmentTree.DumpStorage()
+	// segmentTree.DumpStorage()
 
 	// for _, node := range requiredNodes {
 	// 	key := node.GetKey()
@@ -336,30 +335,30 @@ func RebuildPartialSegmentTree(startingBlock, endingBlock int, reqCommits []Rang
 	// 	fmt.Printf("required node (layer: %d, idx: %d, node: %d) value: %s\n", node.layer, node.commitIdx, node.nodeIdx, nodesValuesHashMap[key])
 	// }
 
-	for _, commit := range reqCommits {
-		nodesToInterpolate := findNodesToInterpolate(commit, true)
-		for _, nodeIdx := range nodesToInterpolate {
-			nodeKey := fmt.Sprintf("%d:%d:%d", commit.layer, commit.idx, nodeIdx)
-			calculatedValue := nodesValuesHashMap[nodeKey]
+	// for _, commit := range reqCommits {
+	// 	nodesToInterpolate := findNodesToInterpolate(commit, true)
+	// 	for _, nodeIdx := range nodesToInterpolate {
+	// 		nodeKey := fmt.Sprintf("%d:%d:%d", commit.layer, commit.idx, nodeIdx)
+	// 		calculatedValue := nodesValuesHashMap[nodeKey]
 
-			lxTrees := map[int]map[int][]common.Hash{
-				1: storage.L1Tree,
-				2: storage.L2Tree,
-				3: storage.L3Tree,
-				4: storage.L4Tree,
-			}
-			tree := lxTrees[commit.layer][commit.idx]
+	// 		lxTrees := map[int]map[int][]common.Hash{
+	// 			1: storage.L1Tree,
+	// 			2: storage.L2Tree,
+	// 			3: storage.L3Tree,
+	// 			4: storage.L4Tree,
+	// 		}
+	// 		tree := lxTrees[commit.layer][commit.idx]
 
-			actualValue := tree[nodeIdx]
+	// 		actualValue := tree[nodeIdx]
 
-			if calculatedValue != actualValue {
-				fmt.Printf("layer: %d, idx: %d, node: %d\n", commit.layer, commit.idx, nodeIdx)
-				fmt.Printf("calculatedValue: %s\n", calculatedValue)
-				fmt.Printf("actualValue: %s\n", actualValue)
-				panic("calculated value does not match actual value")
-			}
-		}
-	}
+	// 		if calculatedValue != actualValue {
+	// 			fmt.Printf("layer: %d, idx: %d, node: %d\n", commit.layer, commit.idx, nodeIdx)
+	// 			fmt.Printf("calculatedValue: %s\n", calculatedValue)
+	// 			fmt.Printf("actualValue: %s\n", actualValue)
+	// 			panic("calculated value does not match actual value")
+	// 		}
+	// 	}
+	// }
 
 	return nodesValuesHashMap
 
