@@ -459,7 +459,7 @@ func (segmentTree *RebuiltLayeredSegmentTree) UpdateLayerX(idx int, val common.H
 
 		updatedIndices := []int{idx}
 		for idx > 0 {
-			parentIdx := segmenttree.GetParent(idx)
+			parentIdx := segmenttree.GetParent(uint64(idx))
 
 			lChild := tree[2*parentIdx+1]
 			rChild := tree[2*parentIdx+2]
@@ -473,9 +473,9 @@ func (segmentTree *RebuiltLayeredSegmentTree) UpdateLayerX(idx int, val common.H
 			// 	rChild.Bytes(),
 			// )
 
-			updatedIndices = append(updatedIndices, parentIdx)
+			updatedIndices = append(updatedIndices, int(parentIdx))
 
-			idx = parentIdx
+			idx = int(parentIdx)
 
 		}
 

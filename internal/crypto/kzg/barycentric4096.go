@@ -15,7 +15,8 @@ import (
 const (
 	// domainSize      = 4096
 	// domainSize = 16
-	DataDir = "polynomial/data"
+	// DataDir = "polynomial/data"
+	DataDir = "data/polynomial"
 	// weightsFileName = "bary_weights_4096.bin"
 	// vanishFileName  = "vanishing_poly_4096.bin"
 	weightsFileNamePlaceholder       = "bary_weights_%d.bin"
