@@ -16,7 +16,6 @@ import (
 	"github.com/nepal80m/samurai/internal/crypto/kzg"
 
 	"github.com/nepal80m/samurai/internal/config"
-	"github.com/nepal80m/samurai/internal/ledger"
 	"github.com/nepal80m/samurai/internal/math/segmenttree"
 )
 
@@ -29,7 +28,7 @@ func main() {
 	profile := flag.Bool("p", true, "Profile the program")
 
 	// flags to generate commitments
-	numBlocks := flag.Int("numBlocks", 10, "Number of blocks to process")
+	numBlocks := flag.Int("numBlocks", 900, "Number of blocks to process")
 	// numTrackedAccounts := flag.Int("a", 1, "Number of tracked accounts")
 
 	// flags to generate proofs & verify proofs
@@ -123,18 +122,25 @@ func generateCommitmentsV2(config *config.Config, precomputedData *config.Precom
 	// Feed blocks
 	go func() {
 		for bn := config.StartingBlockNumber; bn <= config.EndingBlockNumber; bn += 1 {
-			start := time.Now()
-			modifiedAccounts, err := ledger.GetModifiedAccountsByNumber(bn, config.Client)
-			if err != nil {
-				panic(fmt.Errorf("failed to get modified accounts by number %d: %w", bn, err))
-			}
-			fmt.Println("Block", bn, "has", len(modifiedAccounts), "modified accounts", time.Since(start))
-			start = time.Now()
-			balances, err := ledger.BatchMultiUserBalance(modifiedAccounts, bn, config)
-			if err != nil {
-				panic(fmt.Errorf("failed to get balances for block %d: %w", bn, err))
-			}
-			fmt.Println("Block", bn, "fetched balances for", len(modifiedAccounts), "accounts", time.Since(start))
+			// start := time.Now()
+			// // fetch all the modified accounts in this block
+			// modifiedAccounts, err := ledger.GetModifiedAccountsByNumber(bn, config.Client)
+			// if err != nil {
+			// 	panic(fmt.Errorf("failed to get modified accounts by number %d: %w", bn, err))
+			// }
+			// fmt.Println("Block", bn, "has", len(modifiedAccounts), "modified accounts", time.Since(start))
+			// start = time.Now()
+			// // fetch balances for all the modified accounts
+			// balances, err := ledger.BatchMultiUserBalance(modifiedAccounts, bn, config)
+			// if err != nil {
+			// 	panic(fmt.Errorf("failed to get balances for block %d: %w", bn, err))
+			// }
+			// fmt.Println("Block", bn, "fetched balances for", len(modifiedAccounts), "accounts", time.Since(start))
+
+			// TODO: remove this override
+			balances := []*big.Int{new(big.Int).SetUint64(1000000000000000000 + uint64(bn))}
+			modifiedAccounts := []common.Address{common.HexToAddress("0x0000000000000000000000000000000000000027")}
+			// send the block info to the channel
 			blockCh <- blockModifiedAccountsBalances{
 				Number:           bn,
 				ModifiedAccounts: modifiedAccounts,

@@ -59,7 +59,7 @@ CurrentBalance struct {
 	Balance    *big.Int
 	StartBlock uint64
 }
-key: user:<address>:current_balance or current_balance:<address>
+key: user:<address>:current_balance_info
 value: rlp(CurrentBalance)
 
 
@@ -70,21 +70,28 @@ HistoricalBalance struct {
 	EndBlock uint64
 }
 key: historical_balance:<hash(rlp(historical_balance))>
+key: user:<address>:historical_balance_info:<version/idx>
 value: rlp(HistoricalBalance)
-
 
 
 # Tree Tables:
 LXTreeV3 map[int][]common.Hash # need to store
 
-key: user:<address>:tree:<layer=1,2,3,4>:<index>
+key: user:<address>:batch_tree:<layer=1,2,3,4>:<batch_index>
+value: rlp(LXTreeV3[layer=1])
+
+
+# Tree Tables (NEW): store only the current batch tree.
+LXTreeV3 map[int][]common.Hash # need to store
+
+key: user:<address>:batch_tree:<layer=1,2,3,4>
 value: rlp(LXTreeV3[layer=1])
 
 
 # Commitment Tables:
 LXCommitmentV3 map[int]gnark_kzg.Digest # need to store
 
-key: user:<address>:commitment:<layer=1>
+key: user:<address>:commitment:<layer=1>:<batch_index>
 
 
 
@@ -93,5 +100,20 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 # Polynomial Tables: I dont think we need to store these at all. we never use it.
 LXPolynomialV3 map[int]polynomial.Polynomial # need to store
 
-key: user:<address>:polynomial:<layer=1>
+key: user:<address>:polynomial:<layer=1>:<batch_index>
 value: rlp(LXPolynomialV3[layer=1])
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

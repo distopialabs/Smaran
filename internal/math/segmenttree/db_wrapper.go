@@ -46,25 +46,40 @@ func GetCurrentBalanceInfo(account common.Address, db *pebble.DB) (*CurrentBalan
 	return &cbInfo, nil
 }
 
-func GetHistoricalBalanceKey(hbHash common.Hash) string {
-	return "historical_balance:" + hbHash.Hex()
+func GetHistoricalBalanceByHashKey(hbHash common.Hash) string {
+	return "historical_balance_info:" + hbHash.Hex()
+}
+func GetHistoricalBalanceKey(account common.Address, version uint64) string {
+	return "user:" + account.Hex() + ":historical_balance_info:" + strconv.Itoa(int(version))
 }
 
-func StoreHistoricalBalance(historicalBalance *HistoricalBalance, db *pebble.DB) {
+func StoreHistoricalBalanceByHash(historicalBalance *HistoricalBalance, db *pebble.DB) {
 	hbBytes, err := rlp.EncodeToBytes(historicalBalance)
 	if err != nil {
 		panic(fmt.Errorf("failed to encode historical balance: %w", err))
 	}
 	hbHash := BytesToPoseidonHash(hbBytes)
-	key := GetHistoricalBalanceKey(hbHash)
+	key := GetHistoricalBalanceByHashKey(hbHash)
 	err = db.Set([]byte(key), hbBytes, pebble.Sync)
 	if err != nil {
 		panic(fmt.Errorf("failed to store historical balance: %w", err))
 	}
 }
 
-func GetHistoricalBalance(hbHash common.Hash, db *pebble.DB) *HistoricalBalance {
-	key := GetHistoricalBalanceKey(hbHash)
+func StoreHistoricalBalance(account common.Address, historicalBalance *HistoricalBalance, db *pebble.DB) {
+	key := GetHistoricalBalanceKey(account, historicalBalance.Version)
+	hbBytes, err := rlp.EncodeToBytes(historicalBalance)
+	if err != nil {
+		panic(fmt.Errorf("failed to encode historical balance: %w", err))
+	}
+	err = db.Set([]byte(key), hbBytes, pebble.Sync)
+	if err != nil {
+		panic(fmt.Errorf("failed to store historical balance: %w", err))
+	}
+}
+
+func GetHistoricalBalanceByHash(hbHash common.Hash, db *pebble.DB) *HistoricalBalance {
+	key := GetHistoricalBalanceByHashKey(hbHash)
 	val, closer, err := db.Get([]byte(key))
 	if err != nil {
 		if err == pebble.ErrNotFound {
@@ -72,6 +87,18 @@ func GetHistoricalBalance(hbHash common.Hash, db *pebble.DB) *HistoricalBalance 
 		} else {
 			panic(fmt.Errorf("failed to get historical balance: %w", err))
 		}
+	}
+	var historicalBalance HistoricalBalance
+	rlp.DecodeBytes(val, &historicalBalance)
+	closer.Close()
+	return &historicalBalance
+}
+
+func GetHistoricalBalance(account common.Address, version uint64, db *pebble.DB) *HistoricalBalance {
+	key := GetHistoricalBalanceKey(account, version)
+	val, closer, err := db.Get([]byte(key))
+	if err != nil {
+		panic(fmt.Errorf("failed to get historical balance: %w", err))
 	}
 	var historicalBalance HistoricalBalance
 	rlp.DecodeBytes(val, &historicalBalance)

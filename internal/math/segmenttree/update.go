@@ -16,13 +16,13 @@ import (
 	fr "github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
 )
 
-const L1BatchSize = 2048
+// const L1BatchSize = 2048
 
-// const L1BatchSize = 8
+const L1BatchSize = 8
 
-const L2BatchSize = 1365
+// const L2BatchSize = 1365
 
-// const L2BatchSize = 5
+const L2BatchSize = 5
 
 const MaxLayer = 4
 
@@ -78,10 +78,11 @@ func (accountInfo *AccountInfo) Update(blockNumber uint64, balance *big.Int, db 
 	hbBytes := hb.Bytes()
 	hbHash := hb.Hash()
 	_ = hbBytes
-	StoreHistoricalBalance(hb, db)
+	StoreHistoricalBalanceByHash(hb, db)
 
 	//  This will update the current batch tree and commitments inplace.
 	accountInfo.AddLeafNode(hb.Version, hbHash)
+	// TODO: no need to store all the batch trees in db. we can store only the current batch tree.
 	StoreCurrentBatchTree(accountInfo.Account, accountInfo.CurrentBalanceInfo.Version, &accountInfo.CurrentBatchTree, db)
 	StoreCurrentBatchCommitments(accountInfo.Account, accountInfo.CurrentBalanceInfo.Version, &accountInfo.CurrentBatchTreeCommitments, db)
 
