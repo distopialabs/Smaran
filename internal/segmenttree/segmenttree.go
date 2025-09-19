@@ -36,27 +36,27 @@ type AccountInfo struct {
 	PrecomputedData *config.PrecomputedData
 }
 
-func NewAccountInfo(account common.Address, balance *big.Int, blockNumber uint64, precomputedData *config.PrecomputedData) *AccountInfo {
-	var tree BatchTree
-	for i := range MaxLayer {
-		tree[i] = make([]common.Hash, SegmentTreeSize)
-	}
+func NewAccountInfo(account common.Address, precomputedData *config.PrecomputedData) *AccountInfo {
+	// var tree BatchTree
+	// for i := range MaxLayer {
+	// 	tree[i] = make([]common.Hash, SegmentTreeSize)
+	// }
 
-	var commitments BatchCommitments
+	// var commitments BatchCommitments
 
-	cbInfo := &CurrentBalance{
-		Version:    0,
-		Balance:    balance,
-		StartBlock: blockNumber,
-	}
+	// cbInfo := &CurrentBalance{
+	// 	Version:    0,
+	// 	Balance:    balance,
+	// 	StartBlock: blockNumber,
+	// }
 
 	accountInfo := &AccountInfo{
 		Account: account,
 
-		CurrentBalanceInfo: cbInfo,
+		// CurrentBalanceInfo: cbInfo,
 
-		CurrentBatchTree:            tree,
-		CurrentBatchTreeCommitments: commitments,
+		// CurrentBatchTree:            tree,
+		// CurrentBatchTreeCommitments: commitments,
 
 		PrecomputedData: precomputedData,
 	}
@@ -68,14 +68,15 @@ func CreateOrUpdateAccountInfo(account common.Address, balance *big.Int, blockNu
 	if err != nil {
 		if err == pebble.ErrNotFound {
 			// first encounter; create a new account info
-			accountInfo := NewAccountInfo(account, balance, blockNumber, precomputedData)
-			StoreCurrentBalanceInfo(account, accountInfo.CurrentBalanceInfo, db)
-			StoreCurrentBatchTree(account, accountInfo.CurrentBalanceInfo.Version, &accountInfo.CurrentBatchTree, db)
-			StoreCurrentBatchCommitments(account, accountInfo.CurrentBalanceInfo.Version, &accountInfo.CurrentBatchTreeCommitments, db)
+			accountInfo := NewAccountInfo(account, precomputedData)
+			commitmentHash := accountInfo.FirstUpdate(blockNumber, balance, db)
+			// StoreCurrentBalanceInfo(account, accountInfo.CurrentBalanceInfo, db)
+			// StoreCurrentBatchTree(account, &accountInfo.CurrentBatchTree, db)
+			// StoreBatchCommitments(account, accountInfo.CurrentBalanceInfo.Version, &accountInfo.CurrentBatchTreeCommitments, db)
 			// final commitment
-			treeCommitHash := CommitmentToHash(accountInfo.CurrentBatchTreeCommitments[3])
-			cbHash := accountInfo.CurrentBalanceInfo.Hash()
-			commitmentHash := BytesToPoseidonHash(cbHash.Bytes(), treeCommitHash.Bytes())
+			// treeCommitHash := CommitmentToHash(accountInfo.CurrentBatchTreeCommitments[3])
+			// cbHash := accountInfo.CurrentBalanceInfo.Hash()
+			// commitmentHash := BytesToPoseidonHash(cbHash.Bytes(), treeCommitHash.Bytes())
 			_ = commitmentHash
 			// fmt.Println("block number", blockNumber, "account", account.Hex(), "commitmentHash", commitmentHash.Hex())
 
@@ -85,8 +86,8 @@ func CreateOrUpdateAccountInfo(account common.Address, balance *big.Int, blockNu
 			panic(err)
 		}
 	}
-	batchTree := GetCurrentBatchTree(account, cbInfo.Version, db)
-	batchCommitments := GetCurrentBatchCommitments(account, cbInfo.Version, db)
+	batchTree := GetCurrentBatchTree(account, db)
+	batchCommitments := GetBatchCommitments(account, cbInfo.Version, db)
 	accountInfo := &AccountInfo{
 		Account:                     account,
 		CurrentBalanceInfo:          cbInfo,

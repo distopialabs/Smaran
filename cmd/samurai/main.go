@@ -16,7 +16,7 @@ import (
 	"github.com/nepal80m/samurai/internal/crypto/kzg"
 
 	"github.com/nepal80m/samurai/internal/config"
-	"github.com/nepal80m/samurai/internal/math/segmenttree"
+	"github.com/nepal80m/samurai/internal/segmenttree"
 )
 
 func main() {
@@ -33,7 +33,7 @@ func main() {
 
 	// flags to generate proofs & verify proofs
 	queryStartBlock := flag.Int("queryStartBlock", 20, "Start block for query")
-	queryEndBlock := flag.Int("queryEndBlock", 200019, "End block for query")
+	queryEndBlock := flag.Int("queryEndBlock", 880, "End block for query")
 	queryAccount := flag.String("queryAccount", "0x0000000000000000000000000000000000000027", "Account to query")
 
 	flag.Parse()
@@ -86,7 +86,7 @@ func main() {
 		// generateCommitments(*concurrency, &config, precomputedData)
 		generateCommitmentsV2(&config, precomputedData)
 	case "proof":
-		generateProofs(common.HexToAddress(*queryAccount), *queryStartBlock, *queryEndBlock, V, weights, srs, &config)
+		generateProofs(common.HexToAddress(*queryAccount), uint64(*queryStartBlock)+config.StartingBlockNumber, uint64(*queryEndBlock)+config.StartingBlockNumber, precomputedData, &config)
 	case "verify":
 		verifyProofs(*queryStartBlock, *queryEndBlock, V, weights, srs)
 	}

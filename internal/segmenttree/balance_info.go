@@ -55,7 +55,7 @@ func (hb *HistoricalBalance) DeepCopy() *HistoricalBalance {
 	}
 }
 
-func (cb *CurrentBalance) Archive(endBlock uint64) *HistoricalBalance {
+func (cb *CurrentBalance) ToHistoricalBalance(endBlock uint64) *HistoricalBalance {
 	return &HistoricalBalance{
 		// TODO: recheck if we need to deep copy the CurrentBalance
 		// CurrentBalance: *cb.DeepCopy(),

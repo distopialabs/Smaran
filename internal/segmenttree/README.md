@@ -69,7 +69,7 @@ HistoricalBalance struct {
 	CurrentBalance
 	EndBlock uint64
 }
-key: historical_balance:<hash(rlp(historical_balance))>
+<!-- key: historical_balance:<hash(rlp(historical_balance))> -->
 key: user:<address>:historical_balance_info:<version/idx>
 value: rlp(HistoricalBalance)
 

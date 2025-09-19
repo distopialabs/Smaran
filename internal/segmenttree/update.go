@@ -1,6 +1,7 @@
 package segmenttree
 
 import (
+	"fmt"
 	"math/big"
 	"strconv"
 
@@ -28,7 +29,7 @@ const MaxLayer = 4
 
 const SegmentTreeSize = L1BatchSize * 2 //2048 * 2 = 4096
 
-func (accountInfo *AccountInfo) FirstUpdate(blockNumber uint64, balance *big.Int) common.Hash {
+func (accountInfo *AccountInfo) FirstUpdate(blockNumber uint64, balance *big.Int, db *pebble.DB) common.Hash {
 
 	// current balance
 	cb := &CurrentBalance{
@@ -37,25 +38,26 @@ func (accountInfo *AccountInfo) FirstUpdate(blockNumber uint64, balance *big.Int
 		StartBlock: blockNumber,
 	}
 	accountInfo.CurrentBalanceInfo = cb
-	// TODO: Store current balance in db
 
 	// tree
-	var latestBatchTree [MaxLayer][]common.Hash
+	var tree BatchTree
 	for i := range MaxLayer {
-		latestBatchTree[i] = make([]common.Hash, SegmentTreeSize)
+		tree[i] = make([]common.Hash, SegmentTreeSize)
 	}
-	accountInfo.CurrentBatchTree = latestBatchTree
-	// TODO: store latest batch tree in db
+	accountInfo.CurrentBatchTree = tree
 
 	// tree commitments
-	var latestBatchCommitments [MaxLayer]gnark_kzg.Digest
-	accountInfo.CurrentBatchTreeCommitments = latestBatchCommitments
-	// TODO: store latest batch commitments in db
+	var commitments BatchCommitments
+	accountInfo.CurrentBatchTreeCommitments = commitments
+
+	// save
+	accountInfo.Save(db)
 
 	// final commitment
-	treeCommitHash := CommitmentToHash(latestBatchCommitments[3])
-	cbHash := cb.Hash()
-	commitmentHash := BytesToPoseidonHash(cbHash.Bytes(), treeCommitHash.Bytes())
+	commitmentHash := accountInfo.CalculateFinalCommitment()
+	// treeCommitHash := CommitmentToHash(commitments[3])
+	// cbHash := cb.Hash()
+	// commitmentHash := BytesToPoseidonHash(cbHash.Bytes(), treeCommitHash.Bytes())
 	// TODO: store final commitment in db
 
 	return commitmentHash
@@ -63,7 +65,7 @@ func (accountInfo *AccountInfo) FirstUpdate(blockNumber uint64, balance *big.Int
 
 func (accountInfo *AccountInfo) Update(blockNumber uint64, balance *big.Int, db *pebble.DB) common.Hash {
 	prevCb := accountInfo.CurrentBalanceInfo
-	hb := prevCb.Archive(blockNumber - 1)
+	hb := prevCb.ToHistoricalBalance(blockNumber - 1)
 
 	// Update current balance
 	cb := &CurrentBalance{
@@ -72,33 +74,96 @@ func (accountInfo *AccountInfo) Update(blockNumber uint64, balance *big.Int, db 
 		StartBlock: blockNumber,
 	}
 	accountInfo.CurrentBalanceInfo = cb
-	StoreCurrentBalanceInfo(accountInfo.Account, accountInfo.CurrentBalanceInfo, db)
 
 	// Update historical balance and segment tree
-	hbBytes := hb.Bytes()
+	// hbBytes := hb.Bytes()
 	hbHash := hb.Hash()
-	_ = hbBytes
-	StoreHistoricalBalanceByHash(hb, db)
+	// StoreHistoricalBalanceByHash(hb, db)
 
 	//  This will update the current batch tree and commitments inplace.
 	accountInfo.AddLeafNode(hb.Version, hbHash)
-	// TODO: no need to store all the batch trees in db. we can store only the current batch tree.
-	StoreCurrentBatchTree(accountInfo.Account, accountInfo.CurrentBalanceInfo.Version, &accountInfo.CurrentBatchTree, db)
-	StoreCurrentBatchCommitments(accountInfo.Account, accountInfo.CurrentBalanceInfo.Version, &accountInfo.CurrentBatchTreeCommitments, db)
+
+	// Save
+	StoreHistoricalBalance(accountInfo.Account, hb, db)
+	// StoreCurrentBalanceInfo(accountInfo.Account, accountInfo.CurrentBalanceInfo, db)
+	// StoreCurrentBatchTree(accountInfo.Account, &accountInfo.CurrentBatchTree, db)
+	// StoreBatchCommitments(accountInfo.Account, accountInfo.CurrentBalanceInfo.Version, &accountInfo.CurrentBatchTreeCommitments, db)
+	accountInfo.Save(db)
+
+	// ----------TESTING CODE ----------
+
+	lxBatchIdx := func(layer uint64) uint64 {
+		if layer == 0 || layer > MaxLayer {
+			panic("layer" + strconv.Itoa(int(layer)) + " is not supported")
+		}
+		return (accountInfo.CurrentBalanceInfo.Version - 1) / (L1BatchSize * math.Pow(L2BatchSize, layer-1))
+	}
+
+	calculatedCommitment := accountInfo.CurrentBatchTreeCommitments
+	l1StoredCommitment := GetLxBatchCommitment(accountInfo.Account, 1, lxBatchIdx(1), db)
+	l2StoredCommitment := GetLxBatchCommitment(accountInfo.Account, 2, lxBatchIdx(2), db)
+	l3StoredCommitment := GetLxBatchCommitment(accountInfo.Account, 3, lxBatchIdx(3), db)
+	l4StoredCommitment := GetLxBatchCommitment(accountInfo.Account, 4, lxBatchIdx(4), db)
+	storedCommitment := GetBatchCommitments(accountInfo.Account, accountInfo.CurrentBalanceInfo.Version, db)
+
+	for i := 0; i < MaxLayer; i++ {
+		if calculatedCommitment[i] != storedCommitment[i] {
+			panic("calculated commitment does not match with the stored commitment")
+		}
+	}
+
+	if l1StoredCommitment != calculatedCommitment[0] {
+		panic("l1 calculated commitment does not match with the stored commitment")
+	}
+	if l2StoredCommitment != calculatedCommitment[1] {
+		panic("l2 calculated commitment does not match with the stored commitment")
+	}
+	if l3StoredCommitment != calculatedCommitment[2] {
+		panic("l3 calculated commitment does not match with the stored commitment")
+	}
+	if l4StoredCommitment != calculatedCommitment[3] {
+		panic("l4 calculated commitment does not match with the stored commitment")
+	}
+
+	// ----------TESTING CODE ----------
 
 	// final commitment
-	treeCommitHash := CommitmentToHash(accountInfo.CurrentBatchTreeCommitments[3])
-	cbHash := cb.Hash()
-	commitmentHash := BytesToPoseidonHash(cbHash.Bytes(), treeCommitHash.Bytes())
+	commitmentHash := accountInfo.CalculateFinalCommitment()
+	// treeCommitHash := CommitmentToHash(accountInfo.CurrentBatchTreeCommitments[3])
+	// cbHash := cb.Hash()
+	// commitmentHash := BytesToPoseidonHash(cbHash.Bytes(), treeCommitHash.Bytes())
 
 	return commitmentHash
+}
+
+func (accountInfo *AccountInfo) CalculateFinalCommitment() common.Hash {
+	treeCommitHash := CommitmentToHash(accountInfo.CurrentBatchTreeCommitments[MaxLayer-1])
+	cbHash := accountInfo.CurrentBalanceInfo.Hash()
+	commitmentHash := BytesToPoseidonHash(cbHash.Bytes(), treeCommitHash.Bytes())
+	return commitmentHash
+
+}
+
+func (accountInfo *AccountInfo) Save(db *pebble.DB) {
+	StoreCurrentBalanceInfo(accountInfo.Account, accountInfo.CurrentBalanceInfo, db)
+	StoreCurrentBatchTree(accountInfo.Account, &accountInfo.CurrentBatchTree, db)
+	StoreBatchCommitments(accountInfo.Account, accountInfo.CurrentBalanceInfo.Version, &accountInfo.CurrentBatchTreeCommitments, db)
 }
 
 // updates the current batch tree, and commitments. resets them if needed.
 func (accountInfo *AccountInfo) AddLeafNode(leafNodeIdx uint64, leafNodeHash common.Hash) {
 
 	// find which index to update for each layer
-	lxModIdx := func(layer uint64) uint64 {
+	// - : reset
+	// 1: 0,1,2,3,4 - 0,1,2,3,4 - 0,1,2,3,4 - 0,1,2,3,4 - 0,1,2,3,4 - 0,1,2,3,4
+	// 2: 0,0,0,0,0,1,1,1,1,1,2,2,2,2,2,3,3,3,3,3,4,4,4,4,4 - 0,0,0,0,0
+	// 3: 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,1,1
+	// idx0 := blockNumber % L1BatchSize
+	// idx1 := blockNumber / L1BatchSize % L2BatchSize
+	// idx2 := blockNumber / (L1BatchSize * L2BatchSize) % L2BatchSize
+	// idx3 := blockNumber / (L1BatchSize * L2BatchSize * L2BatchSize) % L2BatchSize
+
+	lxBatchNodeIdx := func(layer uint64) uint64 {
 		if layer == 0 || layer > MaxLayer {
 			panic("layer" + strconv.Itoa(int(layer)) + " is not supported")
 		}
@@ -106,9 +171,27 @@ func (accountInfo *AccountInfo) AddLeafNode(leafNodeIdx uint64, leafNodeHash com
 			return leafNodeIdx % L1BatchSize
 
 		} else {
-			return leafNodeIdx / math.Pow(L2BatchSize, layer-1) % L2BatchSize
+			return leafNodeIdx / (L1BatchSize * math.Pow(L2BatchSize, layer-2)) % L2BatchSize
 		}
 	}
+
+	lxBatchLeafNodeOffsetIdx := func(layer uint64) uint64 {
+		idx := lxBatchNodeIdx(layer)
+		if layer == 1 {
+			return L1BatchSize - 1 + idx
+		} else {
+			return L2BatchSize - 1 + idx
+		}
+	}
+	_ = lxBatchLeafNodeOffsetIdx
+
+	// 1: 0,0,0,0,0 - 1,1,1,1,1 - 2,2,2,2,2 - 3,3,3,3,3 - 4,4,4,4,4 - 0,0,0,0,0
+	// 2: 0,0,0,0,0 - 0,0,0,0,0 - 0,0,0,0,0 - 0,0,0,0,0 - 0,0,0,0,0 - 1,1,1,1,1
+	// 3: 0,0,0,0,0 - 0,0,0,0,0 - 0,0,0,0,0 - 0,0,0,0,0 - 0,0,0,0,0 - 0,0,0,0,0
+	// l1CommitIndex := blockNumber / L1BatchSize
+	// l2CommitIndex := blockNumber / (L1BatchSize * L2BatchSize)
+	// l3CommitIndex := blockNumber / (L1BatchSize * L2BatchSize * L2BatchSize)
+	// l4CommitIndex := blockNumber / (L1BatchSize * L2BatchSize * L2BatchSize * L2BatchSize)
 
 	lxBatchIdx := func(layer uint64) uint64 {
 		if layer == 0 || layer > MaxLayer {
@@ -117,56 +200,68 @@ func (accountInfo *AccountInfo) AddLeafNode(leafNodeIdx uint64, leafNodeHash com
 		return leafNodeIdx / (L1BatchSize * math.Pow(L2BatchSize, layer-1))
 	}
 
-	_ = lxModIdx
+	lxBatchSize := func(layer uint64) uint64 {
+		if layer == 0 || layer > MaxLayer {
+			panic("layer" + strconv.Itoa(int(layer)) + " is not supported")
+		}
+		if layer == 1 {
+			return L1BatchSize
+		}
+		return L2BatchSize
+	}
+
 	_ = lxBatchIdx
-
-	// idx0 := blockNumber % L1BatchSize
-	// idx1 := blockNumber / L1BatchSize % L2BatchSize
-	// idx2 := blockNumber / (L1BatchSize * L2BatchSize) % L2BatchSize
-	// idx3 := blockNumber / (L1BatchSize * L2BatchSize * L2BatchSize) % L2BatchSize
-
-	// l1CommitIndex := blockNumber / L1BatchSize
-	// l2CommitIndex := blockNumber / (L1BatchSize * L2BatchSize)
-	// l3CommitIndex := blockNumber / (L1BatchSize * L2BatchSize * L2BatchSize)
-	// l4CommitIndex := blockNumber / (L1BatchSize * L2BatchSize * L2BatchSize * L2BatchSize)
+	_ = lxBatchSize
 
 	// Resetting for new batch
+	// for layer := 1; layer <= MaxLayer; layer++ {
+	// 	if lxModIdx(uint64(layer)) == 0 {
+	// 		accountInfo.CurrentBatchTree[layer-1] = make([]common.Hash, SegmentTreeSize)
+	// 		accountInfo.CurrentBatchTreeCommitments[layer-1] = gnark_kzg.Digest{}
+	// 		if layer == 4 {
+
+	// 			fmt.Println("resetting layer", layer, "commitment", accountInfo.CurrentBatchTreeCommitments[layer-1])
+	// 		}
+	// 	}
+	// }
+
 	for layer := 1; layer <= MaxLayer; layer++ {
-		if lxModIdx(uint64(layer)) == 0 {
+		if (leafNodeIdx % (L1BatchSize * math.Pow(L2BatchSize, uint64(layer)-1))) == 0 {
 			accountInfo.CurrentBatchTree[layer-1] = make([]common.Hash, SegmentTreeSize)
 			accountInfo.CurrentBatchTreeCommitments[layer-1] = gnark_kzg.Digest{}
+			if layer == 3 {
+				fmt.Println("resetting layer", layer, "commitment", accountInfo.CurrentBatchTreeCommitments[layer-1])
+			}
 		}
 	}
-	// TODO: uncomment this and replace the below code with this.
+	// TODO: uncomment this and replace the below code with this. add if else conditionfor layer 1 and others.
 	// lXm1CommitHash := common.Hash{}
 	// lXm1RootHash := leafNodeHash
 	// for layer := uint64(1); layer <= MaxLayer; layer++ {
-	// 	lxCommit := accountInfo.UpdateLXTree(L1BatchSize-1+lxModIdx(layer), lXm1RootHash, lXm1CommitHash, layer)
+	// 	lxCommit := accountInfo.UpdateLXTree(lxBatchSize(layer)-1+lxModIdx(layer), lXm1RootHash, lXm1CommitHash, layer)
 	// 	lxCommitHash := CommitmentToHash(lxCommit)
-	// 	lxRootHash := accountInfo.CurrentBatchTree[layer][0]
+	// 	lxRootHash := accountInfo.CurrentBatchTree[layer-1][0]
 	// 	lXm1CommitHash = lxCommitHash
 	// 	lXm1RootHash = lxRootHash
 	// }
 
 	// updating layer 1 tree of current batch and calculate its commitment
-	l1Commit := accountInfo.UpdateLXTree(L1BatchSize-1+lxModIdx(1), leafNodeHash, common.Hash{}, 1)
+	l1Commit := accountInfo.UpdateLXTree(lxBatchLeafNodeOffsetIdx(1), leafNodeHash, common.Hash{}, 1)
 	l1CommitHash := CommitmentToHash(l1Commit)
 	l1RootHash := accountInfo.CurrentBatchTree[0][0]
 
 	// updating layer 2
-
-	l2Commit := accountInfo.UpdateLXTree(L2BatchSize-1+lxModIdx(2), l1RootHash, l1CommitHash, 2)
+	l2Commit := accountInfo.UpdateLXTree(lxBatchLeafNodeOffsetIdx(2), l1RootHash, l1CommitHash, 2)
 	l2CommitHash := CommitmentToHash(l2Commit)
 	l2RootHash := accountInfo.CurrentBatchTree[1][0]
 
 	// updating layer 3
-
-	l3Commit := accountInfo.UpdateLXTree(L2BatchSize-1+lxModIdx(3), l2RootHash, l2CommitHash, 3)
+	l3Commit := accountInfo.UpdateLXTree(lxBatchLeafNodeOffsetIdx(3), l2RootHash, l2CommitHash, 3)
 	l3CommitHash := CommitmentToHash(l3Commit)
 	l3RootHash := accountInfo.CurrentBatchTree[2][0]
 
 	// updating layer 4
-	l4Commit := accountInfo.UpdateLXTree(L2BatchSize-1+lxModIdx(4), l3RootHash, l3CommitHash, 4)
+	l4Commit := accountInfo.UpdateLXTree(lxBatchLeafNodeOffsetIdx(4), l3RootHash, l3CommitHash, 4)
 	l4CommitHash := CommitmentToHash(l4Commit)
 	l4RootHash := accountInfo.CurrentBatchTree[3][0]
 	_ = l4CommitHash

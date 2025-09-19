@@ -12,7 +12,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/nepal80m/samurai/internal/crypto/kzg"
 	"github.com/nepal80m/samurai/internal/math/polynomial"
-	"github.com/nepal80m/samurai/internal/math/segmenttree"
+	"github.com/nepal80m/samurai/internal/segmenttree"
 )
 
 type ProofSegmentTree struct {
