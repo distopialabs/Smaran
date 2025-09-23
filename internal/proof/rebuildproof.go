@@ -13,7 +13,10 @@ import (
 	"github.com/nepal80m/samurai/internal/segmenttree"
 )
 
-func RebuildSegmentTreeForProof(account common.Address, lxRequiredBatchIdxs map[uint64][]uint64, db *pebble.DB, precomputedData *config.PrecomputedData) map[string][]common.Hash {
+// rebuilds the whole segment tree
+// uses stored commitments to fill the commitHash part of the batch trees
+// in this process, stores only the involved batch trees and returns them
+func RebuildSegmentTreeForProof(account common.Address, lxRequiredBatchIdxs map[uint64][]uint64, startingVersion uint64, endingVersion uint64, db *pebble.DB, precomputedData *config.PrecomputedData) (map[string][]common.Hash, []*segmenttree.HistoricalBalance) {
 
 	cbInfo, err := segmenttree.GetCurrentBalanceInfo(account, db)
 	if err != nil {
@@ -34,11 +37,17 @@ func RebuildSegmentTreeForProof(account common.Address, lxRequiredBatchIdxs map[
 	// add all historical balance info as leaf nodes
 
 	requiredTreeBatchesMap := make(map[string][]common.Hash)
+	requiredHBInfos := make([]*segmenttree.HistoricalBalance, 0)
 
 	for version := uint64(0); version < cbInfo.Version; version++ {
 		hbInfo := segmenttree.GetHistoricalBalance(account, version, db)
 
-		AddLeafNode(accountInfo, hbInfo.Version, hbInfo.Hash(), lxRequiredBatchIdxs)
+		AddLeafNode(accountInfo, hbInfo.Version, hbInfo.Hash())
+
+		// check if this historical balance info is required
+		if hbInfo.Version >= startingVersion && hbInfo.Version <= endingVersion {
+			requiredHBInfos = append(requiredHBInfos, hbInfo)
+		}
 
 		// check if this batch is required, fill in the commitment hashes and add to the requiredTreeBatchesMap
 
@@ -51,16 +60,12 @@ func RebuildSegmentTreeForProof(account common.Address, lxRequiredBatchIdxs map[
 		for layer := uint64(1); layer <= MaxLayer; layer++ {
 			if slices.Contains(lxRequiredBatchIdxs[layer], lxBatchIdx(layer)) {
 				treeBatch := accountInfo.CurrentBatchTree[layer-1]
-				// if layer > 1 {
-				// 	fmt.Println("inserting commitment hashes for layer", layer, "batchIdx", lxBatchIdx(layer))
-				// 	InsertCommitmentHashes(layer, lxBatchIdx(layer), treeBatch, account, cbInfo.Version, db)
-				// }
 				key := fmt.Sprintf("%d:%d", layer, lxBatchIdx(layer))
 				requiredTreeBatchesMap[key] = treeBatch
 			}
 		}
 	}
-
+	// fill in the commitHash part of the batch trees with stored commitments
 	for layer := uint64(2); layer <= MaxLayer; layer++ {
 		for _, batchIdx := range lxRequiredBatchIdxs[layer] {
 			key := fmt.Sprintf("%d:%d", layer, batchIdx)
@@ -69,10 +74,10 @@ func RebuildSegmentTreeForProof(account common.Address, lxRequiredBatchIdxs map[
 			InsertCommitmentHashes(layer, batchIdx, treeBatch, account, cbInfo.Version, db)
 		}
 	}
-	return requiredTreeBatchesMap
+	return requiredTreeBatchesMap, requiredHBInfos
 }
 
-func AddLeafNode(accountInfo *segmenttree.AccountInfo, leafNodeIdx uint64, leafNodeHash common.Hash, lxRequiredBatchIdxs map[uint64][]uint64) {
+func AddLeafNode(accountInfo *segmenttree.AccountInfo, leafNodeIdx uint64, leafNodeHash common.Hash) {
 
 	// find which index to update for each layer
 	lxBatchNodeIdx := func(layer uint64) uint64 {

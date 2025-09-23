@@ -1,7 +1,6 @@
 package segmenttree
 
 import (
-	"fmt"
 	"math/big"
 	"strconv"
 
@@ -214,24 +213,10 @@ func (accountInfo *AccountInfo) AddLeafNode(leafNodeIdx uint64, leafNodeHash com
 	_ = lxBatchSize
 
 	// Resetting for new batch
-	// for layer := 1; layer <= MaxLayer; layer++ {
-	// 	if lxModIdx(uint64(layer)) == 0 {
-	// 		accountInfo.CurrentBatchTree[layer-1] = make([]common.Hash, SegmentTreeSize)
-	// 		accountInfo.CurrentBatchTreeCommitments[layer-1] = gnark_kzg.Digest{}
-	// 		if layer == 4 {
-
-	// 			fmt.Println("resetting layer", layer, "commitment", accountInfo.CurrentBatchTreeCommitments[layer-1])
-	// 		}
-	// 	}
-	// }
-
 	for layer := 1; layer <= MaxLayer; layer++ {
 		if (leafNodeIdx % (L1BatchSize * math.Pow(L2BatchSize, uint64(layer)-1))) == 0 {
 			accountInfo.CurrentBatchTree[layer-1] = make([]common.Hash, SegmentTreeSize)
 			accountInfo.CurrentBatchTreeCommitments[layer-1] = gnark_kzg.Digest{}
-			if layer == 3 {
-				fmt.Println("resetting layer", layer, "commitment", accountInfo.CurrentBatchTreeCommitments[layer-1])
-			}
 		}
 	}
 	// TODO: uncomment this and replace the below code with this. add if else conditionfor layer 1 and others.
