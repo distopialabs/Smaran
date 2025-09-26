@@ -25,6 +25,7 @@ func RebuildSegmentTreeForProof(account common.Address, lxRequiredBatchIdxs map[
 	accountInfo := segmenttree.NewAccountInfo(account, precomputedData)
 
 	// # current balance info
+	// TODO: do we need this value?
 	accountInfo.CurrentBalanceInfo = cbInfo
 
 	// # batch tree data
@@ -49,8 +50,7 @@ func RebuildSegmentTreeForProof(account common.Address, lxRequiredBatchIdxs map[
 			requiredHBInfos = append(requiredHBInfos, hbInfo)
 		}
 
-		// check if this batch is required, fill in the commitment hashes and add to the requiredTreeBatchesMap
-
+		// check if this batch is required; if yes, add to the requiredTreeBatchesMap
 		lxBatchIdx := func(layer uint64) uint64 {
 			if layer == 0 || layer > MaxLayer {
 				panic("layer" + strconv.Itoa(int(layer)) + " is not supported")
@@ -65,6 +65,7 @@ func RebuildSegmentTreeForProof(account common.Address, lxRequiredBatchIdxs map[
 			}
 		}
 	}
+
 	// fill in the commitHash part of the batch trees with stored commitments
 	for layer := uint64(2); layer <= MaxLayer; layer++ {
 		for _, batchIdx := range lxRequiredBatchIdxs[layer] {

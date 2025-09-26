@@ -15,6 +15,7 @@ import (
 	fr "github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
 	gnark_kzg "github.com/consensys/gnark-crypto/ecc/bls12-381/kzg"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/nepal80m/samurai/internal/config"
 	"github.com/nepal80m/samurai/internal/crypto/kzg"
 	"github.com/nepal80m/samurai/internal/math/polynomial"
 	"github.com/nepal80m/samurai/internal/segmenttree"
@@ -49,6 +50,141 @@ func NewRebuiltLayeredSegmentTree() *RebuiltLayeredSegmentTree {
 			L3Tree: make(map[int][]common.Hash),
 			L4Tree: make(map[int][]common.Hash),
 		},
+	}
+}
+
+func VerifyNewRangeProofs(account common.Address, startingVersion, endingVersion uint64, rangeProofs []*RangeProof, balanceInfos []*segmenttree.HistoricalBalance, precomputedData *config.PrecomputedData) {
+	fmt.Println("\n\nVerifying range proofs...")
+
+	proofHashMap := make(map[string]*RangeProof, len(rangeProofs))
+	for _, proof := range rangeProofs {
+		key := fmt.Sprintf("%d:%d", proof.layer, proof.idx)
+		proofHashMap[key] = proof
+	}
+
+	reqCommits := findCommitmentsCoveringRange(int(startingVersion), int(endingVersion))
+
+	lxRequiredBatchIdxs := make(map[uint64][]uint64)
+	for i := uint64(1); i <= segmenttree.MaxLayer; i++ {
+		lxRequiredBatchIdxs[i] = make([]uint64, 0)
+	}
+	for _, reqCommit := range reqCommits {
+		lxRequiredBatchIdxs[uint64(reqCommit.layer)] = append(lxRequiredBatchIdxs[uint64(reqCommit.layer)], uint64(reqCommit.idx))
+	}
+
+	// TODO: Rebuild partial tree
+	requiredTreeBatchesMap := RebuildSegmentTreeForVerify(account, lxRequiredBatchIdxs, startingVersion, endingVersion, balanceInfos, proofHashMap, reqCommits, precomputedData)
+
+	slices.SortFunc(reqCommits, func(a, b RangeCommitment) int {
+		if a.layer != b.layer {
+			return a.layer - b.layer
+		}
+		return a.idx - b.idx
+	})
+	isVerified := make(map[string]bool, len(rangeProofs))
+
+	// loop from last item to first item
+	for i := len(reqCommits) - 1; i >= 0; i-- {
+		reqCommit := reqCommits[i]
+
+		reqCommitKey := fmt.Sprintf("%d:%d", reqCommit.layer, reqCommit.idx)
+
+		if proofHashMap[reqCommitKey] == nil {
+			panic("This required commitment was not found in provided proofs.")
+		}
+
+		if reqCommit.layer != segmenttree.MaxLayer && !isVerified[reqCommitKey] {
+			panic("This commitment is not verified.")
+		}
+
+		nodesToInterpolate := findNodesToInterpolate(reqCommit, true)
+		rangeProof := proofHashMap[reqCommitKey]
+
+		fmt.Printf("\n\nlayer: %d, idx: %d, \n", reqCommit.layer, reqCommit.idx)
+		if reqCommit.BlockRange == nil {
+			fmt.Printf("Commitment is not covering any range.\n")
+		} else {
+			fmt.Printf("sb: %d, eb: %d\n", reqCommit.BlockRange.Start, reqCommit.BlockRange.End)
+		}
+		fmt.Printf("dependentCommitments: %v\n", reqCommit.dependentCommitments)
+		fmt.Printf("nodesToInterpolate: %v\n", nodesToInterpolate)
+		for i, nodeIdx := range nodesToInterpolate {
+			key := fmt.Sprintf("%d:%d", reqCommit.layer, reqCommit.idx)
+			fmt.Printf("ys[%d]: %v\n", i, requiredTreeBatchesMap[key][nodeIdx])
+		}
+		Commitment := rangeProof.Commitment
+
+		pCommitBytes := Commitment.Bytes()
+		pCommitHash := common.BytesToHash(pCommitBytes[:])
+		fmt.Printf("pCommitmentHash: %s\n", pCommitHash)
+
+		// TODO: reconstruct tree using given balance values
+		// tree := lxTrees[reqCommit.layer][reqCommit.idx]
+
+		Z := polynomial.VanishingPolynomial(nodesToInterpolate)
+		// ZCommit, err := gnark_kzg.Commit(Z, srs.Inner.Pk)
+		ZCommit, _ := kzg.CommitG2(Z, precomputedData.SRS.G2Powers)
+
+		zCommitBytes := ZCommit.Bytes()
+		zCommitHash := common.BytesToHash(zCommitBytes[:])
+		fmt.Printf("zCommitmentHash: %s\n", zCommitHash)
+
+		// _ = ZCommit
+		// if err != nil {
+		// 	panic(err)
+		// }
+
+		xs := make([]fr.Element, len(nodesToInterpolate))
+		ys := make([]fr.Element, len(nodesToInterpolate))
+		for i, nodeIdx := range nodesToInterpolate {
+			xs[i] = fr.NewElement(uint64(nodeIdx))
+			key := fmt.Sprintf("%d:%d", reqCommit.layer, reqCommit.idx)
+			ys[i] = polynomial.HashToFieldElement(requiredTreeBatchesMap[key][nodeIdx])
+		}
+
+		// I := polynomial.Interpolate(nodesToInterpolate, ys, V, weights)
+		I := kzg.Interpolate(xs, ys)
+		ICommit, err := gnark_kzg.Commit(I, precomputedData.SRS.Inner.Pk)
+		if err != nil {
+			panic(err)
+		}
+
+		iCommitBytes := ICommit.Bytes()
+		iCommitHash := common.BytesToHash(iCommitBytes[:])
+		fmt.Printf("iCommitmentHash: %s\n", iCommitHash)
+
+		QCommit := rangeProof.Proof
+		qCommitBytes := QCommit.Bytes()
+		qCommitHash := common.BytesToHash(qCommitBytes[:])
+		fmt.Printf("qCommitmentHash: %s\n", qCommitHash)
+
+		// fmt.Printf("Commitment: %v\n", Commitment)
+		// fmt.Printf("Proof: %v\n", QCommit)
+		// fmt.Printf("ys: %v\n", ys)
+
+		// fmt.Printf("I: %v\n", I)
+		// fmt.Printf("Z: %v\n", Z)
+
+		// TODO: Pairing check using G1 elements only
+		_, err = PairingCheck(Commitment, QCommit, ICommit, ZCommit, precomputedData.SRS)
+		if err != nil {
+			panic(err)
+			// fmt.Printf("pairing check failed: invalid proof\n")
+			// panic("pairing check failed: invalid proof")
+		} else {
+			fmt.Println("pairing check passed✅")
+			for _, depCommitIdx := range reqCommit.dependentCommitments {
+				depCommitKey := fmt.Sprintf("%d:%d", reqCommit.layer-1, depCommitIdx)
+				isVerified[depCommitKey] = true
+			}
+		}
+
+		// nodesToInterpolate := findNodesToInterpolate(rangeProof)
+
+		// balance := big.NewInt(1000000000000000000)
+
+		// Z := polynomial.VanishingPolynomial(nodesToInterpolate)
+
 	}
 }
 

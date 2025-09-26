@@ -36,6 +36,7 @@ func generateProofs(addr common.Address, queryStartBlock uint64, queryEndBlock u
 	fmt.Println("Time taken to generate range proofs", time.Since(start))
 	// start = time.Now()
 	// proof.VerifyRangeProofs(queryStartBlock, queryEndBlock, rangeProofs, balances, V, weights, srs)
+	proof.VerifyNewRangeProofs(addr, startingVersion, endingVersion, rangeProofs, balanceInfos, precomputedData)
 	// fmt.Println("Time taken to verify range proofs", time.Since(start))
 
 	// dump proof and balances to file
