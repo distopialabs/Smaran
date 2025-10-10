@@ -11,7 +11,6 @@ import (
 )
 
 func generateProofs(addr common.Address, queryStartBlock uint64, queryEndBlock uint64, precomputedData *config.PrecomputedData, config *config.Config) {
-	// 0x0000000000000000000000000000000000000027
 
 	DB_DIR := "samurai.db"
 
@@ -21,23 +20,23 @@ func generateProofs(addr common.Address, queryStartBlock uint64, queryEndBlock u
 		panic(err)
 	}
 	defer db.Close()
-	start := time.Now()
 	fmt.Println("Generating range proofs for account", addr.Hex())
 	// convert query range in block numbers terms to version number terms
 	fmt.Println("Query start block", queryStartBlock, "Query end block", queryEndBlock)
 	startingVersion, endingVersion := proof.BlockRangeToVersionRange(addr, queryStartBlock, queryEndBlock, config, db)
-
 	fmt.Println("Starting version", startingVersion, "Ending version", endingVersion)
+
+	start := time.Now()
 	rangeProofs, balanceInfos := proof.GetNewProofRange(addr, startingVersion, endingVersion, precomputedData, config.StartingBlockNumber, db)
+	fmt.Println("Time taken to generate range proofs", time.Since(start))
 
 	// rangeProofs, balances := proof.GetRangeProofs(addr, int(startingVersion), int(endingVersion), precomputedData.V, precomputedData.Weights, precomputedData.SRS, config.StartingBlockNumber)
 	// _ = rangeProofs
 	// _ = balances
-	fmt.Println("Time taken to generate range proofs", time.Since(start))
-	// start = time.Now()
+	start = time.Now()
 	// proof.VerifyRangeProofs(queryStartBlock, queryEndBlock, rangeProofs, balances, V, weights, srs)
 	proof.VerifyNewRangeProofs(addr, startingVersion, endingVersion, rangeProofs, balanceInfos, precomputedData)
-	// fmt.Println("Time taken to verify range proofs", time.Since(start))
+	fmt.Println("Time taken to verify range proofs", time.Since(start))
 
 	// dump proof and balances to file
 	proof.DumpNewProofsAndBalances(rangeProofs, balanceInfos)

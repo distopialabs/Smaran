@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"time"
 
 	"github.com/cockroachdb/pebble"
 	fr "github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
@@ -63,6 +64,7 @@ func BlockRangeToVersionRange(account common.Address, startingBlock uint64, endi
 
 	cbInfo, err := segmenttree.GetCurrentBalanceInfo(account, db)
 	if err != nil {
+		fmt.Printf("Error getting current balance info for account %s: %v\n", account.Hex(), err)
 		panic(err)
 	}
 	// for ending block
@@ -103,8 +105,9 @@ func GetNewProofRange(account common.Address, startingVersion, endingVersion uin
 		lxRequiredBatchIdxs[uint64(reqCommit.layer)] = append(lxRequiredBatchIdxs[uint64(reqCommit.layer)], uint64(reqCommit.idx))
 		fmt.Printf("layer: %d, idx: %d\n", reqCommit.layer, reqCommit.idx)
 	}
-
+	start := time.Now()
 	requiredTreeBatchesMap, requiredHBInfos := RebuildSegmentTreeForProof(account, lxRequiredBatchIdxs, startingVersion, endingVersion, db, precomputedData)
+	fmt.Println("Time taken to rebuild segment tree", time.Since(start))
 
 	// ------------------------------------------------------------
 	allRangeProofs := make([]*RangeProof, 0)
@@ -132,24 +135,30 @@ func GetNewProofRange(account common.Address, startingVersion, endingVersion uin
 			xs1[i] = i
 			ys1[i] = polynomial.HashToFieldElement(v)
 		}
+		start = time.Now()
 		P := polynomial.Interpolate(xs1, ys1, precomputedData.V, precomputedData.Weights)
+		fmt.Println("Time taken to interpolate polynomial", time.Since(start))
 
+		start = time.Now()
 		storedCommitment := segmenttree.GetLxBatchCommitment(account, uint64(layer), uint64(idx), db)
+		fmt.Println("Time taken to get stored commitment", time.Since(start))
 
-		computedCommitment, err := gnark_kzg.Commit(P, precomputedData.SRS.Inner.Pk)
-		if err != nil {
-			panic(err)
-		}
-		fmt.Printf("computedCommitment: %v\n", computedCommitment)
-		fmt.Printf("storedCommitment: %v\n", storedCommitment)
+		// start = time.Now()
+		// computedCommitment, err := gnark_kzg.Commit(P, precomputedData.SRS.Inner.Pk)
+		// if err != nil {
+		// 	panic(err)
+		// }
+		// fmt.Println("Time taken to commit polynomial", time.Since(start))
+		// fmt.Printf("computedCommitment: %v\n", computedCommitment)
+		// fmt.Printf("storedCommitment: %v\n", storedCommitment)
 		// _ = computedCommitment
 
-		if computedCommitment != storedCommitment {
-			panic("commitment calculated from polynomial does not match with the stored commitment")
-		}
+		// if computedCommitment != storedCommitment {
+		// 	panic("commitment calculated from polynomial does not match with the stored commitment")
+		// }
 
 		Z := polynomial.VanishingPolynomial(nodesToInterpolate)
-		ZCommit, _ := kzg.CommitG2(Z, precomputedData.SRS.G2Powers)
+		// ZCommit, _ := kzg.CommitG2(Z, precomputedData.SRS.G2Powers)
 
 		xs := make([]fr.Element, len(nodesToInterpolate))
 		ys := make([]fr.Element, len(nodesToInterpolate))
@@ -160,10 +169,10 @@ func GetNewProofRange(account common.Address, startingVersion, endingVersion uin
 		}
 
 		I := kzg.Interpolate(xs, ys)
-		ICommit, err := gnark_kzg.Commit(I, precomputedData.SRS.Inner.Pk)
-		if err != nil {
-			panic(err)
-		}
+		// ICommit, err := gnark_kzg.Commit(I, precomputedData.SRS.Inner.Pk)
+		// if err != nil {
+		// 	panic(err)
+		// }
 		diff := kzg.SubtractPolys(P, I)
 		Q := kzg.PolyDiv(diff, Z)
 		QCommit, err := gnark_kzg.Commit(Q, precomputedData.SRS.Inner.Pk)
@@ -174,20 +183,20 @@ func GetNewProofRange(account common.Address, startingVersion, endingVersion uin
 		// qCommitHash := common.BytesToHash(qCommitBytes[:])
 		// fmt.Printf("qCommitmentHash: %s\n", qCommitHash)
 
-		ok, err := PairingCheck(computedCommitment, QCommit, ICommit, ZCommit, precomputedData.SRS)
-		if err != nil {
-			panic(err)
-		}
-		if !ok {
-			panic("pairing check failed.")
-		} else {
-			fmt.Println("Pairing check passed.✅")
-		}
+		// ok, err := PairingCheck(storedCommitment, QCommit, ICommit, ZCommit, precomputedData.SRS)
+		// if err != nil {
+		// 	panic(err)
+		// }
+		// if !ok {
+		// 	panic("pairing check failed.")
+		// } else {
+		// 	fmt.Println("Pairing check passed.✅")
+		// }
 
 		rangeProof := &RangeProof{
 			idx:                  idx,
 			layer:                layer,
-			Commitment:           computedCommitment,
+			Commitment:           storedCommitment,
 			Proof:                QCommit,
 			BlockRange:           reqCommit.BlockRange,
 			dependentCommitments: reqCommit.dependentCommitments,

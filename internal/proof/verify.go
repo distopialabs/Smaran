@@ -73,7 +73,9 @@ func VerifyNewRangeProofs(account common.Address, startingVersion, endingVersion
 	}
 
 	// TODO: Rebuild partial tree
+	start := time.Now()
 	requiredTreeBatchesMap := RebuildSegmentTreeForVerify(account, lxRequiredBatchIdxs, startingVersion, endingVersion, balanceInfos, proofHashMap, reqCommits, precomputedData)
+	fmt.Println("Time taken to rebuild segment tree", time.Since(start))
 
 	slices.SortFunc(reqCommits, func(a, b RangeCommitment) int {
 		if a.layer != b.layer {

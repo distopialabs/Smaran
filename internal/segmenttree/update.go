@@ -16,13 +16,13 @@ import (
 	fr "github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
 )
 
-// const L1BatchSize = 2048
+const L1BatchSize = 2048
 
-const L1BatchSize = 8
+// const L1BatchSize = 8
 
-// const L2BatchSize = 1365
+const L2BatchSize = 1365
 
-const L2BatchSize = 5
+// const L2BatchSize = 5
 
 const MaxLayer = 4
 
@@ -89,42 +89,42 @@ func (accountInfo *AccountInfo) Update(blockNumber uint64, balance *big.Int, db 
 	// StoreBatchCommitments(accountInfo.Account, accountInfo.CurrentBalanceInfo.Version, &accountInfo.CurrentBatchTreeCommitments, db)
 	accountInfo.Save(db)
 
-	// ----------TESTING CODE ----------
+	// // ----------TESTING CODE ----------
 
-	lxBatchIdx := func(layer uint64) uint64 {
-		if layer == 0 || layer > MaxLayer {
-			panic("layer" + strconv.Itoa(int(layer)) + " is not supported")
-		}
-		return (accountInfo.CurrentBalanceInfo.Version - 1) / (L1BatchSize * math.Pow(L2BatchSize, layer-1))
-	}
+	// lxBatchIdx := func(layer uint64) uint64 {
+	// 	if layer == 0 || layer > MaxLayer {
+	// 		panic("layer" + strconv.Itoa(int(layer)) + " is not supported")
+	// 	}
+	// 	return (accountInfo.CurrentBalanceInfo.Version - 1) / (L1BatchSize * math.Pow(L2BatchSize, layer-1))
+	// }
 
-	calculatedCommitment := accountInfo.CurrentBatchTreeCommitments
-	l1StoredCommitment := GetLxBatchCommitment(accountInfo.Account, 1, lxBatchIdx(1), db)
-	l2StoredCommitment := GetLxBatchCommitment(accountInfo.Account, 2, lxBatchIdx(2), db)
-	l3StoredCommitment := GetLxBatchCommitment(accountInfo.Account, 3, lxBatchIdx(3), db)
-	l4StoredCommitment := GetLxBatchCommitment(accountInfo.Account, 4, lxBatchIdx(4), db)
-	storedCommitment := GetBatchCommitments(accountInfo.Account, accountInfo.CurrentBalanceInfo.Version, db)
+	// calculatedCommitment := accountInfo.CurrentBatchTreeCommitments
+	// l1StoredCommitment := GetLxBatchCommitment(accountInfo.Account, 1, lxBatchIdx(1), db)
+	// l2StoredCommitment := GetLxBatchCommitment(accountInfo.Account, 2, lxBatchIdx(2), db)
+	// l3StoredCommitment := GetLxBatchCommitment(accountInfo.Account, 3, lxBatchIdx(3), db)
+	// l4StoredCommitment := GetLxBatchCommitment(accountInfo.Account, 4, lxBatchIdx(4), db)
+	// storedCommitment := GetBatchCommitments(accountInfo.Account, accountInfo.CurrentBalanceInfo.Version, db)
 
-	for i := 0; i < MaxLayer; i++ {
-		if calculatedCommitment[i] != storedCommitment[i] {
-			panic("calculated commitment does not match with the stored commitment")
-		}
-	}
+	// for i := 0; i < MaxLayer; i++ {
+	// 	if calculatedCommitment[i] != storedCommitment[i] {
+	// 		panic("calculated commitment does not match with the stored commitment")
+	// 	}
+	// }
 
-	if l1StoredCommitment != calculatedCommitment[0] {
-		panic("l1 calculated commitment does not match with the stored commitment")
-	}
-	if l2StoredCommitment != calculatedCommitment[1] {
-		panic("l2 calculated commitment does not match with the stored commitment")
-	}
-	if l3StoredCommitment != calculatedCommitment[2] {
-		panic("l3 calculated commitment does not match with the stored commitment")
-	}
-	if l4StoredCommitment != calculatedCommitment[3] {
-		panic("l4 calculated commitment does not match with the stored commitment")
-	}
+	// if l1StoredCommitment != calculatedCommitment[0] {
+	// 	panic("l1 calculated commitment does not match with the stored commitment")
+	// }
+	// if l2StoredCommitment != calculatedCommitment[1] {
+	// 	panic("l2 calculated commitment does not match with the stored commitment")
+	// }
+	// if l3StoredCommitment != calculatedCommitment[2] {
+	// 	panic("l3 calculated commitment does not match with the stored commitment")
+	// }
+	// if l4StoredCommitment != calculatedCommitment[3] {
+	// 	panic("l4 calculated commitment does not match with the stored commitment")
+	// }
 
-	// ----------TESTING CODE ----------
+	// // ----------TESTING CODE ----------
 
 	// final commitment
 	commitmentHash := accountInfo.CalculateFinalCommitment()

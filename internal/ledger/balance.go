@@ -11,6 +11,9 @@ import (
 )
 
 func BatchMultiUserBalance(addrs []common.Address, blockNum uint64, config *config.Config) ([]*big.Int, error) {
+	if len(addrs) == 0 {
+		return make([]*big.Int, 0), nil
+	}
 	client := config.Client
 
 	elems := make([]rpc.BatchElem, len(addrs))
@@ -22,7 +25,6 @@ func BatchMultiUserBalance(addrs []common.Address, blockNum uint64, config *conf
 			Result: &bal,
 		}
 	}
-
 	if err := client.BatchCallContext(context.Background(), elems); err != nil {
 		return nil, err
 	}
