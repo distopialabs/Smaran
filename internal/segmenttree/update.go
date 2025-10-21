@@ -16,17 +16,6 @@ import (
 	fr "github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
 )
 
-const L1BatchSize = 2048
-
-// const L1BatchSize = 8
-
-const L2BatchSize = 1365
-
-// const L2BatchSize = 5
-
-const MaxLayer = 4
-
-const SegmentTreeSize = L1BatchSize * 2 //2048 * 2 = 4096
 
 func (accountInfo *AccountInfo) FirstUpdate(blockNumber uint64, balance *big.Int, db *pebble.DB) common.Hash {
 

@@ -34,6 +34,9 @@ func generateCommitmentsV2(config *config.Config, precomputedData *config.Precom
 	}
 	defer db.Close()
 
+	cache := segmenttree.NewCache(db, 1000, 100, 100, 10*time.Second)
+	defer cache.Close()
+
 	workers := runtime.NumCPU()
 	total_start := time.Now()
 	type blockInfo struct {

@@ -13,6 +13,18 @@ import (
 	"github.com/nepal80m/samurai/internal/math/polynomial"
 )
 
+const L1BatchSize = 2048
+
+// const L1BatchSize = 8
+
+const L2BatchSize = 1365
+
+// const L2BatchSize = 5
+
+const MaxLayer = 4
+
+const SegmentTreeSize = L1BatchSize * 2 //2048 * 2 = 4096
+
 type CachedData struct {
 	V             polynomial.Polynomial
 	Weights       []fr.Element
@@ -20,13 +32,13 @@ type CachedData struct {
 	SRS           *kzg.MultiSRS
 }
 
-type BatchTree [MaxLayer][]common.Hash
+type BatchTree [MaxLayer][SegmentTreeSize]common.Hash
 type BatchCommitments [MaxLayer]gnark_kzg.Digest
 
 type AccountInfo struct {
 	Account            common.Address
 	CurrentBalanceInfo *CurrentBalance
-	CurrentBatchTree   BatchTree `rlp:"-"`
+	CurrentBatchTree   BatchTree
 	// LXPolynomial   [MaxLayer]polynomial.Polynomial
 	CurrentBatchTreeCommitments BatchCommitments
 
@@ -63,8 +75,42 @@ func NewAccountInfo(account common.Address, precomputedData *config.PrecomputedD
 	return accountInfo
 }
 
-func CreateOrUpdateAccountInfo(account common.Address, balance *big.Int, blockNumber uint64, db *pebble.DB, precomputedData *config.PrecomputedData) *AccountInfo {
-	cbInfo, err := GetCurrentBalanceInfo(account, db)
+func (accountInfo *AccountInfo) DeepCopy() *AccountInfo {
+	var currentBatchTree BatchTree
+	for i := range MaxLayer {
+		currentBatchTree[i] = make([]common.Hash, SegmentTreeSize)
+		copy(currentBatchTree[i], accountInfo.CurrentBatchTree[i])
+	}
+	var currentBatchTreeCommitments BatchCommitments
+	for i := range MaxLayer {
+		currentBatchTreeCommitments[i] = accountInfo.CurrentBatchTreeCommitments[i]
+	}
+	accountInfoCopy := &AccountInfo{
+		Account:                     accountInfo.Account,
+		CurrentBalanceInfo:          accountInfo.CurrentBalanceInfo.DeepCopy(),
+		CurrentBatchTree:            currentBatchTree,
+		CurrentBatchTreeCommitments: currentBatchTreeCommitments,
+		PrecomputedData:             accountInfo.PrecomputedData,
+	}
+	return accountInfoCopy
+}
+
+func CreateOrUpdateAccountInfo(account common.Address, balance *big.Int, blockNumber uint64, precomputedData *config.PrecomputedData, cache *Cache) *AccountInfo {
+
+	accountInfo, err := cache.Get(account)
+	if err != nil {
+		if err != pebble.ErrNotFound {
+			panic(err)
+		}
+		// first encounter; create a new account info
+		accountInfo := NewAccountInfo(account, precomputedData)
+		commitmentHash := accountInfo.FirstUpdate(blockNumber, balance, db)
+
+		_ = commitmentHash
+		return accountInfo
+	}
+
+	// cbInfo, err := GetCurrentBalanceInfo(account, db)
 	if err != nil {
 		if err == pebble.ErrNotFound {
 			// first encounter; create a new account info

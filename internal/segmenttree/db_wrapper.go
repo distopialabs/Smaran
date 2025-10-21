@@ -33,12 +33,12 @@ func GetCurrentBalanceInfo(account common.Address, db *pebble.DB) (*CurrentBalan
 	key := GenerateCurrentBalanceInfoKey(account)
 	val, closer, err := db.Get([]byte(key))
 	if err != nil {
-		// if err == pebble.ErrNotFound {
-		// 	return nil, fmt.Errorf("key %s not found", key)
-		// } else {
-		// 	return nil, err
-		// }
-		return nil, err
+		if err == pebble.ErrNotFound {
+			return nil, err
+		} else {
+			panic(err)
+		}
+		// return nil, err
 	}
 	var cbInfo CurrentBalance
 	rlp.DecodeBytes(val, &cbInfo)
