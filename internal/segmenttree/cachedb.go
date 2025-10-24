@@ -5,11 +5,17 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 )
 
+func BatchStoreAccountInfo(accountInfo *AccountInfo, b *pebble.Batch) {
+	BatchStoreCurrentBalanceInfo(accountInfo.Account, accountInfo.CurrentBalanceInfo, b)
+	BatchStoreCurrentLXBatchTree(accountInfo.Account, accountInfo.CurrentLXBatchTree, b)
+	BatchStoreLXBatchCommitments(accountInfo.Account, accountInfo.CurrentBalanceInfo.Version, accountInfo.CurrentLXBatchCommitment, b)
+}
+
 func StoreAccountInfo(accountInfo *AccountInfo, db *pebble.DB) {
 
 	StoreCurrentBalanceInfo(accountInfo.Account, accountInfo.CurrentBalanceInfo, db)
-	StoreCurrentBatchTree(accountInfo.Account, &accountInfo.CurrentBatchTree, db)
-	StoreBatchCommitments(accountInfo.Account, accountInfo.CurrentBalanceInfo.Version, &accountInfo.CurrentBatchTreeCommitments, db)
+	StoreCurrentLXBatchTree(accountInfo.Account, accountInfo.CurrentLXBatchTree, db)
+	StoreLXBatchCommitments(accountInfo.Account, accountInfo.CurrentBalanceInfo.Version, accountInfo.CurrentLXBatchCommitment, db)
 }
 
 // only returns error if the account info is not found, otherwise panics
@@ -21,19 +27,19 @@ func GetAccountInfo(account common.Address, db *pebble.DB) (*AccountInfo, error)
 		}
 		panic(err)
 	}
-	batchTree := GetCurrentBatchTree(account, db)
-	batchCommitments := GetBatchCommitments(account, cbInfo.Version, db)
+	batchTree := GetCurrentLXBatchTree(account, db)
+	batchCommitments := GetLXBatchCommitments(account, cbInfo.Version, db)
 	accountInfo := &AccountInfo{
-		Account:                     account,
-		CurrentBalanceInfo:          cbInfo,
-		CurrentBatchTree:            *batchTree,
-		CurrentBatchTreeCommitments: *batchCommitments,
+		Account:                  account,
+		CurrentBalanceInfo:       cbInfo,
+		CurrentLXBatchTree:       batchTree,
+		CurrentLXBatchCommitment: batchCommitments,
 	}
 	return accountInfo, nil
 }
 
 func SetAccountInfo(accountInfo *AccountInfo, db *pebble.DB) {
 	StoreCurrentBalanceInfo(accountInfo.Account, accountInfo.CurrentBalanceInfo, db)
-	StoreCurrentBatchTree(accountInfo.Account, &accountInfo.CurrentBatchTree, db)
-	StoreBatchCommitments(accountInfo.Account, accountInfo.CurrentBalanceInfo.Version, &accountInfo.CurrentBatchTreeCommitments, db)
+	StoreCurrentLXBatchTree(accountInfo.Account, accountInfo.CurrentLXBatchTree, db)
+	StoreLXBatchCommitments(accountInfo.Account, accountInfo.CurrentBalanceInfo.Version, accountInfo.CurrentLXBatchCommitment, db)
 }

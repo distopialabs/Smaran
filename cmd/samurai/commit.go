@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"math/big"
+	"os"
 	"runtime"
 	"strconv"
 	"sync"
@@ -18,24 +19,22 @@ import (
 
 func generateCommitmentsV2(config *config.Config, precomputedData *config.PrecomputedData) {
 
-	DB_DIR := "samurai-test.db"
-	// fmt.Println("Removing database directory", DB_DIR)
-	// err := os.RemoveAll(DB_DIR)
-	// if err != nil {
-	// 	panic(fmt.Errorf("failed to remove database directory %s: %w", DB_DIR, err))
-	// } else {
-	// 	fmt.Println("Database directory", DB_DIR, "removed")
-	// }
+	DB_DIR := "samurai-with-cache.db"
+	fmt.Println("Removing database directory", DB_DIR)
+	err := os.RemoveAll(DB_DIR)
+	if err != nil {
+		panic(fmt.Errorf("failed to remove database directory %s: %w", DB_DIR, err))
+	} else {
+		fmt.Println("Database directory", DB_DIR, "removed")
+	}
 
 	// Opening the database
 	db, err := pebble.Open(DB_DIR, &pebble.Options{})
 	if err != nil {
 		panic(err)
 	}
-	defer db.Close()
 
-	cache := segmenttree.NewCache(db, 1000, 100, 100, 10*time.Second)
-	defer cache.Close()
+	cache := segmenttree.NewCache(db, 5000, 2500, 2500, 2*time.Minute, precomputedData)
 
 	workers := runtime.NumCPU()
 	total_start := time.Now()
@@ -187,13 +186,17 @@ func generateCommitmentsV2(config *config.Config, precomputedData *config.Precom
 			defer wg.Done()
 			for task := range updateTaskCh {
 				// start := time.Now()
-				segmenttree.CreateOrUpdateAccountInfo(task.Account, task.Balance, task.BlockNumber, db, precomputedData)
+				segmenttree.CreateOrUpdateAccountInfo(task.Account, task.Balance, task.BlockNumber, cache)
 				// fmt.Println("Block", task.BlockNumber, "account", task.Account.Hex(), "time:", time.Since(start))
 			}
 		}()
 	}
 	wg.Wait()
 
-	fmt.Println("Time taken to process all blocks", time.Since(total_start))
+	// Ensure cache is fully flushed and closed before DB shutdown
+	cache.Close()
+	db.Close()
+
+	fmt.Println("Time taken to process all blocks", time.Since(total_start), time.Now())
 
 }

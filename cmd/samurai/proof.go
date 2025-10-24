@@ -27,7 +27,7 @@ func generateProofs(addr common.Address, queryStartBlock uint64, queryEndBlock u
 	fmt.Println("Starting version", startingVersion, "Ending version", endingVersion)
 
 	start := time.Now()
-	rangeProofs, balanceInfos := proof.GetNewProofRange(addr, startingVersion, endingVersion, precomputedData, config.StartingBlockNumber, db)
+	// rangeProofs, balanceInfos := proof.GetNewProofRange(addr, startingVersion, endingVersion, precomputedData, config.StartingBlockNumber, db)
 	fmt.Println("Time taken to generate range proofs", time.Since(start))
 
 	// rangeProofs, balances := proof.GetRangeProofs(addr, int(startingVersion), int(endingVersion), precomputedData.V, precomputedData.Weights, precomputedData.SRS, config.StartingBlockNumber)
@@ -35,10 +35,10 @@ func generateProofs(addr common.Address, queryStartBlock uint64, queryEndBlock u
 	// _ = balances
 	start = time.Now()
 	// proof.VerifyRangeProofs(queryStartBlock, queryEndBlock, rangeProofs, balances, V, weights, srs)
-	proof.VerifyNewRangeProofs(addr, startingVersion, endingVersion, rangeProofs, balanceInfos, precomputedData)
+	// proof.VerifyNewRangeProofs(addr, startingVersion, endingVersion, rangeProofs, balanceInfos, precomputedData)
 	fmt.Println("Time taken to verify range proofs", time.Since(start))
 
 	// dump proof and balances to file
-	proof.DumpNewProofsAndBalances(rangeProofs, balanceInfos)
+	// proof.DumpNewProofsAndBalances(rangeProofs, balanceInfos)
 
 }

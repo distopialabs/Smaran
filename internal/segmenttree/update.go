@@ -16,42 +16,7 @@ import (
 	fr "github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
 )
 
-
-func (accountInfo *AccountInfo) FirstUpdate(blockNumber uint64, balance *big.Int, db *pebble.DB) common.Hash {
-
-	// current balance
-	cb := &CurrentBalance{
-		Version:    0,
-		Balance:    balance,
-		StartBlock: blockNumber,
-	}
-	accountInfo.CurrentBalanceInfo = cb
-
-	// tree
-	var tree BatchTree
-	for i := range MaxLayer {
-		tree[i] = make([]common.Hash, SegmentTreeSize)
-	}
-	accountInfo.CurrentBatchTree = tree
-
-	// tree commitments
-	var commitments BatchCommitments
-	accountInfo.CurrentBatchTreeCommitments = commitments
-
-	// save
-	accountInfo.Save(db)
-
-	// final commitment
-	commitmentHash := accountInfo.CalculateFinalCommitment()
-	// treeCommitHash := CommitmentToHash(commitments[3])
-	// cbHash := cb.Hash()
-	// commitmentHash := BytesToPoseidonHash(cbHash.Bytes(), treeCommitHash.Bytes())
-	// TODO: store final commitment in db
-
-	return commitmentHash
-}
-
-func (accountInfo *AccountInfo) Update(blockNumber uint64, balance *big.Int, db *pebble.DB) common.Hash {
+func (accountInfo *AccountInfo) Update(blockNumber uint64, balance *big.Int, db *pebble.DB) {
 	prevCb := accountInfo.CurrentBalanceInfo
 	hb := prevCb.ToHistoricalBalance(blockNumber - 1)
 
@@ -76,67 +41,23 @@ func (accountInfo *AccountInfo) Update(blockNumber uint64, balance *big.Int, db 
 	// StoreCurrentBalanceInfo(accountInfo.Account, accountInfo.CurrentBalanceInfo, db)
 	// StoreCurrentBatchTree(accountInfo.Account, &accountInfo.CurrentBatchTree, db)
 	// StoreBatchCommitments(accountInfo.Account, accountInfo.CurrentBalanceInfo.Version, &accountInfo.CurrentBatchTreeCommitments, db)
-	accountInfo.Save(db)
+	// accountInfo.Save(db)
 
-	// // ----------TESTING CODE ----------
-
-	// lxBatchIdx := func(layer uint64) uint64 {
-	// 	if layer == 0 || layer > MaxLayer {
-	// 		panic("layer" + strconv.Itoa(int(layer)) + " is not supported")
-	// 	}
-	// 	return (accountInfo.CurrentBalanceInfo.Version - 1) / (L1BatchSize * math.Pow(L2BatchSize, layer-1))
-	// }
-
-	// calculatedCommitment := accountInfo.CurrentBatchTreeCommitments
-	// l1StoredCommitment := GetLxBatchCommitment(accountInfo.Account, 1, lxBatchIdx(1), db)
-	// l2StoredCommitment := GetLxBatchCommitment(accountInfo.Account, 2, lxBatchIdx(2), db)
-	// l3StoredCommitment := GetLxBatchCommitment(accountInfo.Account, 3, lxBatchIdx(3), db)
-	// l4StoredCommitment := GetLxBatchCommitment(accountInfo.Account, 4, lxBatchIdx(4), db)
-	// storedCommitment := GetBatchCommitments(accountInfo.Account, accountInfo.CurrentBalanceInfo.Version, db)
-
-	// for i := 0; i < MaxLayer; i++ {
-	// 	if calculatedCommitment[i] != storedCommitment[i] {
-	// 		panic("calculated commitment does not match with the stored commitment")
-	// 	}
-	// }
-
-	// if l1StoredCommitment != calculatedCommitment[0] {
-	// 	panic("l1 calculated commitment does not match with the stored commitment")
-	// }
-	// if l2StoredCommitment != calculatedCommitment[1] {
-	// 	panic("l2 calculated commitment does not match with the stored commitment")
-	// }
-	// if l3StoredCommitment != calculatedCommitment[2] {
-	// 	panic("l3 calculated commitment does not match with the stored commitment")
-	// }
-	// if l4StoredCommitment != calculatedCommitment[3] {
-	// 	panic("l4 calculated commitment does not match with the stored commitment")
-	// }
-
-	// // ----------TESTING CODE ----------
-
-	// final commitment
-	commitmentHash := accountInfo.CalculateFinalCommitment()
-	// treeCommitHash := CommitmentToHash(accountInfo.CurrentBatchTreeCommitments[3])
-	// cbHash := cb.Hash()
-	// commitmentHash := BytesToPoseidonHash(cbHash.Bytes(), treeCommitHash.Bytes())
-
-	return commitmentHash
 }
 
 func (accountInfo *AccountInfo) CalculateFinalCommitment() common.Hash {
-	treeCommitHash := CommitmentToHash(accountInfo.CurrentBatchTreeCommitments[MaxLayer-1])
+	treeCommitHash := CommitmentToHash(accountInfo.CurrentLXBatchCommitment[MaxLayer-1])
 	cbHash := accountInfo.CurrentBalanceInfo.Hash()
 	commitmentHash := BytesToPoseidonHash(cbHash.Bytes(), treeCommitHash.Bytes())
 	return commitmentHash
 
 }
 
-func (accountInfo *AccountInfo) Save(db *pebble.DB) {
-	StoreCurrentBalanceInfo(accountInfo.Account, accountInfo.CurrentBalanceInfo, db)
-	StoreCurrentBatchTree(accountInfo.Account, &accountInfo.CurrentBatchTree, db)
-	StoreBatchCommitments(accountInfo.Account, accountInfo.CurrentBalanceInfo.Version, &accountInfo.CurrentBatchTreeCommitments, db)
-}
+// func (accountInfo *AccountInfo) Save(db *pebble.DB) {
+// 	StoreCurrentBalanceInfo(accountInfo.Account, accountInfo.CurrentBalanceInfo, db)
+// 	StoreCurrentBatchTree(accountInfo.Account, &accountInfo.CurrentBatchTree, db)
+// 	StoreBatchCommitments(accountInfo.Account, accountInfo.CurrentBalanceInfo.Version, &accountInfo.CurrentBatchTreeCommitments, db)
+// }
 
 // updates the current batch tree, and commitments. resets them if needed.
 func (accountInfo *AccountInfo) AddLeafNode(leafNodeIdx uint64, leafNodeHash common.Hash) {
@@ -204,8 +125,8 @@ func (accountInfo *AccountInfo) AddLeafNode(leafNodeIdx uint64, leafNodeHash com
 	// Resetting for new batch
 	for layer := 1; layer <= MaxLayer; layer++ {
 		if (leafNodeIdx % (L1BatchSize * math.Pow(L2BatchSize, uint64(layer)-1))) == 0 {
-			accountInfo.CurrentBatchTree[layer-1] = make([]common.Hash, SegmentTreeSize)
-			accountInfo.CurrentBatchTreeCommitments[layer-1] = gnark_kzg.Digest{}
+			accountInfo.CurrentLXBatchTree[layer-1] = [SegmentTreeSize]common.Hash{}
+			accountInfo.CurrentLXBatchCommitment[layer-1] = gnark_kzg.Digest{}
 		}
 	}
 	// TODO: uncomment this and replace the below code with this. add if else conditionfor layer 1 and others.
@@ -222,22 +143,22 @@ func (accountInfo *AccountInfo) AddLeafNode(leafNodeIdx uint64, leafNodeHash com
 	// updating layer 1 tree of current batch and calculate its commitment
 	l1Commit := accountInfo.UpdateLXTree(lxBatchLeafNodeOffsetIdx(1), leafNodeHash, common.Hash{}, 1)
 	l1CommitHash := CommitmentToHash(l1Commit)
-	l1RootHash := accountInfo.CurrentBatchTree[0][0]
+	l1RootHash := accountInfo.CurrentLXBatchTree[0][0]
 
 	// updating layer 2
 	l2Commit := accountInfo.UpdateLXTree(lxBatchLeafNodeOffsetIdx(2), l1RootHash, l1CommitHash, 2)
 	l2CommitHash := CommitmentToHash(l2Commit)
-	l2RootHash := accountInfo.CurrentBatchTree[1][0]
+	l2RootHash := accountInfo.CurrentLXBatchTree[1][0]
 
 	// updating layer 3
 	l3Commit := accountInfo.UpdateLXTree(lxBatchLeafNodeOffsetIdx(3), l2RootHash, l2CommitHash, 3)
 	l3CommitHash := CommitmentToHash(l3Commit)
-	l3RootHash := accountInfo.CurrentBatchTree[2][0]
+	l3RootHash := accountInfo.CurrentLXBatchTree[2][0]
 
 	// updating layer 4
 	l4Commit := accountInfo.UpdateLXTree(lxBatchLeafNodeOffsetIdx(4), l3RootHash, l3CommitHash, 4)
 	l4CommitHash := CommitmentToHash(l4Commit)
-	l4RootHash := accountInfo.CurrentBatchTree[3][0]
+	l4RootHash := accountInfo.CurrentLXBatchTree[3][0]
 	_ = l4CommitHash
 	_ = l4RootHash
 
@@ -245,11 +166,15 @@ func (accountInfo *AccountInfo) AddLeafNode(leafNodeIdx uint64, leafNodeHash com
 
 func (accountInfo *AccountInfo) UpdateLXTree(idx uint64, val common.Hash, lXm1CommitHash common.Hash, layer uint64) bls.G1Affine {
 
-	tree := accountInfo.CurrentBatchTree[layer-1]
-	prevCommit := accountInfo.CurrentBatchTreeCommitments[layer-1]
+	tree := accountInfo.CurrentLXBatchTree[layer-1]
+	prevCommit := accountInfo.CurrentLXBatchCommitment[layer-1]
 
 	var newCommit bls.G1Affine
 	newCommit.Set(&prevCommit)
+
+	if accountInfo.PrecomputedData == nil {
+		panic("precomputed data is nil")
+	}
 
 	if layer > 1 {
 
@@ -317,55 +242,7 @@ func (accountInfo *AccountInfo) UpdateLXTree(idx uint64, val common.Hash, lXm1Co
 			}
 		}
 	}
-	accountInfo.CurrentBatchTreeCommitments[layer-1] = newCommit
+	accountInfo.CurrentLXBatchCommitment[layer-1] = newCommit
 
 	return newCommit
 }
-
-// // TODO: move this to kzg package and take srs as argument. ps: do we need this?
-// func (segmentTree *SegmentTree) _CalculateCommitment(poly polynomial.Polynomial) common.Hash {
-
-// 	commitment, err := gnark_kzg.Commit(poly, segmentTree.PrecomputedData.SRS.Inner.Pk)
-// 	if err != nil {
-// 		log.Fatalf("failed to commit: %v", err)
-// 	}
-// 	return CommitmentToHash(commitment)
-// 	// commitmentBytes := commitment.Bytes()
-// 	// commitmentHash := common.BytesToHash(commitmentBytes[:])
-
-// 	// return commitmentHash
-// }
-
-// TODO: do we need this?
-func _GenerateIncrementalPolynomial(indexToProcess []int, V polynomial.Polynomial, weights []fr.Element, tree []common.Hash) polynomial.Polynomial {
-
-	xValues := make([]int, len(indexToProcess))
-	yValues := make([]fr.Element, len(indexToProcess))
-
-	for i, index := range indexToProcess {
-		xValues[i] = index
-		yValues[i] = polynomial.HashToFieldElement(tree[index])
-	}
-
-	incPoly := polynomial.Interpolate(xValues, yValues, V, weights)
-
-	return incPoly
-}
-
-// // TODO: do we need this?
-// func (segmentTree *SegmentTree) _FlushIfRemaining(blockNumber int) {
-// 	commitIdx := map[int]int{
-// 		1: blockNumber / L1BatchSize,
-// 		2: blockNumber / (L1BatchSize * L2BatchSize),
-// 		3: blockNumber / (L1BatchSize * L2BatchSize * L2BatchSize),
-// 		4: blockNumber / (L1BatchSize * L2BatchSize * L2BatchSize * L2BatchSize),
-// 	}
-
-// 	for layer := 1; layer <= MaxLayer; layer++ {
-// 		for i := 0; i < SegmentTreeSize; i++ {
-// 			if segmentTree.LXTreeV3[layer][i] != (common.Hash{}) {
-// 				WriteTreeSegment(StoragePath, segmentTree.Account, layer, commitIdx[layer], segmentTree.LXTreeV3[layer])
-// 			}
-// 		}
-// 	}
-// }

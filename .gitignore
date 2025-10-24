@@ -3,3 +3,5 @@ storage/
 temp/
 .vscode/
 samurai.db/
+*.db/
+*.log

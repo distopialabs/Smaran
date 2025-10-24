@@ -23,7 +23,7 @@ func main() {
 	profile := flag.Bool("p", true, "Profile the program")
 
 	// flags to generate commitments
-	numBlocks := flag.Int("numBlocks", 10, "Number of blocks to process")
+	numBlocks := flag.Int("numBlocks", 100, "Number of blocks to process")
 	// numTrackedAccounts := flag.Int("a", 1, "Number of tracked accounts")
 
 	// flags to generate proofs & verify proofs

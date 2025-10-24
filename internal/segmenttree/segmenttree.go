@@ -1,7 +1,6 @@
 package segmenttree
 
 import (
-	"fmt"
 	"math/big"
 
 	"github.com/cockroachdb/pebble"
@@ -32,191 +31,73 @@ type CachedData struct {
 	SRS           *kzg.MultiSRS
 }
 
-type BatchTree [MaxLayer][SegmentTreeSize]common.Hash
-type BatchCommitments [MaxLayer]gnark_kzg.Digest
+type BatchTree [SegmentTreeSize]common.Hash
+type LXBatchTree [MaxLayer][SegmentTreeSize]common.Hash
+type LXBatchCommitment [MaxLayer]gnark_kzg.Digest
 
 type AccountInfo struct {
-	Account            common.Address
-	CurrentBalanceInfo *CurrentBalance
-	CurrentBatchTree   BatchTree
-	// LXPolynomial   [MaxLayer]polynomial.Polynomial
-	CurrentBatchTreeCommitments BatchCommitments
+	Account                  common.Address
+	CurrentBalanceInfo       *CurrentBalance
+	CurrentLXBatchTree       *LXBatchTree
+	CurrentLXBatchCommitment *LXBatchCommitment
 
-	// SegmentTree       *SegmentTree
-	// CurrentCommitment common.Hash
-	// HistoricalBalancesKV map[common.Hash][]byte
+	// TODO: do i need to store this here? can i just store it in cache struct?
 	PrecomputedData *config.PrecomputedData
 }
 
-func NewAccountInfo(account common.Address, precomputedData *config.PrecomputedData) *AccountInfo {
-	// var tree BatchTree
-	// for i := range MaxLayer {
-	// 	tree[i] = make([]common.Hash, SegmentTreeSize)
-	// }
-
-	// var commitments BatchCommitments
-
-	// cbInfo := &CurrentBalance{
-	// 	Version:    0,
-	// 	Balance:    balance,
-	// 	StartBlock: blockNumber,
-	// }
+func NewAccountInfo(account common.Address, balance *big.Int, blockNumber uint64, precomputedData *config.PrecomputedData) *AccountInfo {
 
 	accountInfo := &AccountInfo{
 		Account: account,
-
-		// CurrentBalanceInfo: cbInfo,
-
-		// CurrentBatchTree:            tree,
-		// CurrentBatchTreeCommitments: commitments,
-
-		PrecomputedData: precomputedData,
+		CurrentBalanceInfo: &CurrentBalance{
+			Version:    0,
+			Balance:    balance,
+			StartBlock: blockNumber,
+		},
+		CurrentLXBatchTree:       new(LXBatchTree),
+		CurrentLXBatchCommitment: new(LXBatchCommitment),
+		PrecomputedData:          precomputedData,
 	}
 	return accountInfo
 }
 
-func (accountInfo *AccountInfo) DeepCopy() *AccountInfo {
-	var currentBatchTree BatchTree
-	for i := range MaxLayer {
-		currentBatchTree[i] = make([]common.Hash, SegmentTreeSize)
-		copy(currentBatchTree[i], accountInfo.CurrentBatchTree[i])
-	}
-	var currentBatchTreeCommitments BatchCommitments
-	for i := range MaxLayer {
-		currentBatchTreeCommitments[i] = accountInfo.CurrentBatchTreeCommitments[i]
-	}
-	accountInfoCopy := &AccountInfo{
-		Account:                     accountInfo.Account,
-		CurrentBalanceInfo:          accountInfo.CurrentBalanceInfo.DeepCopy(),
-		CurrentBatchTree:            currentBatchTree,
-		CurrentBatchTreeCommitments: currentBatchTreeCommitments,
-		PrecomputedData:             accountInfo.PrecomputedData,
-	}
-	return accountInfoCopy
+func (t *LXBatchTree) DeepCopy() *LXBatchTree {
+	c := *t
+	return &c
 }
 
-func CreateOrUpdateAccountInfo(account common.Address, balance *big.Int, blockNumber uint64, precomputedData *config.PrecomputedData, cache *Cache) *AccountInfo {
+func (t *LXBatchCommitment) DeepCopy() *LXBatchCommitment {
+	c := *t
+	return &c
+}
 
+func (a *AccountInfo) DeepCopy() *AccountInfo {
+	c := &AccountInfo{
+		Account:                  a.Account,
+		CurrentBalanceInfo:       a.CurrentBalanceInfo.DeepCopy(),
+		CurrentLXBatchTree:       a.CurrentLXBatchTree.DeepCopy(),
+		CurrentLXBatchCommitment: a.CurrentLXBatchCommitment.DeepCopy(),
+		PrecomputedData:          a.PrecomputedData,
+	}
+	return c
+}
+
+// check if the account info is in the cache or db. if it is, update it. if it isn't, create a new account info instance.
+func CreateOrUpdateAccountInfo(account common.Address, balance *big.Int, blockNumber uint64, cache *Cache) common.Hash {
 	accountInfo, err := cache.Get(account)
 	if err != nil {
 		if err != pebble.ErrNotFound {
 			panic(err)
 		}
-		// first encounter; create a new account info
-		accountInfo := NewAccountInfo(account, precomputedData)
-		commitmentHash := accountInfo.FirstUpdate(blockNumber, balance, db)
+		// this account doesnt exist yet, not in cache, not in db.create a new account info instance
 
-		_ = commitmentHash
-		return accountInfo
+		accountInfo = NewAccountInfo(account, balance, blockNumber, cache.precomputedData)
+
+	} else {
+		accountInfo.Update(blockNumber, balance, cache.db)
 	}
+	cache.Set(account, accountInfo)
+	commitmentHash := accountInfo.CalculateFinalCommitment()
 
-	// cbInfo, err := GetCurrentBalanceInfo(account, db)
-	if err != nil {
-		if err == pebble.ErrNotFound {
-			// first encounter; create a new account info
-			accountInfo := NewAccountInfo(account, precomputedData)
-			commitmentHash := accountInfo.FirstUpdate(blockNumber, balance, db)
-			// StoreCurrentBalanceInfo(account, accountInfo.CurrentBalanceInfo, db)
-			// StoreCurrentBatchTree(account, &accountInfo.CurrentBatchTree, db)
-			// StoreBatchCommitments(account, accountInfo.CurrentBalanceInfo.Version, &accountInfo.CurrentBatchTreeCommitments, db)
-			// final commitment
-			// treeCommitHash := CommitmentToHash(accountInfo.CurrentBatchTreeCommitments[3])
-			// cbHash := accountInfo.CurrentBalanceInfo.Hash()
-			// commitmentHash := BytesToPoseidonHash(cbHash.Bytes(), treeCommitHash.Bytes())
-			_ = commitmentHash
-			// fmt.Println("block number", blockNumber, "account", account.Hex(), "commitmentHash", commitmentHash.Hex())
-
-			return accountInfo
-		} else {
-			fmt.Printf("%T\n", err)
-			panic(err)
-		}
-	}
-	batchTree := GetCurrentBatchTree(account, db)
-	batchCommitments := GetBatchCommitments(account, cbInfo.Version, db)
-	accountInfo := &AccountInfo{
-		Account:                     account,
-		CurrentBalanceInfo:          cbInfo,
-		CurrentBatchTree:            *batchTree,
-		CurrentBatchTreeCommitments: *batchCommitments,
-		PrecomputedData:             precomputedData,
-	}
-	commitmentHash := accountInfo.Update(blockNumber, balance, db)
-	// fmt.Println("block number", blockNumber, "account", account.Hex(), "commitmentHash", commitmentHash.Hex())
-	_ = commitmentHash
-
-	return accountInfo
+	return commitmentHash
 }
-
-// func GetOrCreateAccountInfo(account common.Address, db *pebble.DB, precomputedData *config.PrecomputedData) *AccountInfo {
-
-// 	cbInfo, err := GetCurrentBalanceInfo(account, db)
-// 	if err != nil {
-// 		if err == pebble.ErrNotFound {
-// 			// create a new account info
-// 			return nil, err
-// 		}
-
-// 		accountInfo, err := GetAccountInfo(account, db)
-// 		if err != nil {
-// 			accountInfo = NewAccountInfo(account, precomputedData)
-// 			StoreAccountInfo(accountInfo, db)
-// 		}
-// 	}
-// }
-
-// type LXTree [MaxLayer][]common.Hash
-// type LXPolynomial [MaxLayer]polynomial.Polynomial
-// type LXCommitment [MaxLayer]gnark_kzg.Digest
-
-// type SegmentTree struct {
-// 	Account      common.Address
-// 	CurrentIndex uint64
-
-// 	LXTreeV3       map[int][]common.Hash
-// 	LXPolynomialV3 map[int]polynomial.Polynomial
-// 	LXCommitmentV3 map[int]gnark_kzg.Digest
-
-// 	// LXPrevCIncCommitmentV3 map[int]gnark_kzg.Digest
-// 	PrecomputedData *config.PrecomputedData
-// 	// CachedData      *CachedData
-// 	Storage *Storage
-// }
-
-// func New(account common.Address, precomputedData *config.PrecomputedData) *SegmentTree {
-// 	return &SegmentTree{
-// 		Account: account,
-
-// 		// LXTreeV3: make(map[int][]common.Hash),
-// 		LXTreeV3: map[int][]common.Hash{
-// 			1: make([]common.Hash, SegmentTreeSize),
-// 			2: make([]common.Hash, SegmentTreeSize),
-// 			3: make([]common.Hash, SegmentTreeSize),
-// 			4: make([]common.Hash, SegmentTreeSize),
-// 		},
-// 		LXPolynomialV3: map[int]polynomial.Polynomial{
-// 			1: make(polynomial.Polynomial, SegmentTreeSize),
-// 			2: make(polynomial.Polynomial, SegmentTreeSize),
-// 			3: make(polynomial.Polynomial, SegmentTreeSize),
-// 			4: make(polynomial.Polynomial, SegmentTreeSize),
-// 		},
-// 		LXCommitmentV3: make(map[int]gnark_kzg.Digest),
-// 		// LXPrevCIncCommitmentV3: make(map[int]gnark_kzg.Digest),
-
-// 		PrecomputedData: precomputedData,
-// 		Storage: &Storage{
-// 			L1Commitments: make(map[int]bls.G1Affine),
-// 			L2Commitments: make(map[int]bls.G1Affine),
-// 			L3Commitments: make(map[int]bls.G1Affine),
-// 			L4Commitments: make(map[int]bls.G1Affine),
-// 			L1Tree:        make(map[int][]common.Hash),
-// 			L2Tree:        make(map[int][]common.Hash),
-// 			L3Tree:        make(map[int][]common.Hash),
-// 			L4Tree:        make(map[int][]common.Hash),
-// 			L1Polynomial:  make(map[int]polynomial.Polynomial),
-// 			L2Polynomial:  make(map[int]polynomial.Polynomial),
-// 			L3Polynomial:  make(map[int]polynomial.Polynomial),
-// 			L4Polynomial:  make(map[int]polynomial.Polynomial),
-// 		},
-// 	}
-// }
