@@ -125,7 +125,7 @@ func (accountInfo *AccountInfo) AddLeafNode(leafNodeIdx uint64, leafNodeHash com
 	// Resetting for new batch
 	for layer := 1; layer <= MaxLayer; layer++ {
 		if (leafNodeIdx % (L1BatchSize * math.Pow(L2BatchSize, uint64(layer)-1))) == 0 {
-			accountInfo.CurrentLXBatchTree[layer-1] = [SegmentTreeSize]common.Hash{}
+			accountInfo.CurrentLXBatchTree[layer-1] = BatchTree{}
 			accountInfo.CurrentLXBatchCommitment[layer-1] = gnark_kzg.Digest{}
 		}
 	}
@@ -166,7 +166,7 @@ func (accountInfo *AccountInfo) AddLeafNode(leafNodeIdx uint64, leafNodeHash com
 
 func (accountInfo *AccountInfo) UpdateLXTree(idx uint64, val common.Hash, lXm1CommitHash common.Hash, layer uint64) bls.G1Affine {
 
-	tree := accountInfo.CurrentLXBatchTree[layer-1]
+	tree := &accountInfo.CurrentLXBatchTree[layer-1]
 	prevCommit := accountInfo.CurrentLXBatchCommitment[layer-1]
 
 	var newCommit bls.G1Affine

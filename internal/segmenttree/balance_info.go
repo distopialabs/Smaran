@@ -4,7 +4,8 @@ import (
 	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/rlp"
+	segmenttreepb "github.com/nepal80m/samurai/internal/segmenttree/pb"
+	"google.golang.org/protobuf/proto"
 )
 
 type CurrentBalance struct {
@@ -19,7 +20,11 @@ type HistoricalBalance struct {
 }
 
 func (cb *CurrentBalance) Bytes() []byte {
-	b, err := rlp.EncodeToBytes(cb)
+	b, err := proto.Marshal(&segmenttreepb.CurrentBalance{
+		Version:    cb.Version,
+		Balance:    cb.Balance.Bytes(),
+		StartBlock: cb.StartBlock,
+	})
 	if err != nil {
 		panic(err)
 	}
@@ -27,7 +32,14 @@ func (cb *CurrentBalance) Bytes() []byte {
 }
 
 func (hb *HistoricalBalance) Bytes() []byte {
-	b, err := rlp.EncodeToBytes(hb)
+	b, err := proto.Marshal(&segmenttreepb.HistoricalBalance{
+		Current: &segmenttreepb.CurrentBalance{
+			Version:    hb.Version,
+			Balance:    hb.Balance.Bytes(),
+			StartBlock: hb.StartBlock,
+		},
+		EndBlock: hb.EndBlock,
+	})
 	if err != nil {
 		panic(err)
 	}

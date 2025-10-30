@@ -184,6 +184,7 @@ func (c *Cache) flusher() {
 
 func (c *Cache) flushOne(e *CacheEntry) error {
 	e.mu.Lock()
+
 	StoreAccountInfo(e.val, c.db)
 	if e.dirty {
 		e.dirty = false
@@ -195,6 +196,26 @@ func (c *Cache) flushOne(e *CacheEntry) error {
 
 func (c *Cache) flushSome(full bool) {
 	c.mu.Lock()
+	start := time.Now()
+	fmt.Println("Cache locked, flushing some", time.Now())
+	maxUpdatesExceeded := c.updatesSinceLastFlush >= c.maxUpdatesSinceLastFlush
+	maxDirtyEntriesExceeded := c.dirtyEntriesCount >= c.maxDirtyEntriesCount
+	shouldFlush := maxUpdatesExceeded || maxDirtyEntriesExceeded
+	if !shouldFlush {
+		fmt.Println("No need to flush, unlocked", time.Since(start), "\n\n")
+		c.mu.Unlock()
+		return
+	}
+	fmt.Println("Entries count", len(c.entries), "/", c.maxEntriesCount)
+	fmt.Println("Dirty entries count", c.dirtyEntriesCount, "/", c.maxDirtyEntriesCount)
+	fmt.Println("Updates since last flush", c.updatesSinceLastFlush, "/", c.maxUpdatesSinceLastFlush)
+	if maxUpdatesExceeded {
+		fmt.Println("Max updates exceeded ⚠️")
+	}
+	if maxDirtyEntriesExceeded {
+		fmt.Println("Max dirty entries exceeded ⚠️")
+	}
+
 	// TODO: tune this
 	var toFlush int
 	if c.dirtyEntriesCount < 2 {
@@ -204,6 +225,7 @@ func (c *Cache) flushSome(full bool) {
 	}
 
 	if toFlush == 0 {
+		fmt.Println("No dirty entries to flush, unlocked", time.Since(start), "\n\n")
 		c.mu.Unlock()
 		return
 	}
@@ -229,21 +251,23 @@ func (c *Cache) flushSome(full bool) {
 			break
 		}
 	}
-	c.mu.Unlock()
-
 	if len(flushEntries) == 0 {
+		c.mu.Unlock()
+		fmt.Println("No flush entries, unlocked", time.Since(start))
 		return
 	}
+	fmt.Println("Flush entries", len(flushEntries), time.Since(start))
+	fmt.Println("Creating batch", time.Since(start))
 	b := c.db.NewBatch()
 	defer b.Close()
 	for _, fe := range flushEntries {
 		BatchStoreAccountInfo(fe.snapshot, b)
 	}
+	fmt.Println("Batch created", time.Since(start))
 	if err := b.Commit(pebble.Sync); err != nil {
 		panic(fmt.Errorf("failed to commit batch: %w", err))
 	}
-
-	c.mu.Lock()
+	fmt.Println("Batch committed", time.Since(start))
 	for _, fe := range flushEntries {
 		if fe.e.dirty && fe.e.val.CurrentBalanceInfo.Version == fe.version {
 			fe.e.dirty = false
@@ -254,8 +278,10 @@ func (c *Cache) flushSome(full bool) {
 			panic("I had a lock, how is this possible?")
 		}
 	}
+	fmt.Println("Dirty entries unlocked", time.Since(start))
 	c.updatesSinceLastFlush = 0
 	c.mu.Unlock()
+	fmt.Println("Cache unlocked", time.Since(start), "\n\n")
 }
 
 func (c *Cache) evictIfNeeded() {

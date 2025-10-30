@@ -5,7 +5,6 @@ import (
 	"math/big"
 	"os"
 	"runtime"
-	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -34,7 +33,8 @@ func generateCommitmentsV2(config *config.Config, precomputedData *config.Precom
 		panic(err)
 	}
 
-	cache := segmenttree.NewCache(db, 5000, 2500, 2500, 2*time.Minute, precomputedData)
+	cache := segmenttree.NewCache(db, 20000, 15000, 40000, 2*time.Minute, precomputedData)
+	// otterCache := segmenttree.NewOtterCache(db, 20000, 10000, 10000, 2*time.Minute, precomputedData)
 
 	workers := runtime.NumCPU()
 	total_start := time.Now()
@@ -43,7 +43,54 @@ func generateCommitmentsV2(config *config.Config, precomputedData *config.Precom
 		ModifiedAccounts []common.Address
 		Balances         []*big.Int
 	}
+	type updateTask struct {
+		BlockNumber uint64
+		Account     common.Address
+		Balance     *big.Int
+	}
 	blockInfoCh := make(chan blockInfo, workers*2)
+	orderedBlockInfoCh := make(chan blockInfo, workers*2)
+
+	updateTaskCh := make(chan updateTask, 1<<10)
+
+	// keep logging the size of the channel every 5 seconds until the channel is closed
+	// go func() {
+	// 	for {
+	// 		time.Sleep(5 * time.Second)
+	// 		remaining := cap(blockInfoCh) - len(blockInfoCh)
+	// 		if remaining > 5 {
+	// 			fmt.Printf("BlockInfoCh: %d/%d\n", len(blockInfoCh), cap(blockInfoCh))
+	// 		}
+	// 		if remaining > 0 && remaining < 5 {
+	// 			fmt.Printf("⚠️ BlockInfoCh is almost full: %d/%d\n", len(blockInfoCh), cap(blockInfoCh))
+	// 		}
+	// 		if remaining <= 0 {
+	// 			fmt.Printf("🚨 BlockInfoCh is full: %d/%d\n", len(blockInfoCh), cap(blockInfoCh))
+	// 		}
+
+	// 		remaining = cap(orderedBlockInfoCh) - len(orderedBlockInfoCh)
+	// 		if remaining > 5 {
+	// 			fmt.Printf("OrderedBlockInfoCh: %d/%d\n", len(orderedBlockInfoCh), cap(orderedBlockInfoCh))
+	// 		}
+	// 		if remaining > 0 && remaining < 5 {
+	// 			fmt.Printf("⚠️ OrderedBlockInfoCh is almost full, %d/%d\n", len(orderedBlockInfoCh), cap(orderedBlockInfoCh))
+	// 		}
+	// 		if remaining <= 0 {
+	// 			fmt.Printf("🚨 OrderedBlockInfoCh is full: %d/%d\n", len(orderedBlockInfoCh), cap(orderedBlockInfoCh))
+	// 		}
+	// 		remaining = cap(updateTaskCh) - len(updateTaskCh)
+	// 		if remaining > 5 {
+	// 			fmt.Printf("UpdateTaskCh: %d/%d\n", len(updateTaskCh), cap(updateTaskCh))
+	// 		}
+	// 		if remaining > 0 && remaining < 5 {
+	// 			fmt.Printf("⚠️ UpdateTaskCh is almost full: %d/%d\n", len(updateTaskCh), cap(updateTaskCh))
+	// 		}
+	// 		if remaining <= 0 {
+	// 			fmt.Printf("🚨 UpdateTaskCh is full: %d/%d\n", len(updateTaskCh), cap(updateTaskCh))
+	// 		}
+
+	// 	}
+	// }()
 
 	var wg1 sync.WaitGroup
 	nextBlockToFetch := config.StartingBlockNumber
@@ -74,12 +121,15 @@ func generateCommitmentsV2(config *config.Config, precomputedData *config.Precom
 				// balances := []*big.Int{new(big.Int).SetUint64(1000000000000000000 + uint64(bn))}
 				// modifiedAccounts := []common.Address{common.HexToAddress("0x0000000000000000000000000000000000000027")}
 				// send the block info to the channel
-				fmt.Println("Block", bn, "fetched and sent to the channel")
+				// fmt.Println("Block", bn, "fetched and sent to the channel")
+				// fmt.Println("Waiting for blockInfoCh to be ready", time.Now(), len(blockInfoCh), "items in the channel of size", cap(blockInfoCh))
+				// start := time.Now()
 				blockInfoCh <- blockInfo{
 					Number:           bn,
 					ModifiedAccounts: modifiedAccounts,
 					Balances:         balances,
 				}
+				// fmt.Println("Block", bn, "sent to the channel", time.Since(start))
 			}
 		}()
 	}
@@ -90,7 +140,6 @@ func generateCommitmentsV2(config *config.Config, precomputedData *config.Precom
 	}()
 
 	// Reorder the blockCh by the block number
-	orderedBlockInfoCh := make(chan blockInfo, workers*2)
 	go func() {
 		nextBlockToProcess := config.StartingBlockNumber
 		pendingBlocks := make(map[uint64]blockInfo)
@@ -101,7 +150,7 @@ func generateCommitmentsV2(config *config.Config, precomputedData *config.Precom
 				nextBlockToProcess++
 				for {
 					if blk, ok := pendingBlocks[nextBlockToProcess]; ok {
-						fmt.Println("Block", nextBlockToProcess, "ordered and sent to the channel")
+						// fmt.Println("Block", nextBlockToProcess, "ordered and sent to the channel")
 						orderedBlockInfoCh <- blk
 						delete(pendingBlocks, nextBlockToProcess)
 						nextBlockToProcess++
@@ -112,10 +161,19 @@ func generateCommitmentsV2(config *config.Config, precomputedData *config.Precom
 			} else {
 				pendingBlocks[blkInfo.Number] = blkInfo
 			}
-			fmt.Println("Pending blocks:", len(pendingBlocks))
-			if len(pendingBlocks) > workers {
-				panic("Pending blocks:" + strconv.Itoa(len(pendingBlocks)) + "is greater than workers:" + strconv.Itoa(workers))
+			if len(pendingBlocks) > 100 {
+				fmt.Println("🚨💾💣 Pending blocks:", len(pendingBlocks))
+				panic(fmt.Sprintf("Pending blocks exceeded safe limit: %d", len(pendingBlocks)))
+			} else if len(pendingBlocks) > 50 {
+				fmt.Println("⚠️💾💣 Pending blocks:", len(pendingBlocks))
+			} else {
+				fmt.Println("Pending blocks:", len(pendingBlocks))
 			}
+
+			// fmt.Println("Pending blocks:", len(pendingBlocks))
+			// if len(pendingBlocks) > workers {
+			// 	panic("Pending blocks:" + strconv.Itoa(len(pendingBlocks)) + "is greater than workers:" + strconv.Itoa(workers))
+			// }
 		}
 		close(orderedBlockInfoCh)
 		fmt.Println("Time taken to order all blocks", time.Since(total_start))
@@ -156,15 +214,10 @@ func generateCommitmentsV2(config *config.Config, precomputedData *config.Precom
 	// }()
 
 	// feed update tasks
-	type updateTask struct {
-		BlockNumber uint64
-		Account     common.Address
-		Balance     *big.Int
-	}
-	updateTaskCh := make(chan updateTask, workers*2)
+
 	go func() {
 		for blk := range orderedBlockInfoCh {
-			fmt.Println("Block", blk.Number, "with", len(blk.ModifiedAccounts), "accounts ready to be sent to updateTaskCh, waiting for channel to be ready", time.Since(total_start))
+			// fmt.Println("Block", blk.Number, "with", len(blk.ModifiedAccounts), "accounts ready to be sent to updateTaskCh, waiting for channel to be ready", time.Since(total_start))
 
 			for i, addr := range blk.ModifiedAccounts {
 				updateTaskCh <- updateTask{
@@ -173,7 +226,7 @@ func generateCommitmentsV2(config *config.Config, precomputedData *config.Precom
 					Balance:     blk.Balances[i],
 				}
 			}
-			fmt.Println("Block", blk.Number, "with", len(blk.ModifiedAccounts), "accounts sent to updateTaskCh", time.Since(total_start))
+			// fmt.Println("Block", blk.Number, "with", len(blk.ModifiedAccounts), "accounts sent to updateTaskCh", time.Since(total_start))
 		}
 		close(updateTaskCh)
 		fmt.Println("Time taken to feed all update tasks", time.Since(total_start))
@@ -186,7 +239,9 @@ func generateCommitmentsV2(config *config.Config, precomputedData *config.Precom
 			defer wg.Done()
 			for task := range updateTaskCh {
 				// start := time.Now()
-				segmenttree.CreateOrUpdateAccountInfo(task.Account, task.Balance, task.BlockNumber, cache)
+
+				segmenttree.NewCreateOrUpdateAccountInfo(task.Account, task.Balance, task.BlockNumber, cache)
+				// segmenttree.NewCreateOrUpdateAccountInfoOtter(task.Account, task.Balance, task.BlockNumber, otterCache)
 				// fmt.Println("Block", task.BlockNumber, "account", task.Account.Hex(), "time:", time.Since(start))
 			}
 		}()

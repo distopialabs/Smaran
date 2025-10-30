@@ -25,6 +25,11 @@ go tool pprof -http=:8080 samurai ./profiles/cpu.prof
 
 ---
 
+## Build protobuf files
+```
+protoc --go_out=. --go_opt=paths=source_relative internal/segmenttree/pb/segmenttree.proto
+```
+
 ## Contributors:
 - Asim Nepal
 - Shistata Subedi
