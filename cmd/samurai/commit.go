@@ -166,9 +166,10 @@ func generateCommitmentsV2(config *config.Config, precomputedData *config.Precom
 				panic(fmt.Sprintf("Pending blocks exceeded safe limit: %d", len(pendingBlocks)))
 			} else if len(pendingBlocks) > 50 {
 				fmt.Println("⚠️💾💣 Pending blocks:", len(pendingBlocks))
-			} else {
-				fmt.Println("Pending blocks:", len(pendingBlocks))
 			}
+			// } else {
+			// 	fmt.Println("Pending blocks:", len(pendingBlocks))
+			// }
 
 			// fmt.Println("Pending blocks:", len(pendingBlocks))
 			// if len(pendingBlocks) > workers {
@@ -233,7 +234,7 @@ func generateCommitmentsV2(config *config.Config, precomputedData *config.Precom
 	}()
 
 	wg := sync.WaitGroup{}
-	for range workers {
+	for range workers * 2 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()

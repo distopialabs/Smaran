@@ -21,6 +21,13 @@ type CacheEntry struct {
 	prev, next *CacheEntry // doubly linked list
 }
 
+type flushEntry struct {
+	key common.Address
+
+	e        *CacheEntry
+	snapshot *AccountInfo
+	version  uint64
+}
 type Cache struct {
 	mu sync.RWMutex
 
