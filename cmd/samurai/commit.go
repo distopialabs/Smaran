@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/cespare/xxhash/v2"
 	"github.com/cockroachdb/pebble"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/nepal80m/samurai/internal/config"
@@ -43,7 +44,7 @@ func generateCommitmentsV2(config *config.Config, precomputedData *config.Precom
 	db, err := pebble.Open(DB_DIR, &pebble.Options{
 		// MemTableSize: 1 << 31,
 		MemTableSize: 2_147_483_648,
-		// DisableWAL:   true,
+		DisableWAL:   true,
 	})
 	if err != nil {
 		panic(err)
@@ -56,17 +57,25 @@ func generateCommitmentsV2(config *config.Config, precomputedData *config.Precom
 
 	workers := runtime.NumCPU()
 	fmt.Println("Workers:", workers)
-	blockInfoCh := make(chan blockInfo, workers*2)
-	orderedBlockInfoCh := make(chan blockInfo, workers*2)
-	updateTaskCh := make(chan updateTask, 1<<10)
+	blockInfoCh := make(chan blockInfo, 1024)
+	orderedBlockInfoCh := make(chan blockInfo, 1024)
+	// updateTaskCh := make(chan updateTask, 1<<10)
+	fetchWorkerCount := workers * 2
+	updateWorkerCount := workers * 4
+
+	// create separate updateTaskCh for each worker
+	updateTaskChs := make([]chan updateTask, updateWorkerCount)
+	for i := range updateWorkerCount {
+		updateTaskChs[i] = make(chan updateTask, 1024)
+	}
 
 	total_start := time.Now()
 
-	// go logChannelSize(blockInfoCh, orderedBlockInfoCh, updateTaskCh)
+	// go logChannelSize(blockInfoCh, orderedBlockInfoCh, updateTaskChs)
 
 	var wg1 sync.WaitGroup
 	nextBlockToFetch := config.StartingBlockNumber
-	for range 6 {
+	for range fetchWorkerCount {
 		wg1.Add(1)
 		go func() {
 			defer wg1.Done()
@@ -82,9 +91,10 @@ func generateCommitmentsV2(config *config.Config, precomputedData *config.Precom
 					panic(fmt.Errorf("failed to get modified accounts by number %d: %w", bn, err))
 				}
 				// fetch balances for all the modified accounts
-				if len(modifiedAccounts) == 0 {
-					continue
-				}
+				// if len(modifiedAccounts) == 0 {
+				// 	continue
+				// }
+				// ? do not just skip if there are no modified accounts, because orderWorker is waiting for the next block info to be sent to the channel. instead, send an empty block info with empty modified accounts and balances.
 				balances, err := ledger.BatchMultiUserBalance(modifiedAccounts, bn, config)
 				if err != nil {
 					panic(fmt.Errorf("failed to get balances for block %d: %w", bn, err))
@@ -151,12 +161,15 @@ func generateCommitmentsV2(config *config.Config, precomputedData *config.Precom
 	}()
 
 	// feed update tasks
+
 	go func() {
 		for blk := range orderedBlockInfoCh {
 			// fmt.Println("Block", blk.Number, "with", len(blk.ModifiedAccounts), "accounts ready to be sent to updateTaskCh, waiting for channel to be ready", time.Since(total_start))
 
 			for i, addr := range blk.ModifiedAccounts {
-				updateTaskCh <- updateTask{
+				h := xxhash.Sum64(addr[:])
+				chIdx := int(h % uint64(updateWorkerCount))
+				updateTaskChs[chIdx] <- updateTask{
 					BlockNumber: blk.Number,
 					Account:     addr,
 					Balance:     blk.Balances[i],
@@ -164,18 +177,20 @@ func generateCommitmentsV2(config *config.Config, precomputedData *config.Precom
 			}
 			// fmt.Println("Block", blk.Number, "with", len(blk.ModifiedAccounts), "accounts sent to updateTaskCh", time.Since(total_start))
 		}
-		close(updateTaskCh)
+		for i := range updateWorkerCount {
+			close(updateTaskChs[i])
+		}
 		fmt.Println("Time taken to feed all update tasks", time.Since(total_start))
 	}()
 
 	wg := sync.WaitGroup{}
-	for range workers * 2 {
+	for i := range updateWorkerCount {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for task := range updateTaskCh {
+			for task := range updateTaskChs[i] {
 				// start := time.Now()
-				segmenttree.FinalCreateOrUpdateAccountInfo(task.Account, task.Balance, task.BlockNumber, cache)
+				segmenttree.CreateOrUpdateAccountInfo(task.Account, task.Balance, task.BlockNumber, cache)
 				// fmt.Println("Block", task.BlockNumber, "account", task.Account.Hex(), "time:", time.Since(start))
 				// segmenttree.NewCreateOrUpdateAccountInfo(task.Account, task.Balance, task.BlockNumber, cache)
 				// segmenttree.NewCreateOrUpdateAccountInfoOtter(task.Account, task.Balance, task.BlockNumber, otterCache)
@@ -193,10 +208,10 @@ func generateCommitmentsV2(config *config.Config, precomputedData *config.Precom
 
 }
 
-func logChannelSize(blockInfoCh chan blockInfo, orderedBlockInfoCh chan blockInfo, updateTaskCh chan updateTask) {
+func logChannelSize(blockInfoCh chan blockInfo, orderedBlockInfoCh chan blockInfo, updateTaskChs []chan updateTask) {
 	// keep logging the size of the channel every 5 seconds until the channel is closed
 	for {
-		time.Sleep(5 * time.Second)
+		time.Sleep(1 * time.Second)
 		remaining := cap(blockInfoCh) - len(blockInfoCh)
 		if remaining > 5 {
 			fmt.Printf("BlockInfoCh: %d/%d\n", len(blockInfoCh), cap(blockInfoCh))
@@ -218,16 +233,18 @@ func logChannelSize(blockInfoCh chan blockInfo, orderedBlockInfoCh chan blockInf
 		if remaining <= 0 {
 			fmt.Printf("🚨 OrderedBlockInfoCh is full: %d/%d\n", len(orderedBlockInfoCh), cap(orderedBlockInfoCh))
 		}
-		remaining = cap(updateTaskCh) - len(updateTaskCh)
-		if remaining > 5 {
-			fmt.Printf("UpdateTaskCh: %d/%d\n", len(updateTaskCh), cap(updateTaskCh))
-		}
-		if remaining > 0 && remaining < 5 {
-			fmt.Printf("⚠️ UpdateTaskCh is almost full: %d/%d\n", len(updateTaskCh), cap(updateTaskCh))
-		}
-		if remaining <= 0 {
-			fmt.Printf("🚨 UpdateTaskCh is full: %d/%d\n", len(updateTaskCh), cap(updateTaskCh))
-		}
+		// for i, updateTaskCh := range updateTaskChs {
+		// 	remaining = cap(updateTaskCh) - len(updateTaskCh)
+		// 	if remaining > 5 {
+		// 		fmt.Printf("UpdateTaskCh %d: %d/%d\n", i, len(updateTaskCh), cap(updateTaskCh))
+		// 	}
+		// 	if remaining > 0 && remaining < 5 {
+		// 		fmt.Printf("⚠️ UpdateTaskCh %d is almost full: %d/%d\n", i, len(updateTaskCh), cap(updateTaskCh))
+		// 	}
+		// 	if remaining <= 0 {
+		// 		fmt.Printf("🚨 UpdateTaskCh %d is full: %d/%d\n", i, len(updateTaskCh), cap(updateTaskCh))
+		// 	}
+		// }
 
 	}
 }

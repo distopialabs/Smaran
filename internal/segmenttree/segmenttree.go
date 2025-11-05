@@ -3,8 +3,6 @@ package segmenttree
 import (
 	"fmt"
 	"math/big"
-	"sync"
-	"time"
 	"unsafe"
 
 	"github.com/cockroachdb/pebble"
@@ -72,7 +70,7 @@ type AccountInfo struct {
 	PrecomputedData *config.PrecomputedData
 
 	// cache metadata
-	Dirty bool
+	// Dirty bool
 }
 
 func NewAccountInfo(account common.Address, precomputedData *config.PrecomputedData) *AccountInfo {
@@ -112,175 +110,7 @@ func (a *AccountInfo) DeepCopy() *AccountInfo {
 	return c
 }
 
-// check if the account info is in the cache or db. if it is, update it. if it isn't, create a new account info instance.
-func CreateOrUpdateAccountInfo(account common.Address, balance *big.Int, blockNumber uint64, cache *OldCache) common.Hash {
-	accountInfo, err := cache.Get(account)
-	if err != nil {
-		if err != pebble.ErrNotFound {
-			panic(err)
-		}
-		// this account doesnt exist yet, not in cache, not in db.create a new account info instance
-
-		accountInfo = NewAccountInfo(account, cache.precomputedData)
-
-	} else {
-		accountInfo.Update(blockNumber, balance, cache.db)
-	}
-	cache.Set(account, accountInfo)
-	commitmentHash := accountInfo.CalculateFinalCommitment()
-
-	return commitmentHash
-}
-
-func NewCreateOrUpdateAccountInfo(account common.Address, balance *big.Int, blockNumber uint64, cache *OldCache) common.Hash {
-	shouldFlush := false
-	var commitmentHash common.Hash
-	cache.mu.Lock()
-	if e, ok := cache.entries[account]; ok {
-		// cache hit
-		e.mu.Lock()
-		cache.moveToHead(e)
-		if !e.dirty {
-			e.dirty = true
-			cache.dirtyEntriesCount++
-		}
-		cache.updatesSinceLastFlush++
-
-		shouldFlush = cache.updatesSinceLastFlush >= cache.maxUpdatesSinceLastFlush || cache.dirtyEntriesCount >= cache.maxDirtyEntriesCount
-		cache.mu.Unlock()
-		accountInfo := e.val
-		accountInfo.Update(blockNumber, balance, cache.db)
-		commitmentHash = accountInfo.CalculateFinalCommitment()
-
-		e.mu.Unlock()
-
-	} else {
-		// cache miss: load from db
-		// TODO: recheck if you want to keep a temp entry as placeholder in cache for this account
-		e := &CacheEntry{
-			mu:    sync.RWMutex{},
-			key:   account,
-			dirty: true,
-		}
-		e.mu.Lock()
-		cache.entries[account] = e
-		cache.attach(e)
-		cache.dirtyEntriesCount++
-		cache.evictIfNeeded()
-		cache.updatesSinceLastFlush++
-
-		shouldFlush = cache.updatesSinceLastFlush >= cache.maxUpdatesSinceLastFlush || cache.dirtyEntriesCount >= cache.maxDirtyEntriesCount
-		cache.mu.Unlock()
-
-		cbInfo, err := GetCurrentBalanceInfo(account, cache.db)
-		if err != nil {
-			if err != pebble.ErrNotFound {
-				panic(err)
-			}
-			// key not found in db
-			accountInfo := NewAccountInfo(account, cache.precomputedData)
-			e.val = accountInfo
-			commitmentHash = accountInfo.CalculateFinalCommitment()
-		} else {
-			// key found in db
-			batchTree := GetCurrentLXBatchTree(account, cache.db)
-			batchCommitments := GetLXBatchCommitments(account, cbInfo.Version, cache.db)
-			accountInfo := &AccountInfo{
-				Account:                  account,
-				CurrentBalanceInfo:       cbInfo,
-				CurrentLXBatchTree:       batchTree,
-				CurrentLXBatchCommitment: batchCommitments,
-				PrecomputedData:          cache.precomputedData,
-			}
-			accountInfo.Update(blockNumber, balance, cache.db)
-			e.val = accountInfo
-			commitmentHash = accountInfo.CalculateFinalCommitment()
-
-		}
-		e.mu.Unlock()
-	}
-	if shouldFlush {
-		cache.flushSome(false)
-	}
-
-	return commitmentHash
-}
-
-func LibNewCreateOrUpdateAccountInfo(account common.Address, balance *big.Int, blockNumber uint64, cache *OldCache) common.Hash {
-	shouldFlush := false
-	var commitmentHash common.Hash
-	cache.mu.Lock()
-	if e, ok := cache.entries[account]; ok {
-		// cache hit
-		e.mu.Lock()
-		cache.moveToHead(e)
-		if !e.dirty {
-			e.dirty = true
-			cache.dirtyEntriesCount++
-		}
-		cache.updatesSinceLastFlush++
-
-		shouldFlush = cache.updatesSinceLastFlush >= cache.maxUpdatesSinceLastFlush || cache.dirtyEntriesCount >= cache.maxDirtyEntriesCount
-		cache.mu.Unlock()
-		accountInfo := e.val
-		accountInfo.Update(blockNumber, balance, cache.db)
-		commitmentHash = accountInfo.CalculateFinalCommitment()
-
-		e.mu.Unlock()
-
-	} else {
-		// cache miss: load from db
-		// TODO: recheck if you want to keep a temp entry as placeholder in cache for this account
-		e := &CacheEntry{
-			mu:    sync.RWMutex{},
-			key:   account,
-			dirty: true,
-		}
-		e.mu.Lock()
-		cache.entries[account] = e
-		cache.attach(e)
-		cache.dirtyEntriesCount++
-		cache.evictIfNeeded()
-		cache.updatesSinceLastFlush++
-
-		shouldFlush = cache.updatesSinceLastFlush >= cache.maxUpdatesSinceLastFlush || cache.dirtyEntriesCount >= cache.maxDirtyEntriesCount
-		cache.mu.Unlock()
-
-		cbInfo, err := GetCurrentBalanceInfo(account, cache.db)
-		if err != nil {
-			if err != pebble.ErrNotFound {
-				panic(err)
-			}
-			// key not found in db
-			accountInfo := NewAccountInfo(account, cache.precomputedData)
-			e.val = accountInfo
-			commitmentHash = accountInfo.CalculateFinalCommitment()
-		} else {
-			// key found in db
-			batchTree := GetCurrentLXBatchTree(account, cache.db)
-			batchCommitments := GetLXBatchCommitments(account, cbInfo.Version, cache.db)
-			accountInfo := &AccountInfo{
-				Account:                  account,
-				CurrentBalanceInfo:       cbInfo,
-				CurrentLXBatchTree:       batchTree,
-				CurrentLXBatchCommitment: batchCommitments,
-				PrecomputedData:          cache.precomputedData,
-			}
-			accountInfo.Update(blockNumber, balance, cache.db)
-			e.val = accountInfo
-			commitmentHash = accountInfo.CalculateFinalCommitment()
-
-		}
-		e.mu.Unlock()
-	}
-	if shouldFlush {
-		cache.flushSome(false)
-	}
-
-	return commitmentHash
-}
-
-func FinalCreateOrUpdateAccountInfo(account common.Address, balance *big.Int, blockNumber uint64, cache *Cache) common.Hash {
+func CreateOrUpdateAccountInfo(account common.Address, balance *big.Int, blockNumber uint64, cache *Cache) common.Hash {
 	initFn := func(account common.Address) *AccountInfo {
 		accountInfo := NewAccountInfo(account, cache.precomputedData)
 		return accountInfo
@@ -315,18 +145,18 @@ func FinalCreateOrUpdateAccountInfo(account common.Address, balance *big.Int, bl
 		}
 	}
 	mutate := func(accountInfo *AccountInfo) {
-		start := time.Now()
+		// start := time.Now()
 		accountInfo.Update(blockNumber, balance, cache.db)
-		fmt.Println("Time taken to mutate account info", time.Since(start))
+		// fmt.Println("Time taken to mutate account info", time.Since(start))
 	}
 
 	// quitLog := logBlockedTime("Update", 100*time.Millisecond)
-	start := time.Now()
+	// start := time.Now()
 	accountInfo, err := cache.Update(account, initFn, loadFn, mutate)
 	if err != nil {
 		panic(err)
 	}
-	fmt.Println("Time taken to update account info in cache", time.Since(start))
+	// fmt.Println("update time:", time.Since(start))
 	// close(quitLog)
 	commitmentHash := accountInfo.CalculateFinalCommitment()
 	return commitmentHash

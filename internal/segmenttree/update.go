@@ -1,10 +1,8 @@
 package segmenttree
 
 import (
-	"fmt"
 	"math/big"
 	"strconv"
-	"time"
 
 	"github.com/cockroachdb/pebble"
 	"github.com/consensys/gnark-crypto/ecc"
@@ -45,14 +43,13 @@ func (accountInfo *AccountInfo) Update(blockNumber uint64, balance *big.Int, db 
 	// StoreHistoricalBalanceByHash(hb, db)
 
 	//  This will update the current batch tree and commitments inplace.
-	start := time.Now()
+	// start := time.Now()
 	accountInfo.AddLeafNode(hb.Version, hbHash)
-	fmt.Println("Time taken to add leaf node", time.Since(start))
+	// fmt.Println("Time taken to add leaf node", time.Since(start))
 
 	// Save
-	// TODO: uncomment this and make it async
 	// start = time.Now()
-	// StoreHistoricalBalance(accountInfo.Account, hb, db)
+	StoreHistoricalBalance(accountInfo.Account, hb, db)
 	// fmt.Println("Time taken to store historical balance in db", time.Since(start))
 
 }
@@ -65,11 +62,11 @@ func (accountInfo *AccountInfo) CalculateFinalCommitment() common.Hash {
 
 }
 
-// func (accountInfo *AccountInfo) Save(db *pebble.DB) {
-// 	StoreCurrentBalanceInfo(accountInfo.Account, accountInfo.CurrentBalanceInfo, db)
-// 	StoreCurrentBatchTree(accountInfo.Account, &accountInfo.CurrentBatchTree, db)
-// 	StoreBatchCommitments(accountInfo.Account, accountInfo.CurrentBalanceInfo.Version, &accountInfo.CurrentBatchTreeCommitments, db)
-// }
+func (accountInfo *AccountInfo) Save(db *pebble.DB) {
+	StoreCurrentBalanceInfo(accountInfo.Account, accountInfo.CurrentBalanceInfo, db)
+	StoreCurrentLXBatchTree(accountInfo.Account, accountInfo.CurrentLXBatchTree, db)
+	StoreLXBatchCommitments(accountInfo.Account, accountInfo.CurrentBalanceInfo.Version, accountInfo.CurrentLXBatchCommitment, db)
+}
 
 // updates the current batch tree, and commitments. resets them if needed.
 func (accountInfo *AccountInfo) AddLeafNode(leafNodeIdx uint64, leafNodeHash common.Hash) {

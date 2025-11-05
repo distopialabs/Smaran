@@ -45,7 +45,7 @@ func StoreCurrentBalanceInfo(account common.Address, currentBalance *CurrentBala
 	if err != nil {
 		panic(fmt.Errorf("failed to encode current balance info: %w", err))
 	}
-	err = db.Set([]byte(key), val, pebble.Sync)
+	err = db.Set([]byte(key), val, pebble.NoSync)
 	if err != nil {
 		panic(fmt.Errorf("failed to store current balance info: %w", err))
 	}
@@ -132,7 +132,7 @@ func StoreHistoricalBalance(account common.Address, historicalBalance *Historica
 	if err != nil {
 		panic(fmt.Errorf("failed to encode historical balance: %w", err))
 	}
-	err = db.Set([]byte(key), hbBytes, pebble.Sync)
+	err = db.Set([]byte(key), hbBytes, pebble.NoSync)
 	if err != nil {
 		panic(fmt.Errorf("failed to store historical balance: %w", err))
 	}
@@ -231,7 +231,7 @@ func StoreCurrentLXBatchTree(account common.Address, batchTree *LXBatchTree, db 
 		// if err != nil {
 		// 	panic(fmt.Errorf("failed to encode batch tree: %w", err))
 		// }
-		err = db.Set([]byte(key), val, pebble.Sync)
+		err = db.Set([]byte(key), val, pebble.NoSync)
 		if err != nil {
 			panic(fmt.Errorf("failed to store batch tree: %w", err))
 		}
@@ -390,7 +390,7 @@ func StoreLXBatchCommitments(account common.Address, version uint64, batchCommit
 		valBytes := batchCommitments[layer-1].Bytes()
 		val := make([]byte, len(valBytes))
 		copy(val, valBytes[:])
-		err := db.Set([]byte(key), val, pebble.Sync)
+		err := db.Set([]byte(key), val, pebble.NoSync)
 		if err != nil {
 			panic(fmt.Errorf("failed to store batch commitments: %w", err))
 		}
