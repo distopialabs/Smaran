@@ -2,6 +2,8 @@ package segmenttree
 
 import (
 	"encoding/json"
+	"fmt"
+	"time"
 
 	bls "github.com/consensys/gnark-crypto/ecc/bls12-381"
 	fr "github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
@@ -9,6 +11,24 @@ import (
 	gnark_kzg "github.com/consensys/gnark-crypto/ecc/bls12-381/kzg"
 	"github.com/ethereum/go-ethereum/common"
 )
+
+func logBlockedTime(name string, d time.Duration) chan struct{} {
+	start := time.Now()
+	ticker := time.NewTicker(d)
+	quit := make(chan struct{})
+	go func() {
+		for {
+			select {
+			case <-ticker.C:
+				fmt.Println("🚨", name, "blocked for", time.Since(start))
+			case <-quit:
+				ticker.Stop()
+				return
+			}
+		}
+	}()
+	return quit
+}
 
 func MarshalG1AffineMap(g1AffineMap map[int]bls.G1Affine) ([]byte, error) {
 	g1affinebytesMap := make(map[int][]byte)

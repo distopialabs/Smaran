@@ -3,6 +3,7 @@ package segmenttree
 import (
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/cockroachdb/pebble"
 	gnark_kzg "github.com/consensys/gnark-crypto/ecc/bls12-381/kzg"
@@ -61,7 +62,7 @@ func BatchStoreCurrentBalanceInfo(account common.Address, currentBalance *Curren
 	if err != nil {
 		panic(fmt.Errorf("failed to encode current balance info: %w", err))
 	}
-	b.Set([]byte(key), val, nil)
+	b.Set([]byte(key), val, pebble.NoSync)
 }
 
 func GetCurrentBalanceInfo(account common.Address, db *pebble.DB) (*CurrentBalance, error) {
@@ -220,15 +221,16 @@ func StoreCurrentLXBatchTree(account common.Address, batchTree *LXBatchTree, db 
 		key := GenerateCurrentLXBatchTreeKey(account, layer)
 		var val []byte
 		var err error
-		if dbEncoding == EncodingProto {
-			bt := (*BatchTree)(&batchTree[layer-1])
-			val, err = proto.Marshal(protoFromBatchTree(bt))
-		} else {
-			val, err = rlp.EncodeToBytes(batchTree[layer-1])
-		}
-		if err != nil {
-			panic(fmt.Errorf("failed to encode batch tree: %w", err))
-		}
+		val = batchTree[layer-1].MarshalBinary()
+		// if dbEncoding == EncodingProto {
+		// 	bt := (*BatchTree)(&batchTree[layer-1])
+		// 	val, err = proto.Marshal(protoFromBatchTree(bt))
+		// } else {
+		// 	val, err = rlp.EncodeToBytes(batchTree[layer-1])
+		// }
+		// if err != nil {
+		// 	panic(fmt.Errorf("failed to encode batch tree: %w", err))
+		// }
 		err = db.Set([]byte(key), val, pebble.Sync)
 		if err != nil {
 			panic(fmt.Errorf("failed to store batch tree: %w", err))
@@ -239,18 +241,19 @@ func StoreCurrentLXBatchTree(account common.Address, batchTree *LXBatchTree, db 
 func BatchStoreCurrentLXBatchTree(account common.Address, batchTree *LXBatchTree, b *pebble.Batch) {
 	for layer := uint64(1); layer <= MaxLayer; layer++ {
 		key := GenerateCurrentLXBatchTreeKey(account, layer)
-		var val []byte
-		var err error
-		if dbEncoding == EncodingProto {
-			bt := (*BatchTree)(&batchTree[layer-1])
-			val, err = proto.Marshal(protoFromBatchTree(bt))
-		} else {
-			val, err = rlp.EncodeToBytes(batchTree[layer-1])
-		}
-		if err != nil {
-			panic(fmt.Errorf("failed to encode batch tree: %w", err))
-		}
-		b.Set([]byte(key), val, nil)
+		// var val []byte
+		// var err error
+		val := batchTree[layer-1].MarshalBinary()
+		// if dbEncoding == EncodingProto {
+		// 	bt := (*BatchTree)(&batchTree[layer-1])
+		// 	val, err = proto.Marshal(protoFromBatchTree(bt))
+		// } else {
+		// 	val, err = rlp.EncodeToBytes(batchTree[layer-1])
+		// }
+		// if err != nil {
+		// 	panic(fmt.Errorf("failed to encode batch tree: %w", err))
+		// }
+		b.Set([]byte(key), val, pebble.NoSync)
 	}
 }
 
@@ -266,23 +269,106 @@ func GetCurrentLXBatchTree(account common.Address, db *pebble.DB) *LXBatchTree {
 				panic(fmt.Errorf("failed to get batch tree: %w", err))
 			}
 		}
-		if dbEncoding == EncodingProto {
-			pb := &segmenttreepb.BatchTree{}
-			if err := proto.Unmarshal(val, pb); err != nil {
-				panic(fmt.Errorf("failed to decode batch tree: %w", err))
-			}
-			tree := batchTreeFromProto(pb)
-			batchTree[layer-1] = tree
-		} else {
-			var tree BatchTree
-			if err := rlp.DecodeBytes(val, &tree); err != nil {
-				panic(fmt.Errorf("failed to decode batch tree: %w", err))
-			}
-			batchTree[layer-1] = tree
+		var tree BatchTree
+		if err := tree.UnmarshalBinary(val); err != nil {
+			panic(fmt.Errorf("failed to decode batch tree: %w", err))
 		}
+		batchTree[layer-1] = tree
+		// if dbEncoding == EncodingProto {
+		// 	pb := &segmenttreepb.BatchTree{}
+		// 	if err := proto.Unmarshal(val, pb); err != nil {
+		// 		panic(fmt.Errorf("failed to decode batch tree: %w", err))
+		// 	}
+		// 	tree := batchTreeFromProto(pb)
+		// 	batchTree[layer-1] = tree
+		// } else {
+		// 	var tree BatchTree
+		// 	if err := rlp.DecodeBytes(val, &tree); err != nil {
+		// 		panic(fmt.Errorf("failed to decode batch tree: %w", err))
+		// 	}
+		// 	batchTree[layer-1] = tree
+		// }
 		closer.Close()
 	}
 	return &batchTree
+}
+
+func GetCurrentLXBatchTreeAndCommitments(account common.Address, version uint64, db *pebble.DB) (*LXBatchTree, *LXBatchCommitment) {
+	lastLeafNodeIdx := version - 1
+	lxBatchIdx := func(layer uint64) uint64 {
+		if layer == 0 || layer > MaxLayer {
+			panic("layer" + strconv.Itoa(int(layer)) + " is not supported")
+		}
+		return lastLeafNodeIdx / (L1BatchSize * math.Pow(L2BatchSize, layer-1))
+	}
+
+	prefix := []byte("user:" + account.Hex() + ":") //TODO: add ":batch_" to prefix
+	iterOpts := &pebble.IterOptions{
+		LowerBound: prefix,
+		UpperBound: append(prefix, 0xFF),
+	}
+
+	iter, err := db.NewIter(iterOpts)
+	if err != nil {
+		panic(fmt.Errorf("failed to create iterator: %w", err))
+	}
+	defer iter.Close()
+
+	var batchTree LXBatchTree
+	var batchCommitments LXBatchCommitment
+
+	for iter.First(); iter.Valid(); iter.Next() {
+		key := string(iter.Key())
+		if strings.Contains(key, ":batch_tree:") {
+			parts := strings.Split(key, ":")
+			if len(parts) >= 4 {
+				layer, err := strconv.ParseUint(parts[3], 10, 64)
+				if err != nil {
+					panic(fmt.Errorf("failed to parse layer: %w", err))
+				}
+				if layer > MaxLayer || layer < 1 {
+					panic(fmt.Errorf("layer %d is not supported", layer))
+				}
+				var tree BatchTree
+				if err := tree.UnmarshalBinary(iter.Value()); err != nil {
+					panic(fmt.Errorf("failed to decode batch tree: %w", err))
+				}
+				batchTree[layer-1] = tree
+			}
+		} else if strings.Contains(key, ":batch_commitments:") {
+			parts := strings.Split(key, ":")
+			if len(parts) >= 5 {
+				layer, err := strconv.ParseUint(parts[3], 10, 64)
+				if err != nil {
+					panic(fmt.Errorf("failed to parse layer: %w", err))
+				}
+				if layer > MaxLayer || layer < 1 {
+					panic(fmt.Errorf("layer %d is not supported", layer))
+				}
+				batchIdx, err := strconv.ParseUint(parts[4], 10, 64)
+				if err != nil {
+					panic(fmt.Errorf("failed to parse batch index: %w", err))
+				}
+				// TODO: uncomment this, and check if invalid batch index used when storing.
+				// if batchIdx > L1BatchSize*math.Pow(L2BatchSize, layer-1) {
+				// 	panic(fmt.Errorf("batch index %d is not supported", batchIdx))
+				// }
+				expectedBatchIdx := lxBatchIdx(layer)
+				if expectedBatchIdx == batchIdx {
+					var commitment gnark_kzg.Digest
+					_, err := commitment.SetBytes(iter.Value())
+					if err != nil {
+						panic(fmt.Errorf("failed to set commitment: %w", err))
+					}
+					batchCommitments[layer-1] = commitment
+				}
+			}
+		}
+	}
+	if err := iter.Error(); err != nil {
+		panic(fmt.Errorf("failed to iterate: %w", err))
+	}
+	return &batchTree, &batchCommitments
 }
 
 func GenerateBatchCommitmentsKey(account common.Address, layer, batchIdx uint64) string {
@@ -301,17 +387,10 @@ func StoreLXBatchCommitments(account common.Address, version uint64, batchCommit
 	for layer := uint64(1); layer <= MaxLayer; layer++ {
 		batchIdx := lxBatchIdx(uint64(layer))
 		key := GenerateBatchCommitmentsKey(account, layer, batchIdx)
-		var val []byte
-		var err error
-		if dbEncoding == EncodingProto {
-			val, err = proto.Marshal(protoFromDigest(batchCommitments[layer-1]))
-		} else {
-			val, err = rlp.EncodeToBytes(batchCommitments[layer-1])
-		}
-		if err != nil {
-			panic(fmt.Errorf("failed to encode batch commitments: %w", err))
-		}
-		err = db.Set([]byte(key), val, pebble.Sync)
+		valBytes := batchCommitments[layer-1].Bytes()
+		val := make([]byte, len(valBytes))
+		copy(val, valBytes[:])
+		err := db.Set([]byte(key), val, pebble.Sync)
 		if err != nil {
 			panic(fmt.Errorf("failed to store batch commitments: %w", err))
 		}
@@ -329,17 +408,10 @@ func BatchStoreLXBatchCommitments(account common.Address, version uint64, batchC
 	for layer := uint64(1); layer <= MaxLayer; layer++ {
 		batchIdx := lxBatchIdx(uint64(layer))
 		key := GenerateBatchCommitmentsKey(account, layer, batchIdx)
-		var val []byte
-		var err error
-		if dbEncoding == EncodingProto {
-			val, err = proto.Marshal(protoFromDigest(batchCommitments[layer-1]))
-		} else {
-			val, err = rlp.EncodeToBytes(batchCommitments[layer-1])
-		}
-		if err != nil {
-			panic(fmt.Errorf("failed to encode batch commitments: %w", err))
-		}
-		b.Set([]byte(key), val, nil)
+		valBytes := batchCommitments[layer-1].Bytes()
+		val := make([]byte, len(valBytes))
+		copy(val, valBytes[:])
+		b.Set([]byte(key), val, pebble.NoSync)
 	}
 }
 
@@ -364,20 +436,16 @@ func GetLXBatchCommitments(account common.Address, version uint64, db *pebble.DB
 				panic(fmt.Errorf("failed to get batch commitments: %w", err))
 			}
 		}
-		if dbEncoding == EncodingProto {
-			pb := &segmenttreepb.KZGDigest{}
-			if err := proto.Unmarshal(val, pb); err != nil {
-				panic(fmt.Errorf("failed to decode batch commitments: %w", err))
-			}
-			commitments := digestFromProto(pb)
-			batchCommitments[layer-1] = commitments
-		} else {
-			var commitments gnark_kzg.Digest
-			if err := rlp.DecodeBytes(val, &commitments); err != nil {
-				panic(fmt.Errorf("failed to decode batch commitments: %w", err))
-			}
-			batchCommitments[layer-1] = commitments
+
+		commitmentBytes := make([]byte, len(val))
+		copy(commitmentBytes, val[:])
+		var commitment gnark_kzg.Digest
+		_, err = commitment.SetBytes(commitmentBytes)
+		if err != nil {
+			panic(fmt.Errorf("failed to set commitment: %w", err))
 		}
+		batchCommitments[layer-1] = commitment
+
 		closer.Close()
 	}
 	return &batchCommitments

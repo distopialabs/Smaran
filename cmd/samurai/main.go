@@ -18,7 +18,7 @@ func main() {
 	// usage: go run main.go -numBlocks 100 -numTrackedAccounts 100 -concurrency 10
 
 	mode := flag.String("mode", "commit", "Mode to run: commit, proof, verify")
-	dbEncoding := flag.String("dbEncoding", "proto", "DB encoding: proto or rlp")
+	dbEncoding := flag.String("dbEncoding", "rlp", "DB encoding: proto or rlp")
 	concurrency := flag.Int("c", 1, "Concurrency level")
 	_ = concurrency
 	profile := flag.Bool("p", true, "Profile the program")

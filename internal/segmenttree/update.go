@@ -1,8 +1,10 @@
 package segmenttree
 
 import (
+	"fmt"
 	"math/big"
 	"strconv"
+	"time"
 
 	"github.com/cockroachdb/pebble"
 	"github.com/consensys/gnark-crypto/ecc"
@@ -18,6 +20,15 @@ import (
 
 func (accountInfo *AccountInfo) Update(blockNumber uint64, balance *big.Int, db *pebble.DB) {
 	prevCb := accountInfo.CurrentBalanceInfo
+
+	if prevCb == nil {
+		accountInfo.CurrentBalanceInfo = &CurrentBalance{
+			Version:    0,
+			Balance:    balance,
+			StartBlock: blockNumber,
+		}
+		return
+	}
 	hb := prevCb.ToHistoricalBalance(blockNumber - 1)
 
 	// Update current balance
@@ -34,14 +45,15 @@ func (accountInfo *AccountInfo) Update(blockNumber uint64, balance *big.Int, db 
 	// StoreHistoricalBalanceByHash(hb, db)
 
 	//  This will update the current batch tree and commitments inplace.
+	start := time.Now()
 	accountInfo.AddLeafNode(hb.Version, hbHash)
+	fmt.Println("Time taken to add leaf node", time.Since(start))
 
 	// Save
-	StoreHistoricalBalance(accountInfo.Account, hb, db)
-	// StoreCurrentBalanceInfo(accountInfo.Account, accountInfo.CurrentBalanceInfo, db)
-	// StoreCurrentBatchTree(accountInfo.Account, &accountInfo.CurrentBatchTree, db)
-	// StoreBatchCommitments(accountInfo.Account, accountInfo.CurrentBalanceInfo.Version, &accountInfo.CurrentBatchTreeCommitments, db)
-	// accountInfo.Save(db)
+	// TODO: uncomment this and make it async
+	// start = time.Now()
+	// StoreHistoricalBalance(accountInfo.Account, hb, db)
+	// fmt.Println("Time taken to store historical balance in db", time.Since(start))
 
 }
 
