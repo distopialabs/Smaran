@@ -22,6 +22,7 @@ func main() {
 	concurrency := flag.Int("c", 1, "Concurrency level")
 	_ = concurrency
 	profile := flag.Bool("p", true, "Profile the program")
+	ipc := flag.String("ipc", "/mydata/erigon/mainnet/erigon.ipc", "Erigon IPC path")
 
 	// flags to generate commitments
 	numBlocks := flag.Int("numBlocks", 100, "Number of blocks to process")
@@ -50,7 +51,7 @@ func main() {
 		defer pprof.StopCPUProfile()
 	}
 
-	client, err := rpc.Dial("/mydata/erigon/mainnet/erigon.ipc")
+	client, err := rpc.Dial(*ipc)
 	if err != nil {
 		log.Fatalf("Failed to connect to Erigon IPC: %v", err)
 	}
