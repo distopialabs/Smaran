@@ -46,17 +46,21 @@ func (c *Cache) Update(k common.Address, initFn func(common.Address) *AccountInf
 			ai = initFn(k)
 		}
 	}
-	// fmt.Println("Time taken to get/init account info from cache/db", time.Since(start))
+	// fmt.Println(k.Hex(), "get/init time:", time.Since(start))
+	// start = time.Now()
 	mutate(ai)
-
+	// fmt.Println(k.Hex(), "mutate time:", time.Since(start))
 	// quitLog = logBlockedTime("CacheSet", 100*time.Millisecond)
+	// start = time.Now()
 	admitted := c.rc.Set(k[:], ai, 1)
 	if !admitted {
-		fmt.Println("❌Cache set rejected")
+		fmt.Println(k.Hex(), "❌Cache set rejected")
 	}
+	// fmt.Println(k.Hex(), "cache set time:", time.Since(start))
 	// start := time.Now()
+	// start = time.Now()
 	ai.Save(c.db)
-	// fmt.Println("save time:", time.Since(start))
+	// fmt.Println(k.Hex(), "save time:", time.Since(start))
 	// close(quitLog)
 	// c.rc.Wait() // TODO: do i need to wait here?
 	return ai, nil

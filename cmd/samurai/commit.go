@@ -60,8 +60,8 @@ func generateCommitmentsV2(config *config.Config, precomputedData *config.Precom
 	blockInfoCh := make(chan blockInfo, 1024)
 	orderedBlockInfoCh := make(chan blockInfo, 1024)
 	// updateTaskCh := make(chan updateTask, 1<<10)
-	fetchWorkerCount := workers * 2
-	updateWorkerCount := workers * 4
+	fetchWorkerCount := 32           //workers * 2 = 32
+	updateWorkerCount := workers * 4 //workers * 4 = 64
 
 	// create separate updateTaskCh for each worker
 	updateTaskChs := make([]chan updateTask, updateWorkerCount)
@@ -84,7 +84,7 @@ func generateCommitmentsV2(config *config.Config, precomputedData *config.Precom
 				if bn > config.EndingBlockNumber {
 					break
 				}
-				start := time.Now()
+				// start := time.Now()
 				// fetch all the modified accounts in this block
 				modifiedAccounts, err := ledger.GetModifiedAccountsByNumber(bn, config.Client)
 				if err != nil {
@@ -99,7 +99,7 @@ func generateCommitmentsV2(config *config.Config, precomputedData *config.Precom
 				if err != nil {
 					panic(fmt.Errorf("failed to get balances for block %d: %w", bn, err))
 				}
-				fmt.Println("Block", bn, "fetched and sent to the channel", time.Since(start))
+				// fmt.Println("Block", bn, "fetched and sent to the channel", time.Since(start))
 
 				// TODO: remove this override
 				// balances := []*big.Int{new(big.Int).SetUint64(1000000000000000000 + uint64(bn))}
@@ -146,14 +146,14 @@ func generateCommitmentsV2(config *config.Config, precomputedData *config.Precom
 			} else {
 				pendingBlocks[blkInfo.Number] = blkInfo
 			}
-			if len(pendingBlocks) > 100 {
+			if len(pendingBlocks) > 1000 {
 				fmt.Println("🚨💾💣 Pending blocks:", len(pendingBlocks))
 				panic(fmt.Sprintf("Pending blocks exceeded safe limit: %d", len(pendingBlocks)))
 			} else if len(pendingBlocks) > 50 {
 				fmt.Println("⚠️💾💣 Pending blocks:", len(pendingBlocks))
 				// }
 			} else {
-				fmt.Println("Pending blocks:", len(pendingBlocks))
+				// fmt.Println("Pending blocks:", len(pendingBlocks))
 			}
 		}
 		close(orderedBlockInfoCh)
@@ -213,38 +213,38 @@ func logChannelSize(blockInfoCh chan blockInfo, orderedBlockInfoCh chan blockInf
 	for {
 		time.Sleep(1 * time.Second)
 		remaining := cap(blockInfoCh) - len(blockInfoCh)
-		if remaining > 5 {
-			fmt.Printf("BlockInfoCh: %d/%d\n", len(blockInfoCh), cap(blockInfoCh))
-		}
-		if remaining > 0 && remaining < 5 {
-			fmt.Printf("⚠️ BlockInfoCh is almost full: %d/%d\n", len(blockInfoCh), cap(blockInfoCh))
-		}
-		if remaining <= 0 {
-			fmt.Printf("🚨 BlockInfoCh is full: %d/%d\n", len(blockInfoCh), cap(blockInfoCh))
-		}
-
-		remaining = cap(orderedBlockInfoCh) - len(orderedBlockInfoCh)
-		if remaining > 5 {
-			fmt.Printf("OrderedBlockInfoCh: %d/%d\n", len(orderedBlockInfoCh), cap(orderedBlockInfoCh))
-		}
-		if remaining > 0 && remaining < 5 {
-			fmt.Printf("⚠️ OrderedBlockInfoCh is almost full, %d/%d\n", len(orderedBlockInfoCh), cap(orderedBlockInfoCh))
-		}
-		if remaining <= 0 {
-			fmt.Printf("🚨 OrderedBlockInfoCh is full: %d/%d\n", len(orderedBlockInfoCh), cap(orderedBlockInfoCh))
-		}
-		// for i, updateTaskCh := range updateTaskChs {
-		// 	remaining = cap(updateTaskCh) - len(updateTaskCh)
-		// 	if remaining > 5 {
-		// 		fmt.Printf("UpdateTaskCh %d: %d/%d\n", i, len(updateTaskCh), cap(updateTaskCh))
-		// 	}
-		// 	if remaining > 0 && remaining < 5 {
-		// 		fmt.Printf("⚠️ UpdateTaskCh %d is almost full: %d/%d\n", i, len(updateTaskCh), cap(updateTaskCh))
-		// 	}
-		// 	if remaining <= 0 {
-		// 		fmt.Printf("🚨 UpdateTaskCh %d is full: %d/%d\n", i, len(updateTaskCh), cap(updateTaskCh))
-		// 	}
+		// if remaining > 5 {
+		// 	fmt.Printf("BlockInfoCh: %d/%d\n", len(blockInfoCh), cap(blockInfoCh))
 		// }
+		// if remaining > 0 && remaining < 5 {
+		// 	fmt.Printf("⚠️ BlockInfoCh is almost full: %d/%d\n", len(blockInfoCh), cap(blockInfoCh))
+		// }
+		// if remaining <= 0 {
+		// 	fmt.Printf("🚨 BlockInfoCh is full: %d/%d\n", len(blockInfoCh), cap(blockInfoCh))
+		// }
+
+		// remaining = cap(orderedBlockInfoCh) - len(orderedBlockInfoCh)
+		// if remaining > 5 {
+		// 	fmt.Printf("OrderedBlockInfoCh: %d/%d\n", len(orderedBlockInfoCh), cap(orderedBlockInfoCh))
+		// }
+		// if remaining > 0 && remaining < 5 {
+		// 	fmt.Printf("⚠️ OrderedBlockInfoCh is almost full, %d/%d\n", len(orderedBlockInfoCh), cap(orderedBlockInfoCh))
+		// }
+		// if remaining <= 0 {
+		// 	fmt.Printf("🚨 OrderedBlockInfoCh is full: %d/%d\n", len(orderedBlockInfoCh), cap(orderedBlockInfoCh))
+		// }
+		for i, updateTaskCh := range updateTaskChs {
+			remaining = cap(updateTaskCh) - len(updateTaskCh)
+			if remaining > 5 {
+				fmt.Printf("UpdateTaskCh %d: %d/%d\n", i, len(updateTaskCh), cap(updateTaskCh))
+			}
+			if remaining > 0 && remaining < 5 {
+				fmt.Printf("⚠️ UpdateTaskCh %d is almost full: %d/%d\n", i, len(updateTaskCh), cap(updateTaskCh))
+			}
+			if remaining <= 0 {
+				fmt.Printf("🚨 UpdateTaskCh %d is full: %d/%d\n", i, len(updateTaskCh), cap(updateTaskCh))
+			}
+		}
 
 	}
 }

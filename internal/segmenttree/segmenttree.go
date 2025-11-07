@@ -156,7 +156,7 @@ func CreateOrUpdateAccountInfo(account common.Address, balance *big.Int, blockNu
 	if err != nil {
 		panic(err)
 	}
-	// fmt.Println("update time:", time.Since(start))
+	// fmt.Println(account.Hex(), "update time:", time.Since(start))
 	// close(quitLog)
 	commitmentHash := accountInfo.CalculateFinalCommitment()
 	return commitmentHash
