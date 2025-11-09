@@ -45,6 +45,7 @@ func generateCommitmentsV2(config *config.Config, precomputedData *config.Precom
 		// MemTableSize: 1 << 31,
 		MemTableSize: 2_147_483_648,
 		DisableWAL:   true,
+		// Cache:        pebble.NewCache(2_147_483_648),
 	})
 	if err != nil {
 		panic(err)
@@ -54,6 +55,14 @@ func generateCommitmentsV2(config *config.Config, precomputedData *config.Precom
 	if err != nil {
 		panic(err)
 	}
+	// otterCache, err := segmenttree.NewOtterCache(db, precomputedData)
+	// if err != nil {
+	// 	panic(err)
+	// }
+	// lruCache, err := segmenttree.NewLRUCache(db, precomputedData)
+	// if err != nil {
+	// 	panic(err)
+	// }
 
 	workers := runtime.NumCPU()
 	fmt.Println("Workers:", workers)
@@ -99,7 +108,7 @@ func generateCommitmentsV2(config *config.Config, precomputedData *config.Precom
 				if err != nil {
 					panic(fmt.Errorf("failed to get balances for block %d: %w", bn, err))
 				}
-				// fmt.Println("Block", bn, "fetched and sent to the channel", time.Since(start))
+				fmt.Println("Block", bn, "fetched and sent to the channel")
 
 				// TODO: remove this override
 				// balances := []*big.Int{new(big.Int).SetUint64(1000000000000000000 + uint64(bn))}
@@ -135,7 +144,7 @@ func generateCommitmentsV2(config *config.Config, precomputedData *config.Precom
 				nextBlockToProcess++
 				for {
 					if blk, ok := pendingBlocks[nextBlockToProcess]; ok {
-						// fmt.Println("Block", nextBlockToProcess, "ordered and sent to the channel")
+						fmt.Println("Block", nextBlockToProcess, "ordered and sent to the channel")
 						orderedBlockInfoCh <- blk
 						delete(pendingBlocks, nextBlockToProcess)
 						nextBlockToProcess++
@@ -175,7 +184,7 @@ func generateCommitmentsV2(config *config.Config, precomputedData *config.Precom
 					Balance:     blk.Balances[i],
 				}
 			}
-			// fmt.Println("Block", blk.Number, "with", len(blk.ModifiedAccounts), "accounts sent to updateTaskCh", time.Since(total_start))
+			fmt.Println("Block", blk.Number, "with", len(blk.ModifiedAccounts), "accounts sent to updateTaskCh")
 		}
 		for i := range updateWorkerCount {
 			close(updateTaskChs[i])
@@ -184,13 +193,16 @@ func generateCommitmentsV2(config *config.Config, precomputedData *config.Precom
 	}()
 
 	wg := sync.WaitGroup{}
+	// create syncmap to track the account seen
+	var accountsSeen sync.Map
 	for i := range updateWorkerCount {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			for task := range updateTaskChs[i] {
+				_, seen := accountsSeen.LoadOrStore(task.Account, struct{}{})
 				// start := time.Now()
-				segmenttree.CreateOrUpdateAccountInfo(task.Account, task.Balance, task.BlockNumber, cache)
+				segmenttree.CreateOrUpdateAccountInfo(task.Account, task.Balance, task.BlockNumber, cache, seen)
 				// fmt.Println("Block", task.BlockNumber, "account", task.Account.Hex(), "time:", time.Since(start))
 				// segmenttree.NewCreateOrUpdateAccountInfo(task.Account, task.Balance, task.BlockNumber, cache)
 				// segmenttree.NewCreateOrUpdateAccountInfoOtter(task.Account, task.Balance, task.BlockNumber, otterCache)

@@ -110,7 +110,7 @@ func (a *AccountInfo) DeepCopy() *AccountInfo {
 	return c
 }
 
-func CreateOrUpdateAccountInfo(account common.Address, balance *big.Int, blockNumber uint64, cache *Cache) common.Hash {
+func CreateOrUpdateAccountInfo(account common.Address, balance *big.Int, blockNumber uint64, cache *Cache, seenAccount bool) common.Hash {
 	initFn := func(account common.Address) *AccountInfo {
 		accountInfo := NewAccountInfo(account, cache.precomputedData)
 		return accountInfo
@@ -152,7 +152,7 @@ func CreateOrUpdateAccountInfo(account common.Address, balance *big.Int, blockNu
 
 	// quitLog := logBlockedTime("Update", 100*time.Millisecond)
 	// start := time.Now()
-	accountInfo, err := cache.Update(account, initFn, loadFn, mutate)
+	accountInfo, err := cache.Update(account, initFn, loadFn, mutate, seenAccount)
 	if err != nil {
 		panic(err)
 	}
