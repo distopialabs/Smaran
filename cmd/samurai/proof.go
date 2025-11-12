@@ -8,6 +8,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/nepal80m/samurai/internal/config"
 	"github.com/nepal80m/samurai/internal/proof"
+	"github.com/nepal80m/samurai/internal/segmenttree"
 )
 
 func generateProofs(addr common.Address, queryStartBlock uint64, queryEndBlock uint64, precomputedData *config.PrecomputedData, config *config.Config) {
@@ -15,7 +16,7 @@ func generateProofs(addr common.Address, queryStartBlock uint64, queryEndBlock u
 	DB_DIR := "samurai.db"
 
 	// Opening the database
-	db, err := pebble.Open(DB_DIR, &pebble.Options{})
+	db, err := segmenttree.NewPebbleDB(DB_DIR, &pebble.Options{})
 	if err != nil {
 		panic(err)
 	}

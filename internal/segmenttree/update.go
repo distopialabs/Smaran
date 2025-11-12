@@ -4,7 +4,6 @@ import (
 	"math/big"
 	"strconv"
 
-	"github.com/cockroachdb/pebble"
 	"github.com/consensys/gnark-crypto/ecc"
 	bls "github.com/consensys/gnark-crypto/ecc/bls12-381"
 	gnark_kzg "github.com/consensys/gnark-crypto/ecc/bls12-381/kzg"
@@ -16,7 +15,7 @@ import (
 	fr "github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
 )
 
-func (accountInfo *AccountInfo) Update(blockNumber uint64, balance *big.Int, db *pebble.DB) {
+func (accountInfo *AccountInfo) Update(blockNumber uint64, balance *big.Int, db DB) {
 	prevCb := accountInfo.CurrentBalanceInfo
 
 	if prevCb == nil {
@@ -62,7 +61,7 @@ func (accountInfo *AccountInfo) CalculateFinalCommitment() common.Hash {
 
 }
 
-func (accountInfo *AccountInfo) Save(db *pebble.DB) {
+func (accountInfo *AccountInfo) Save(db DB) {
 	StoreCurrentBalanceInfo(accountInfo.Account, accountInfo.CurrentBalanceInfo, db)
 	StoreCurrentLXBatchTree(accountInfo.Account, accountInfo.CurrentLXBatchTree, db)
 	StoreLXBatchCommitments(accountInfo.Account, accountInfo.CurrentBalanceInfo.Version, accountInfo.CurrentLXBatchCommitment, db)

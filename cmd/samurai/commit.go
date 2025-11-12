@@ -17,6 +17,14 @@ import (
 	"github.com/nepal80m/samurai/internal/segmenttree"
 )
 
+// DBBackend specifies which database backend to use
+type DBBackend string
+
+const (
+	PebbleBackend DBBackend = "pebble"
+	SqliteBackend DBBackend = "sqlite"
+)
+
 type blockInfo struct {
 	Number           uint64
 	ModifiedAccounts []common.Address
@@ -30,25 +38,59 @@ type updateTask struct {
 
 func generateCommitmentsV2(config *config.Config, precomputedData *config.PrecomputedData) {
 
-	DB_DIR := "samurai-with-cache.db"
-	fmt.Println("Removing database directory", DB_DIR)
-	err := os.RemoveAll(DB_DIR)
-	if err != nil {
-		panic(fmt.Errorf("failed to remove database directory %s: %w", DB_DIR, err))
-	} else {
-		fmt.Println("Database directory", DB_DIR, "removed")
-	}
+	// Choose database backend: PebbleBackend or SqliteBackend
+	// Change this to switch between backends
+	backend := PebbleBackend
+	// backend := SqliteBackend
 
-	// Opening the database
-	// TODO: tune the options
-	db, err := pebble.Open(DB_DIR, &pebble.Options{
-		// MemTableSize: 1 << 31,
-		MemTableSize: 2_147_483_648,
-		DisableWAL:   true,
-		// Cache:        pebble.NewCache(2_147_483_648),
-	})
-	if err != nil {
-		panic(err)
+	var DB_DIR string
+	var db segmenttree.DB
+	var err error
+
+	switch backend {
+	case PebbleBackend:
+		DB_DIR = "samurai-with-cache-pebble.db"
+		fmt.Println("Using Pebble database backend")
+		fmt.Println("Removing database directory", DB_DIR)
+		err = os.RemoveAll(DB_DIR)
+		if err != nil {
+			panic(fmt.Errorf("failed to remove database directory %s: %w", DB_DIR, err))
+		} else {
+			fmt.Println("Database directory", DB_DIR, "removed")
+		}
+
+		// Opening the Pebble database
+		// TODO: tune the options
+		pebbleDB, err := segmenttree.NewPebbleDB(DB_DIR, &pebble.Options{
+			MemTableSize: 2_147_483_648,
+			DisableWAL:   true,
+			// Cache:        pebble.NewCache(2_147_483_648),
+		})
+		if err != nil {
+			panic(err)
+		}
+		db = pebbleDB
+
+	case SqliteBackend:
+		DB_DIR = "samurai-with-cache-sqlite.db"
+		fmt.Println("Using SQLite database backend")
+		fmt.Println("Removing database file", DB_DIR)
+		err = segmenttree.RemoveSqliteDB(DB_DIR)
+		if err != nil {
+			panic(fmt.Errorf("failed to remove database file %s: %w", DB_DIR, err))
+		} else {
+			fmt.Println("Database file", DB_DIR, "removed")
+		}
+
+		// Opening the SQLite database
+		sqliteDB, err := segmenttree.NewSqliteDB(DB_DIR)
+		if err != nil {
+			panic(err)
+		}
+		db = sqliteDB
+
+	default:
+		panic(fmt.Errorf("unknown database backend: %s", backend))
 	}
 
 	cache, err := segmenttree.NewCache(db, precomputedData)
@@ -63,6 +105,18 @@ func generateCommitmentsV2(config *config.Config, precomputedData *config.Precom
 	// if err != nil {
 	// 	panic(err)
 	// }
+
+	// log the cache stats
+	go func() {
+		for {
+			time.Sleep(1 * time.Second)
+			fmt.Println("Cache cost added:", cache.C.Metrics.CostAdded())
+			fmt.Println("Cache cost evicted:", cache.C.Metrics.CostEvicted())
+			fmt.Println("Cache cost present:", cache.C.Metrics.CostAdded()-cache.C.Metrics.CostEvicted())
+			fmt.Println("Cache metrics:", cache.C.Metrics.String())
+
+		}
+	}()
 
 	workers := runtime.NumCPU()
 	fmt.Println("Workers:", workers)
@@ -178,6 +232,7 @@ func generateCommitmentsV2(config *config.Config, precomputedData *config.Precom
 			for i, addr := range blk.ModifiedAccounts {
 				h := xxhash.Sum64(addr[:])
 				chIdx := int(h % uint64(updateWorkerCount))
+				fmt.Println("Sending update task for account", addr.Hex(), "to worker", chIdx)
 				updateTaskChs[chIdx] <- updateTask{
 					BlockNumber: blk.Number,
 					Account:     addr,
@@ -200,9 +255,21 @@ func generateCommitmentsV2(config *config.Config, precomputedData *config.Precom
 		go func() {
 			defer wg.Done()
 			for task := range updateTaskChs[i] {
-				_, seen := accountsSeen.LoadOrStore(task.Account, struct{}{})
+				// old_value, seen := accountsSeen.Load(task.Account)
+				// if !seen {
+				// 	accountsSeen.Store(task.Account, 1)
+				// } else {
+				// 	accountsSeen.Store(task.Account, old_value.(int)+1)
+				// }
+				// var seenCount int
+				// if old_value == nil {
+				// 	seenCount = 0
+				// } else {
+				// 	seenCount = old_value.(int)
+				// }
+				// _, seen := accountsSeen.LoadOrStore(task.Account, struct{}{})
 				// start := time.Now()
-				segmenttree.CreateOrUpdateAccountInfo(task.Account, task.Balance, task.BlockNumber, cache, seen)
+				segmenttree.CreateOrUpdateAccountInfo(task.Account, task.Balance, task.BlockNumber, cache, &accountsSeen)
 				// fmt.Println("Block", task.BlockNumber, "account", task.Account.Hex(), "time:", time.Since(start))
 				// segmenttree.NewCreateOrUpdateAccountInfo(task.Account, task.Balance, task.BlockNumber, cache)
 				// segmenttree.NewCreateOrUpdateAccountInfoOtter(task.Account, task.Balance, task.BlockNumber, otterCache)
@@ -212,7 +279,32 @@ func generateCommitmentsV2(config *config.Config, precomputedData *config.Precom
 	}
 	wg.Wait()
 
+	// print the accounts seen
+	accountsSeen.Range(func(key, value interface{}) bool {
+
+		seenAccountInfo := value.(segmenttree.SeenAccountInfo)
+		fmt.Println("Account", key.(common.Address).Hex(), "seen", seenAccountInfo.Count, "times, fetched from db", seenAccountInfo.DBFetchCount, "times, total time", seenAccountInfo.TotalDBFetchTime)
+		return true
+	})
 	// Ensure cache is fully flushed and closed before DB shutdown
+	fmt.Println("Cache hit ratio:", cache.C.Metrics.Ratio())
+	fmt.Println("Cache miss ratio:", 1-cache.C.Metrics.Ratio())
+	fmt.Println("Cache hit count:", cache.C.Metrics.Hits())
+	fmt.Println("Cache miss count:", cache.C.Metrics.Misses())
+	fmt.Println("Cache eviction count:", cache.C.Metrics.KeysEvicted())
+	fmt.Println("Cache cost added:", cache.C.Metrics.CostAdded())
+	fmt.Println("Cache cost evicted:", cache.C.Metrics.CostEvicted())
+	fmt.Println("Cache sets dropped:", cache.C.Metrics.SetsDropped())
+	fmt.Println("Cache sets rejected:", cache.C.Metrics.SetsRejected())
+	fmt.Println("Cache gets dropped:", cache.C.Metrics.GetsDropped())
+	fmt.Println("Cache gets kept:", cache.C.Metrics.GetsKept())
+	fmt.Println("Cache life expectancy:", cache.C.Metrics.LifeExpectancySeconds())
+	fmt.Println("Cache keys added:", cache.C.Metrics.KeysAdded())
+	fmt.Println("Cache keys updated:", cache.C.Metrics.KeysUpdated())
+	fmt.Println("Cache keys evicted:", cache.C.Metrics.KeysEvicted())
+	fmt.Println("Cache keys present:", cache.C.Metrics.KeysAdded()-cache.C.Metrics.KeysEvicted())
+	fmt.Println("Cache metrics:", cache.C.Metrics.String())
+
 	cache.Close()
 	db.Close()
 
@@ -224,7 +316,7 @@ func logChannelSize(blockInfoCh chan blockInfo, orderedBlockInfoCh chan blockInf
 	// keep logging the size of the channel every 5 seconds until the channel is closed
 	for {
 		time.Sleep(1 * time.Second)
-		remaining := cap(blockInfoCh) - len(blockInfoCh)
+		// remaining := cap(blockInfoCh) - len(blockInfoCh)
 		// if remaining > 5 {
 		// 	fmt.Printf("BlockInfoCh: %d/%d\n", len(blockInfoCh), cap(blockInfoCh))
 		// }
@@ -246,7 +338,7 @@ func logChannelSize(blockInfoCh chan blockInfo, orderedBlockInfoCh chan blockInf
 		// 	fmt.Printf("🚨 OrderedBlockInfoCh is full: %d/%d\n", len(orderedBlockInfoCh), cap(orderedBlockInfoCh))
 		// }
 		for i, updateTaskCh := range updateTaskChs {
-			remaining = cap(updateTaskCh) - len(updateTaskCh)
+			remaining := cap(updateTaskCh) - len(updateTaskCh)
 			if remaining > 5 {
 				fmt.Printf("UpdateTaskCh %d: %d/%d\n", i, len(updateTaskCh), cap(updateTaskCh))
 			}
