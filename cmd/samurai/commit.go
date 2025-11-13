@@ -104,7 +104,7 @@ func generateCommitmentsV2(config *config.Config, precomputedData *config.Precom
 				// 	continue
 				// }
 				// ? do not just skip if there are no modified accounts, because orderWorker is waiting for the next block info to be sent to the channel. instead, send an empty block info with empty modified accounts and balances.
-				balances, err := ledger.BatchMultiUserBalance(modifiedAccounts, bn, config)
+				balances, err := ledger.BatchMultiUserBalance(modifiedAccounts, bn, config.Client)
 				if err != nil {
 					panic(fmt.Errorf("failed to get balances for block %d: %w", bn, err))
 				}

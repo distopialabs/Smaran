@@ -7,14 +7,13 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/rpc"
-	"github.com/nepal80m/samurai/internal/config"
 )
 
-func BatchMultiUserBalance(addrs []common.Address, blockNum uint64, config *config.Config) ([]*big.Int, error) {
+// fetches balances for multiple accounts in a single RPC call for a given block number
+func BatchMultiUserBalance(addrs []common.Address, blockNum uint64, client *rpc.Client) ([]*big.Int, error) {
 	if len(addrs) == 0 {
 		return make([]*big.Int, 0), nil
 	}
-	client := config.Client
 
 	elems := make([]rpc.BatchElem, len(addrs))
 	for i, addr := range addrs {
@@ -36,9 +35,8 @@ func BatchMultiUserBalance(addrs []common.Address, blockNum uint64, config *conf
 	return balances, nil
 }
 
-func batchSingleUserBalances(addr common.Address, startBlockNum, endBlockNum uint64, config *config.Config) ([]*big.Int, error) {
-	client := config.Client
-
+// fetches balances for a single account for a range of block numbers
+func batchSingleUserBalances(addr common.Address, startBlockNum, endBlockNum uint64, client *rpc.Client) ([]*big.Int, error) {
 	elems := make([]rpc.BatchElem, endBlockNum-startBlockNum+1)
 	for i := range endBlockNum - startBlockNum + 1 {
 		var bal hexutil.Big

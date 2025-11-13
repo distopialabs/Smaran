@@ -5,3 +5,4 @@ temp/
 samurai.db/
 *.db/
 *.log
+data/modified_accounts
