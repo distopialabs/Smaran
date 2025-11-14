@@ -40,16 +40,16 @@ func generateCommitmentsV2(config *config.Config, precomputedData *config.Precom
 
 	// Choose database backend: PebbleBackend or SqliteBackend
 	// Change this to switch between backends
-	backend := PebbleBackend
+	// backend := PebbleBackend
 	// backend := SqliteBackend
 
 	var DB_DIR string
-	var db segmenttree.DB
+	// var db segmenttree.DB
+	var dbs [segmenttree.DB_SHARDS]segmenttree.DB
 	var err error
 
-	switch backend {
-	case PebbleBackend:
-		DB_DIR = "samurai-with-cache-pebble.db"
+	for i := range segmenttree.DB_SHARDS {
+		DB_DIR = fmt.Sprintf("samurai-shard-%d.db", i)
 		fmt.Println("Using Pebble database backend")
 		fmt.Println("Removing database directory", DB_DIR)
 		err = os.RemoveAll(DB_DIR)
@@ -58,42 +58,62 @@ func generateCommitmentsV2(config *config.Config, precomputedData *config.Precom
 		} else {
 			fmt.Println("Database directory", DB_DIR, "removed")
 		}
-
-		// Opening the Pebble database
-		// TODO: tune the options
-		pebbleDB, err := segmenttree.NewPebbleDB(DB_DIR, &pebble.Options{
+		dbs[i], err = segmenttree.NewPebbleDB(DB_DIR, &pebble.Options{
 			MemTableSize: 2_147_483_648,
 			DisableWAL:   true,
 			// Cache:        pebble.NewCache(2_147_483_648),
 		})
 		if err != nil {
-			panic(err)
+			panic(fmt.Errorf("failed to create Pebble database %s: %w", DB_DIR, err))
 		}
-		db = pebbleDB
-
-	case SqliteBackend:
-		DB_DIR = "samurai-with-cache-sqlite.db"
-		fmt.Println("Using SQLite database backend")
-		fmt.Println("Removing database file", DB_DIR)
-		err = segmenttree.RemoveSqliteDB(DB_DIR)
-		if err != nil {
-			panic(fmt.Errorf("failed to remove database file %s: %w", DB_DIR, err))
-		} else {
-			fmt.Println("Database file", DB_DIR, "removed")
-		}
-
-		// Opening the SQLite database
-		sqliteDB, err := segmenttree.NewSqliteDB(DB_DIR)
-		if err != nil {
-			panic(err)
-		}
-		db = sqliteDB
-
-	default:
-		panic(fmt.Errorf("unknown database backend: %s", backend))
 	}
+	// switch backend {
+	// case PebbleBackend:
+	// 	DB_DIR = "samurai-with-cache-pebble.db"
+	// 	fmt.Println("Using Pebble database backend")
+	// 	fmt.Println("Removing database directory", DB_DIR)
+	// 	err = os.RemoveAll(DB_DIR)
+	// 	if err != nil {
+	// 		panic(fmt.Errorf("failed to remove database directory %s: %w", DB_DIR, err))
+	// 	} else {
+	// 		fmt.Println("Database directory", DB_DIR, "removed")
+	// 	}
 
-	cache, err := segmenttree.NewCache(db, precomputedData)
+	// 	// Opening the Pebble database
+	// 	// TODO: tune the options
+	// 	pebbleDB, err := segmenttree.NewPebbleDB(DB_DIR, &pebble.Options{
+	// 		MemTableSize: 2_147_483_648,
+	// 		DisableWAL:   true,
+	// 		// Cache:        pebble.NewCache(2_147_483_648),
+	// 	})
+	// 	if err != nil {
+	// 		panic(err)
+	// 	}
+	// 	db = pebbleDB
+
+	// case SqliteBackend:
+	// 	DB_DIR = "samurai-with-cache-sqlite.db"
+	// 	fmt.Println("Using SQLite database backend")
+	// 	fmt.Println("Removing database file", DB_DIR)
+	// 	err = segmenttree.RemoveSqliteDB(DB_DIR)
+	// 	if err != nil {
+	// 		panic(fmt.Errorf("failed to remove database file %s: %w", DB_DIR, err))
+	// 	} else {
+	// 		fmt.Println("Database file", DB_DIR, "removed")
+	// 	}
+
+	// 	// Opening the SQLite database
+	// 	sqliteDB, err := segmenttree.NewSqliteDB(DB_DIR)
+	// 	if err != nil {
+	// 		panic(err)
+	// 	}
+	// 	db = sqliteDB
+
+	// default:
+	// 	panic(fmt.Errorf("unknown database backend: %s", backend))
+	// }
+
+	cache, err := segmenttree.NewCache(dbs, precomputedData)
 	if err != nil {
 		panic(err)
 	}
@@ -107,16 +127,6 @@ func generateCommitmentsV2(config *config.Config, precomputedData *config.Precom
 	// }
 
 	// log the cache stats
-	go func() {
-		for {
-			time.Sleep(1 * time.Second)
-			fmt.Println("Cache cost added:", cache.C.Metrics.CostAdded())
-			fmt.Println("Cache cost evicted:", cache.C.Metrics.CostEvicted())
-			fmt.Println("Cache cost present:", cache.C.Metrics.CostAdded()-cache.C.Metrics.CostEvicted())
-			fmt.Println("Cache metrics:", cache.C.Metrics.String())
-
-		}
-	}()
 
 	workers := runtime.NumCPU()
 	fmt.Println("Workers:", workers)
@@ -286,27 +296,12 @@ func generateCommitmentsV2(config *config.Config, precomputedData *config.Precom
 		fmt.Println("Account", key.(common.Address).Hex(), "seen", seenAccountInfo.Count, "times, fetched from db", seenAccountInfo.DBFetchCount, "times, total time", seenAccountInfo.TotalDBFetchTime)
 		return true
 	})
-	// Ensure cache is fully flushed and closed before DB shutdown
-	fmt.Println("Cache hit ratio:", cache.C.Metrics.Ratio())
-	fmt.Println("Cache miss ratio:", 1-cache.C.Metrics.Ratio())
-	fmt.Println("Cache hit count:", cache.C.Metrics.Hits())
-	fmt.Println("Cache miss count:", cache.C.Metrics.Misses())
-	fmt.Println("Cache eviction count:", cache.C.Metrics.KeysEvicted())
-	fmt.Println("Cache cost added:", cache.C.Metrics.CostAdded())
-	fmt.Println("Cache cost evicted:", cache.C.Metrics.CostEvicted())
-	fmt.Println("Cache sets dropped:", cache.C.Metrics.SetsDropped())
-	fmt.Println("Cache sets rejected:", cache.C.Metrics.SetsRejected())
-	fmt.Println("Cache gets dropped:", cache.C.Metrics.GetsDropped())
-	fmt.Println("Cache gets kept:", cache.C.Metrics.GetsKept())
-	fmt.Println("Cache life expectancy:", cache.C.Metrics.LifeExpectancySeconds())
-	fmt.Println("Cache keys added:", cache.C.Metrics.KeysAdded())
-	fmt.Println("Cache keys updated:", cache.C.Metrics.KeysUpdated())
-	fmt.Println("Cache keys evicted:", cache.C.Metrics.KeysEvicted())
-	fmt.Println("Cache keys present:", cache.C.Metrics.KeysAdded()-cache.C.Metrics.KeysEvicted())
-	fmt.Println("Cache metrics:", cache.C.Metrics.String())
 
 	cache.Close()
-	db.Close()
+	for i := range segmenttree.DB_SHARDS {
+		dbs[i].Close()
+		fmt.Println("Database", i, "closed")
+	}
 
 	fmt.Println("Time taken to process all blocks", time.Since(total_start), time.Now())
 

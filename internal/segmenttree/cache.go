@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cespare/xxhash/v2"
 	ristretto "github.com/dgraph-io/ristretto/v2"
 	otter "github.com/maypok86/otter/v2"
 	"github.com/maypok86/otter/v2/stats"
@@ -14,9 +15,11 @@ import (
 	"github.com/nepal80m/samurai/internal/config"
 )
 
+const DB_SHARDS = 8
+
 type Cache struct {
-	C  *ristretto.Cache[[]byte, *AccountInfo]
-	db DB
+	C   *ristretto.Cache[[]byte, *AccountInfo]
+	dbs [DB_SHARDS]DB
 
 	precomputedData *config.PrecomputedData
 }
@@ -62,10 +65,10 @@ func NewLRUCache(db DB, precomputedData *config.PrecomputedData) (*LRUCache, err
 	}, nil
 }
 
-func NewCache(db DB, precomputedData *config.PrecomputedData) (*Cache, error) {
+func NewCache(dbs [DB_SHARDS]DB, precomputedData *config.PrecomputedData) (*Cache, error) {
 	rc, err := ristretto.NewCache(&ristretto.Config[[]byte, *AccountInfo]{
 		NumCounters: 2_097_152, // TODO: recommended is 10x maxCost (2^18)
-		MaxCost:     32_768,
+		MaxCost:     131072,    //32_768
 		BufferItems: 64,
 	})
 	if err != nil {
@@ -73,7 +76,7 @@ func NewCache(db DB, precomputedData *config.PrecomputedData) (*Cache, error) {
 	}
 	return &Cache{
 		C:               rc,
-		db:              db,
+		dbs:             dbs,
 		precomputedData: precomputedData,
 	}, nil
 }
@@ -84,11 +87,14 @@ type SeenAccountInfo struct {
 	TotalDBFetchTime time.Duration
 }
 
-func (c *Cache) Update(k common.Address, initFn func(common.Address) *AccountInfo, loadFn func(common.Address) *AccountInfo, mutate func(*AccountInfo), accountsSeen *sync.Map) (*AccountInfo, error) {
+func (c *Cache) Update(k common.Address, initFn func(common.Address) *AccountInfo, loadFn func(common.Address, DB) *AccountInfo, mutate func(*AccountInfo, DB), accountsSeen *sync.Map) (*AccountInfo, error) {
 
 	var ai *AccountInfo
 	start := time.Now()
 	seenInfo, seen := accountsSeen.Load(k)
+
+	dbIndex := xxhash.Sum64(k[:]) % DB_SHARDS
+	db := c.dbs[dbIndex]
 
 	if seen {
 		seenAccountInfo := seenInfo.(SeenAccountInfo)
@@ -105,7 +111,7 @@ func (c *Cache) Update(k common.Address, initFn func(common.Address) *AccountInf
 
 			fmt.Println("Cache miss for account", k.Hex(), " seen", seenAccountInfo.Count, "times before, fetching from db")
 			fetchStart := time.Now()
-			ai = loadFn(k)
+			ai = loadFn(k, db)
 			fetchTime := time.Since(fetchStart)
 			accountsSeen.Store(k, SeenAccountInfo{
 				Count:            seenAccountInfo.Count + 1,
@@ -137,7 +143,7 @@ func (c *Cache) Update(k common.Address, initFn func(common.Address) *AccountInf
 	// }
 	fmt.Println(k.Hex(), "get/init time:", time.Since(start))
 	start = time.Now()
-	mutate(ai)
+	mutate(ai, db)
 	fmt.Println(k.Hex(), "mutate time:", time.Since(start))
 	// quitLog = logBlockedTime("CacheSet", 100*time.Millisecond)
 	// start = time.Now()
@@ -148,7 +154,7 @@ func (c *Cache) Update(k common.Address, initFn func(common.Address) *AccountInf
 	// fmt.Println(k.Hex(), "cache set time:", time.Since(start))
 	// start := time.Now()
 	start = time.Now()
-	ai.Save(c.db)
+	ai.Save(db)
 	fmt.Println(k.Hex(), "save time:", time.Since(start))
 	// close(quitLog)
 	// c.rc.Wait() // TODO: do i need to wait here?
