@@ -3,9 +3,10 @@ package segmenttree
 import (
 	"fmt"
 	"math/big"
+	"sync"
+	"time"
 	"unsafe"
 
-	"github.com/cockroachdb/pebble"
 	fr "github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
 	gnark_kzg "github.com/consensys/gnark-crypto/ecc/bls12-381/kzg"
 	"github.com/ethereum/go-ethereum/common"
@@ -110,16 +111,17 @@ func (a *AccountInfo) DeepCopy() *AccountInfo {
 	return c
 }
 
-func CreateOrUpdateAccountInfo(account common.Address, balance *big.Int, blockNumber uint64, cache *Cache, seenAccount bool) common.Hash {
+func CreateOrUpdateAccountInfo(account common.Address, balance *big.Int, blockNumber uint64, cache *Cache, accountsSeen *sync.Map) common.Hash {
+
 	initFn := func(account common.Address) *AccountInfo {
 		accountInfo := NewAccountInfo(account, cache.precomputedData)
 		return accountInfo
 	}
-	loadFn := func(account common.Address) *AccountInfo {
+	loadFn := func(account common.Address, db DB) *AccountInfo {
 		// start := time.Now()
-		cbInfo, err := GetCurrentBalanceInfo(account, cache.db)
+		cbInfo, err := GetCurrentBalanceInfo(account, db)
 		if err != nil {
-			if err != pebble.ErrNotFound {
+			if err != ErrNotFound {
 				panic(err)
 			}
 			// key not found in db
@@ -129,8 +131,8 @@ func CreateOrUpdateAccountInfo(account common.Address, balance *big.Int, blockNu
 			// innerStart := time.Now()
 			// TODO: tried using iterator here, but it was slower. need to investigate again.
 			// batchTree, batchCommitments := GetCurrentLXBatchTreeAndCommitments(account, cbInfo.Version, cache.db)
-			batchTree := GetCurrentLXBatchTree(account, cache.db)
-			batchCommitments := GetLXBatchCommitments(account, cbInfo.Version, cache.db)
+			batchTree := GetCurrentLXBatchTree(account, db)
+			batchCommitments := GetLXBatchCommitments(account, cbInfo.Version, db)
 			// fmt.Println("Time taken to get batch tree and commitments from db", time.Since(innerStart))
 			accountInfo := &AccountInfo{
 				Account:                  account,
@@ -144,19 +146,19 @@ func CreateOrUpdateAccountInfo(account common.Address, balance *big.Int, blockNu
 
 		}
 	}
-	mutate := func(accountInfo *AccountInfo) {
+	mutate := func(accountInfo *AccountInfo, db DB) {
 		// start := time.Now()
-		accountInfo.Update(blockNumber, balance, cache.db)
+		accountInfo.Update(blockNumber, balance, db)
 		// fmt.Println("Time taken to mutate account info", time.Since(start))
 	}
 
 	// quitLog := logBlockedTime("Update", 100*time.Millisecond)
-	// start := time.Now()
-	accountInfo, err := cache.Update(account, initFn, loadFn, mutate, seenAccount)
+	start := time.Now()
+	accountInfo, err := cache.Update(account, initFn, loadFn, mutate, accountsSeen)
 	if err != nil {
 		panic(err)
 	}
-	// fmt.Println(account.Hex(), "update time:", time.Since(start))
+	fmt.Println(account.Hex(), "update time:", time.Since(start))
 	// close(quitLog)
 	commitmentHash := accountInfo.CalculateFinalCommitment()
 	return commitmentHash

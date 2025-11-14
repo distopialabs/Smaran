@@ -6,7 +6,6 @@ import (
 
 	"github.com/nepal80m/samurai/internal/math"
 
-	"github.com/cockroachdb/pebble"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/nepal80m/samurai/internal/segmenttree"
 )
@@ -161,7 +160,7 @@ func UpdateLXTree(accountInfo *segmenttree.AccountInfo, idx uint64, val common.H
 
 }
 
-func InsertCommitmentHashes(layer uint64, batchIdx uint64, tree []common.Hash, account common.Address, latestVersion uint64, db *pebble.DB) {
+func InsertCommitmentHashes(layer uint64, batchIdx uint64, tree []common.Hash, account common.Address, latestVersion uint64, db segmenttree.DB) {
 	if layer <= 1 || layer > MaxLayer {
 		panic("layer" + strconv.Itoa(int(layer)) + " is invalid")
 	}

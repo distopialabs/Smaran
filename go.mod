@@ -10,8 +10,6 @@ require (
 	github.com/consensys/gnark-crypto v0.18.0
 	github.com/dgraph-io/ristretto/v2 v2.3.0
 	github.com/ethereum/go-ethereum v1.16.0
-	github.com/hashicorp/golang-lru/v2 v2.0.7
-	github.com/maypok86/otter/v2 v2.2.1
 	google.golang.org/protobuf v1.34.2
 )
 

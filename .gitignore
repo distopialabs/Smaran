@@ -1,8 +1,9 @@
 __pycache__
+.vscode/
+data/
+profiles/
+logs/
 storage/
 temp/
-.vscode/
-samurai.db/
-*.db/
+*.db
 *.log
-data/modified_accounts

@@ -3,9 +3,7 @@ package segmenttree
 import (
 	"fmt"
 	"strconv"
-	"strings"
 
-	"github.com/cockroachdb/pebble"
 	gnark_kzg "github.com/consensys/gnark-crypto/ecc/bls12-381/kzg"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/rlp"
@@ -33,7 +31,7 @@ func GenerateCurrentBalanceInfoKey(account common.Address) string {
 	return "user:" + account.Hex() + ":current_balance_info"
 }
 
-func StoreCurrentBalanceInfo(account common.Address, currentBalance *CurrentBalance, db *pebble.DB) {
+func StoreCurrentBalanceInfo(account common.Address, currentBalance *CurrentBalance, db DB) {
 	key := GenerateCurrentBalanceInfoKey(account)
 	var val []byte
 	var err error
@@ -45,12 +43,12 @@ func StoreCurrentBalanceInfo(account common.Address, currentBalance *CurrentBala
 	if err != nil {
 		panic(fmt.Errorf("failed to encode current balance info: %w", err))
 	}
-	err = db.Set([]byte(key), val, pebble.NoSync)
+	err = db.Set([]byte(key), val, false)
 	if err != nil {
 		panic(fmt.Errorf("failed to store current balance info: %w", err))
 	}
 }
-func BatchStoreCurrentBalanceInfo(account common.Address, currentBalance *CurrentBalance, b *pebble.Batch) {
+func BatchStoreCurrentBalanceInfo(account common.Address, currentBalance *CurrentBalance, b Batch) {
 	key := GenerateCurrentBalanceInfoKey(account)
 	var val []byte
 	var err error
@@ -62,14 +60,14 @@ func BatchStoreCurrentBalanceInfo(account common.Address, currentBalance *Curren
 	if err != nil {
 		panic(fmt.Errorf("failed to encode current balance info: %w", err))
 	}
-	b.Set([]byte(key), val, pebble.NoSync)
+	b.Set([]byte(key), val, false)
 }
 
-func GetCurrentBalanceInfo(account common.Address, db *pebble.DB) (*CurrentBalance, error) {
+func GetCurrentBalanceInfo(account common.Address, db DB) (*CurrentBalance, error) {
 	key := GenerateCurrentBalanceInfoKey(account)
-	val, closer, err := db.Get([]byte(key))
+	val, err := db.Get([]byte(key))
 	if err != nil {
-		if err == pebble.ErrNotFound {
+		if err == ErrNotFound {
 			return nil, err
 		} else {
 			panic(err)
@@ -90,7 +88,6 @@ func GetCurrentBalanceInfo(account common.Address, db *pebble.DB) (*CurrentBalan
 		}
 		cbInfo = &x
 	}
-	closer.Close()
 	return cbInfo, nil
 }
 
@@ -101,7 +98,7 @@ func GenerateHistoricalBalanceKey(account common.Address, version uint64) string
 	return "user:" + account.Hex() + ":historical_balance_info:" + strconv.Itoa(int(version))
 }
 
-func StoreHistoricalBalanceByHash(historicalBalance *HistoricalBalance, db *pebble.DB) {
+func StoreHistoricalBalanceByHash(historicalBalance *HistoricalBalance, db DB) {
 	var hbBytes []byte
 	var err error
 	if dbEncoding == EncodingProto {
@@ -114,13 +111,13 @@ func StoreHistoricalBalanceByHash(historicalBalance *HistoricalBalance, db *pebb
 	}
 	hbHash := BytesToPoseidonHash(hbBytes)
 	key := GenerateHistoricalBalanceByHashKey(hbHash)
-	err = db.Set([]byte(key), hbBytes, pebble.Sync)
+	err = db.Set([]byte(key), hbBytes, true)
 	if err != nil {
 		panic(fmt.Errorf("failed to store historical balance: %w", err))
 	}
 }
 
-func StoreHistoricalBalance(account common.Address, historicalBalance *HistoricalBalance, db *pebble.DB) {
+func StoreHistoricalBalance(account common.Address, historicalBalance *HistoricalBalance, db DB) {
 	key := GenerateHistoricalBalanceKey(account, historicalBalance.Version)
 	var hbBytes []byte
 	var err error
@@ -132,17 +129,17 @@ func StoreHistoricalBalance(account common.Address, historicalBalance *Historica
 	if err != nil {
 		panic(fmt.Errorf("failed to encode historical balance: %w", err))
 	}
-	err = db.Set([]byte(key), hbBytes, pebble.NoSync)
+	err = db.Set([]byte(key), hbBytes, false)
 	if err != nil {
 		panic(fmt.Errorf("failed to store historical balance: %w", err))
 	}
 }
 
-func GetHistoricalBalanceByHash(hbHash common.Hash, db *pebble.DB) *HistoricalBalance {
+func GetHistoricalBalanceByHash(hbHash common.Hash, db DB) *HistoricalBalance {
 	key := GenerateHistoricalBalanceByHashKey(hbHash)
-	val, closer, err := db.Get([]byte(key))
+	val, err := db.Get([]byte(key))
 	if err != nil {
-		if err == pebble.ErrNotFound {
+		if err == ErrNotFound {
 			panic(fmt.Errorf("key %s not found", key))
 		} else {
 			panic(fmt.Errorf("failed to get historical balance: %w", err))
@@ -162,13 +159,12 @@ func GetHistoricalBalanceByHash(hbHash common.Hash, db *pebble.DB) *HistoricalBa
 		}
 		historicalBalance = &x
 	}
-	closer.Close()
 	return historicalBalance
 }
 
-func GetHistoricalBalance(account common.Address, version uint64, db *pebble.DB) *HistoricalBalance {
+func GetHistoricalBalance(account common.Address, version uint64, db DB) *HistoricalBalance {
 	key := GenerateHistoricalBalanceKey(account, version)
-	val, closer, err := db.Get([]byte(key))
+	val, err := db.Get([]byte(key))
 	if err != nil {
 		panic(fmt.Errorf("failed to get historical balance for version %d: %w", version, err))
 	}
@@ -186,7 +182,6 @@ func GetHistoricalBalance(account common.Address, version uint64, db *pebble.DB)
 		}
 		historicalBalance = &x
 	}
-	closer.Close()
 	return historicalBalance
 }
 
@@ -216,12 +211,11 @@ func GenerateCurrentLXBatchTreeKey(account common.Address, layer uint64) string 
 //			}
 //		}
 //	}
-func StoreCurrentLXBatchTree(account common.Address, batchTree *LXBatchTree, db *pebble.DB) {
+func StoreCurrentLXBatchTree(account common.Address, batchTree *LXBatchTree, db DB) {
 	for layer := uint64(1); layer <= MaxLayer; layer++ {
 		key := GenerateCurrentLXBatchTreeKey(account, layer)
-		var val []byte
 		var err error
-		val = batchTree[layer-1].MarshalBinary()
+		val := batchTree[layer-1].MarshalBinary()
 		// if dbEncoding == EncodingProto {
 		// 	bt := (*BatchTree)(&batchTree[layer-1])
 		// 	val, err = proto.Marshal(protoFromBatchTree(bt))
@@ -231,14 +225,14 @@ func StoreCurrentLXBatchTree(account common.Address, batchTree *LXBatchTree, db 
 		// if err != nil {
 		// 	panic(fmt.Errorf("failed to encode batch tree: %w", err))
 		// }
-		err = db.Set([]byte(key), val, pebble.NoSync)
+		err = db.Set([]byte(key), val, false)
 		if err != nil {
 			panic(fmt.Errorf("failed to store batch tree: %w", err))
 		}
 	}
 }
 
-func BatchStoreCurrentLXBatchTree(account common.Address, batchTree *LXBatchTree, b *pebble.Batch) {
+func BatchStoreCurrentLXBatchTree(account common.Address, batchTree *LXBatchTree, b Batch) {
 	for layer := uint64(1); layer <= MaxLayer; layer++ {
 		key := GenerateCurrentLXBatchTreeKey(account, layer)
 		// var val []byte
@@ -253,17 +247,17 @@ func BatchStoreCurrentLXBatchTree(account common.Address, batchTree *LXBatchTree
 		// if err != nil {
 		// 	panic(fmt.Errorf("failed to encode batch tree: %w", err))
 		// }
-		b.Set([]byte(key), val, pebble.NoSync)
+		b.Set([]byte(key), val, false)
 	}
 }
 
-func GetCurrentLXBatchTree(account common.Address, db *pebble.DB) *LXBatchTree {
+func GetCurrentLXBatchTree(account common.Address, db DB) *LXBatchTree {
 	var batchTree LXBatchTree
 	for layer := uint64(1); layer <= MaxLayer; layer++ {
 		key := GenerateCurrentLXBatchTreeKey(account, layer)
-		val, closer, err := db.Get([]byte(key))
+		val, err := db.Get([]byte(key))
 		if err != nil {
-			if err == pebble.ErrNotFound {
+			if err == ErrNotFound {
 				panic(fmt.Errorf("batch tree not found for layer %d", layer))
 			} else {
 				panic(fmt.Errorf("failed to get batch tree: %w", err))
@@ -288,11 +282,14 @@ func GetCurrentLXBatchTree(account common.Address, db *pebble.DB) *LXBatchTree {
 		// 	}
 		// 	batchTree[layer-1] = tree
 		// }
-		closer.Close()
 	}
 	return &batchTree
 }
 
+// GetCurrentLXBatchTreeAndCommitments is a Pebble-specific implementation using iterators
+// It was found to be slower than separate Get calls, so it's not currently used
+// Keeping it here for reference but commented out since it requires Pebble-specific APIs
+/*
 func GetCurrentLXBatchTreeAndCommitments(account common.Address, version uint64, db *pebble.DB) (*LXBatchTree, *LXBatchCommitment) {
 	lastLeafNodeIdx := version - 1
 	lxBatchIdx := func(layer uint64) uint64 {
@@ -370,12 +367,13 @@ func GetCurrentLXBatchTreeAndCommitments(account common.Address, version uint64,
 	}
 	return &batchTree, &batchCommitments
 }
+*/
 
 func GenerateBatchCommitmentsKey(account common.Address, layer, batchIdx uint64) string {
 	return "user:" + account.Hex() + ":batch_commitments:" + strconv.Itoa(int(layer)) + ":" + strconv.Itoa(int(batchIdx))
 }
 
-func StoreLXBatchCommitments(account common.Address, version uint64, batchCommitments *LXBatchCommitment, db *pebble.DB) {
+func StoreLXBatchCommitments(account common.Address, version uint64, batchCommitments *LXBatchCommitment, db DB) {
 	lastLeafNodeIdx := version - 1
 	lxBatchIdx := func(layer uint64) uint64 {
 		if layer == 0 || layer > MaxLayer {
@@ -390,14 +388,14 @@ func StoreLXBatchCommitments(account common.Address, version uint64, batchCommit
 		valBytes := batchCommitments[layer-1].Bytes()
 		val := make([]byte, len(valBytes))
 		copy(val, valBytes[:])
-		err := db.Set([]byte(key), val, pebble.NoSync)
+		err := db.Set([]byte(key), val, false)
 		if err != nil {
 			panic(fmt.Errorf("failed to store batch commitments: %w", err))
 		}
 	}
 }
 
-func BatchStoreLXBatchCommitments(account common.Address, version uint64, batchCommitments *LXBatchCommitment, b *pebble.Batch) {
+func BatchStoreLXBatchCommitments(account common.Address, version uint64, batchCommitments *LXBatchCommitment, b Batch) {
 	lastLeafNodeIdx := version - 1
 	lxBatchIdx := func(layer uint64) uint64 {
 		if layer == 0 || layer > MaxLayer {
@@ -411,11 +409,11 @@ func BatchStoreLXBatchCommitments(account common.Address, version uint64, batchC
 		valBytes := batchCommitments[layer-1].Bytes()
 		val := make([]byte, len(valBytes))
 		copy(val, valBytes[:])
-		b.Set([]byte(key), val, pebble.NoSync)
+		b.Set([]byte(key), val, false)
 	}
 }
 
-func GetLXBatchCommitments(account common.Address, version uint64, db *pebble.DB) *LXBatchCommitment {
+func GetLXBatchCommitments(account common.Address, version uint64, db DB) *LXBatchCommitment {
 	lastLeafNodeIdx := version - 1
 	lxBatchIdx := func(layer uint64) uint64 {
 		if layer == 0 || layer > MaxLayer {
@@ -428,9 +426,9 @@ func GetLXBatchCommitments(account common.Address, version uint64, db *pebble.DB
 	for layer := uint64(1); layer <= MaxLayer; layer++ {
 		batchIdx := lxBatchIdx(uint64(layer))
 		key := GenerateBatchCommitmentsKey(account, layer, batchIdx)
-		val, closer, err := db.Get([]byte(key))
+		val, err := db.Get([]byte(key))
 		if err != nil {
-			if err == pebble.ErrNotFound {
+			if err == ErrNotFound {
 				panic(fmt.Errorf("batch commitments not found for layer %d and batch index %d", layer, batchIdx))
 			} else {
 				panic(fmt.Errorf("failed to get batch commitments: %w", err))
@@ -445,17 +443,15 @@ func GetLXBatchCommitments(account common.Address, version uint64, db *pebble.DB
 			panic(fmt.Errorf("failed to set commitment: %w", err))
 		}
 		batchCommitments[layer-1] = commitment
-
-		closer.Close()
 	}
 	return &batchCommitments
 }
 
-func GetBatchCommitment(account common.Address, layer, batchIdx uint64, db *pebble.DB) gnark_kzg.Digest {
+func GetBatchCommitment(account common.Address, layer, batchIdx uint64, db DB) gnark_kzg.Digest {
 	key := GenerateBatchCommitmentsKey(account, layer, batchIdx)
-	val, closer, err := db.Get([]byte(key))
+	val, err := db.Get([]byte(key))
 	if err != nil {
-		if err == pebble.ErrNotFound {
+		if err == ErrNotFound {
 			panic(fmt.Errorf("batch commitment not found for layer %d and batch index %d", layer, batchIdx))
 		} else {
 			panic(fmt.Errorf("failed to get batch commitments: %w", err))
@@ -473,6 +469,5 @@ func GetBatchCommitment(account common.Address, layer, batchIdx uint64, db *pebb
 			panic(fmt.Errorf("failed to decode batch commitment: %w", err))
 		}
 	}
-	closer.Close()
 	return commitment
 }

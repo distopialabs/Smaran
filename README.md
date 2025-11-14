@@ -7,7 +7,7 @@
 ```
 git clone https://github.com/distopialabs/samurai.git
 go mod tidy
-go run main.go
+go run ./cmd/samurai -mode commit -numBlocks 100
 ```
 
 ## How to generate performance graph

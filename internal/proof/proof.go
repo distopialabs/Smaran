@@ -7,7 +7,6 @@ import (
 	"math"
 	"os"
 
-	"github.com/cockroachdb/pebble"
 	gnark_kzg "github.com/consensys/gnark-crypto/ecc/bls12-381/kzg"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/nepal80m/samurai/internal/config"
@@ -36,7 +35,7 @@ type RangeProof struct {
 	dependentCommitments []int
 }
 
-func BinarySearchVersionByBlockNumber(blockNumber uint64, searchStart uint64, searchEnd uint64, account common.Address, db *pebble.DB) (uint64, error) {
+func BinarySearchVersionByBlockNumber(blockNumber uint64, searchStart uint64, searchEnd uint64, account common.Address, db segmenttree.DB) (uint64, error) {
 	L := searchStart
 	R := searchEnd
 	for L <= R {
@@ -56,7 +55,7 @@ func BinarySearchVersionByBlockNumber(blockNumber uint64, searchStart uint64, se
 	}
 	return 0, errors.New("version not found")
 }
-func BlockRangeToVersionRange(account common.Address, startingBlock uint64, endingBlock uint64, config *config.Config, db *pebble.DB) (uint64, uint64) {
+func BlockRangeToVersionRange(account common.Address, startingBlock uint64, endingBlock uint64, config *config.Config, db segmenttree.DB) (uint64, uint64) {
 
 	cbInfo, err := segmenttree.GetCurrentBalanceInfo(account, db)
 	if err != nil {
