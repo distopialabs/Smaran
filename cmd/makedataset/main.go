@@ -26,8 +26,8 @@ type blockInfo struct {
 func main() {
 	// startBlock := flag.Int("startBlock", 18900000, "Start block") //18908895
 	// endBlock := flag.Int("endBlock", 21525890, "End block")
-	startBlock := flag.Int("startBlock", 18_900_000, "Start block")       //18908895
-	endBlock := flag.Int("endBlock", 18_900_000+(100_000*6), "End block") //100k = 2hr
+	startBlock := flag.Int("startBlock", 19_500_000, "Start block")       //18908895
+	endBlock := flag.Int("endBlock", 19_500_000+(100_000*6), "End block") //100k = 2hr
 	testMode := flag.Bool("testMode", false, "Test mode")
 
 	flag.Parse()

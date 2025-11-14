@@ -83,7 +83,7 @@ func (c *Cache) Update(k common.Address, initFn func(common.Address) *AccountInf
 	// start := time.Now()
 	if seenAccount {
 		if v, ok := c.c.Get(k[:]); ok {
-			// fmt.Println("Cache hit")
+			// fmt.Println("Account", k.Hex(), " seen ", seenAccount found in cache")
 			ai = v
 		} else {
 			// fmt.Println("Cache miss")
