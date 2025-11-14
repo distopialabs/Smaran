@@ -5,7 +5,7 @@
 
 ## How to run
 ```
-git clone https://github.com/distopialabs/samurai.git
+git clone https://github.com/distopialabs/Samurai.git
 go mod tidy
 go run ./cmd/samurai -mode commit -numBlocks 100
 ```
