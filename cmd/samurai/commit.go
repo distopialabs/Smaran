@@ -13,7 +13,7 @@ import (
 	"github.com/cockroachdb/pebble"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/nepal80m/samurai/internal/config"
-	"github.com/nepal80m/samurai/internal/ledger"
+	"github.com/nepal80m/samurai/internal/dataset"
 	"github.com/nepal80m/samurai/internal/segmenttree"
 )
 
@@ -25,14 +25,156 @@ const (
 )
 
 type blockInfo struct {
-	Number           uint64
-	ModifiedAccounts []common.Address
-	Balances         []*big.Int
+	Number  uint64
+	Entries []dataset.Entry
 }
 type updateTask struct {
 	BlockNumber uint64
 	Account     common.Address
 	Balance     *big.Int
+}
+
+func generateCommitmentsSimplified(config *config.Config, precomputedData *config.PrecomputedData) {
+
+	var DB_DIR string
+	// var db segmenttree.DB
+	var dbs [segmenttree.DB_SHARDS]segmenttree.DB
+	var err error
+
+	for i := range segmenttree.DB_SHARDS {
+		DB_DIR = fmt.Sprintf("storage/samurai-shard-%d.db", i)
+		fmt.Println("Using Pebble database backend")
+		fmt.Println("Removing database directory", DB_DIR)
+		err = os.RemoveAll(DB_DIR)
+		if err != nil {
+			panic(fmt.Errorf("failed to remove database directory %s: %w", DB_DIR, err))
+		} else {
+			fmt.Println("Database directory", DB_DIR, "removed")
+		}
+		dbs[i], err = segmenttree.NewPebbleDB(DB_DIR, &pebble.Options{
+			MemTableSize: 2_147_483_648,
+			DisableWAL:   true,
+			Cache:        pebble.NewCache(2_147_483_648),
+		})
+		if err != nil {
+			panic(fmt.Errorf("failed to create Pebble database %s: %w", DB_DIR, err))
+		}
+	}
+
+	cache, err := segmenttree.NewCache(dbs, precomputedData)
+	if err != nil {
+		panic(err)
+	}
+
+	workers := runtime.NumCPU()
+	fmt.Println("Workers:", workers)
+	blockInfoCh := make(chan blockInfo, 1024)
+	// updateTaskCh := make(chan updateTask, 1<<10)
+	updateWorkerCount := workers * 4 //workers * 4 = 64
+
+	// create separate updateTaskCh for each worker
+	updateTaskChs := make([]chan updateTask, updateWorkerCount)
+	for i := range updateWorkerCount {
+		updateTaskChs[i] = make(chan updateTask, 10_000)
+	}
+
+	total_start := time.Now()
+
+	go logChannelSize(blockInfoCh, updateTaskChs)
+
+	var wg1 sync.WaitGroup
+	wg1.Add(1)
+	go func() {
+		defer wg1.Done()
+		r := dataset.NewDatasetReader(dataset.DATASET_DIR, dataset.SEGMENT_SIZE)
+		defer r.Close()
+		for bn := config.StartingBlockNumber; bn <= config.EndingBlockNumber; bn++ {
+			entries, err := r.GetBlock(uint32(bn))
+			if err != nil {
+				panic(fmt.Errorf("failed to get block %d from dataset: %w", bn, err))
+			}
+
+			blockInfoCh <- blockInfo{
+				Number:  bn,
+				Entries: entries,
+			}
+			fmt.Println("Block", bn, "sent to the channel")
+		}
+	}()
+	go func() {
+		wg1.Wait()
+		close(blockInfoCh)
+		fmt.Println("Time taken to fetch all blocks", time.Since(total_start))
+	}()
+
+	// feed update tasks
+
+	go func() {
+		for blk := range blockInfoCh {
+			// fmt.Println("Block", blk.Number, "with", len(blk.ModifiedAccounts), "accounts ready to be sent to updateTaskCh, waiting for channel to be ready", time.Since(total_start))
+
+			for _, entry := range blk.Entries {
+				h := xxhash.Sum64(entry.Address[:])
+				chIdx := int(h % uint64(updateWorkerCount))
+				updateTaskChs[chIdx] <- updateTask{
+					BlockNumber: blk.Number,
+					Account:     common.BytesToAddress(entry.Address[:]),
+					Balance:     new(big.Int).SetBytes(entry.Balance),
+				}
+			}
+			fmt.Println("Block", blk.Number, "with", len(blk.Entries), "accounts sent to updateTaskCh")
+		}
+		for i := range updateWorkerCount {
+			close(updateTaskChs[i])
+		}
+		fmt.Println("Time taken to feed all update tasks", time.Since(total_start))
+	}()
+
+	wg := sync.WaitGroup{}
+	// create syncmap to track the account seen
+	var accountsSeen sync.Map
+	for i := range updateWorkerCount {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for task := range updateTaskChs[i] {
+				// old_value, seen := accountsSeen.Load(task.Account)
+				// if !seen {
+				// 	accountsSeen.Store(task.Account, 1)
+				// } else {
+				// 	accountsSeen.Store(task.Account, old_value.(int)+1)
+				// }
+				// var seenCount int
+				// if old_value == nil {
+				// 	seenCount = 0
+				// } else {
+				// 	seenCount = old_value.(int)
+				// }
+				// _, seen := accountsSeen.LoadOrStore(task.Account, struct{}{})
+				// start := time.Now()
+				segmenttree.CreateOrUpdateAccountInfo(task.Account, task.Balance, task.BlockNumber, cache, &accountsSeen)
+				// fmt.Println("Block", task.BlockNumber, "account", task.Account.Hex(), "time:", time.Since(start))
+			}
+		}()
+	}
+	wg.Wait()
+
+	// print the accounts seen
+	// accountsSeen.Range(func(key, value interface{}) bool {
+
+	// 	seenAccountInfo := value.(segmenttree.SeenAccountInfo)
+	// 	fmt.Println("Account", key.(common.Address).Hex(), "seen", seenAccountInfo.Count, "times, fetched from db", seenAccountInfo.DBFetchCount, "times, total time", seenAccountInfo.TotalDBFetchTime)
+	// 	return true
+	// })
+
+	cache.Close()
+	for i := range segmenttree.DB_SHARDS {
+		dbs[i].Close()
+		fmt.Println("Database", i, "closed")
+	}
+
+	fmt.Println("Time taken to process all blocks", time.Since(total_start), time.Now())
+
 }
 
 func generateCommitmentsV2(config *config.Config, precomputedData *config.PrecomputedData) {
@@ -43,7 +185,7 @@ func generateCommitmentsV2(config *config.Config, precomputedData *config.Precom
 	var err error
 
 	for i := range segmenttree.DB_SHARDS {
-		DB_DIR = fmt.Sprintf("samurai-shard-%d.db", i)
+		DB_DIR = fmt.Sprintf("storage/samurai-shard-%d.db", i)
 		fmt.Println("Using Pebble database backend")
 		fmt.Println("Removing database directory", DB_DIR)
 		err = os.RemoveAll(DB_DIR)
@@ -72,7 +214,7 @@ func generateCommitmentsV2(config *config.Config, precomputedData *config.Precom
 	blockInfoCh := make(chan blockInfo, 1024)
 	orderedBlockInfoCh := make(chan blockInfo, 1024)
 	// updateTaskCh := make(chan updateTask, 1<<10)
-	fetchWorkerCount := 32           //workers * 2 = 32
+	fetchWorkerCount := 10           //workers * 2 = 32
 	updateWorkerCount := workers * 4 //workers * 4 = 64
 
 	// create separate updateTaskCh for each worker
@@ -87,6 +229,8 @@ func generateCommitmentsV2(config *config.Config, precomputedData *config.Precom
 
 	var wg1 sync.WaitGroup
 	nextBlockToFetch := config.StartingBlockNumber
+	r := dataset.NewDatasetReader(dataset.DATASET_DIR, dataset.SEGMENT_SIZE)
+	defer r.Close()
 	for range fetchWorkerCount {
 		wg1.Add(1)
 		go func() {
@@ -96,36 +240,17 @@ func generateCommitmentsV2(config *config.Config, precomputedData *config.Precom
 				if bn > config.EndingBlockNumber {
 					break
 				}
-				// start := time.Now()
-				// fetch all the modified accounts in this block
-				modifiedAccounts, err := ledger.GetModifiedAccountsByNumber(bn, config.Client)
-				if err != nil {
-					panic(fmt.Errorf("failed to get modified accounts by number %d: %w", bn, err))
-				}
-				// fetch balances for all the modified accounts
-				// if len(modifiedAccounts) == 0 {
-				// 	continue
-				// }
-				// ? do not just skip if there are no modified accounts, because orderWorker is waiting for the next block info to be sent to the channel. instead, send an empty block info with empty modified accounts and balances.
-				balances, err := ledger.BatchMultiUserBalance(modifiedAccounts, bn, config.Client)
-				if err != nil {
-					panic(fmt.Errorf("failed to get balances for block %d: %w", bn, err))
-				}
-				fmt.Println("Block", bn, "fetched and sent to the channel")
 
-				// TODO: remove this override
-				// balances := []*big.Int{new(big.Int).SetUint64(1000000000000000000 + uint64(bn))}
-				// modifiedAccounts := []common.Address{common.HexToAddress("0x0000000000000000000000000000000000000027")}
-				// send the block info to the channel
-				// fmt.Println("Block", bn, "fetched and sent to the channel")
-				// fmt.Println("Waiting for blockInfoCh to be ready", time.Now(), len(blockInfoCh), "items in the channel of size", cap(blockInfoCh))
-				// start := time.Now()
-				blockInfoCh <- blockInfo{
-					Number:           bn,
-					ModifiedAccounts: modifiedAccounts,
-					Balances:         balances,
+				entries, err := r.GetBlock(uint32(bn))
+				if err != nil {
+					panic(fmt.Errorf("failed to get block %d from dataset: %w", bn, err))
 				}
-				// fmt.Println("Block", bn, "sent to the channel", time.Since(start))
+
+				blockInfoCh <- blockInfo{
+					Number:  bn,
+					Entries: entries,
+				}
+				fmt.Println("Block", bn, "sent to the channel")
 			}
 		}()
 	}
@@ -178,17 +303,17 @@ func generateCommitmentsV2(config *config.Config, precomputedData *config.Precom
 		for blk := range orderedBlockInfoCh {
 			// fmt.Println("Block", blk.Number, "with", len(blk.ModifiedAccounts), "accounts ready to be sent to updateTaskCh, waiting for channel to be ready", time.Since(total_start))
 
-			for i, addr := range blk.ModifiedAccounts {
-				h := xxhash.Sum64(addr[:])
+			for _, entry := range blk.Entries {
+				h := xxhash.Sum64(entry.Address[:])
 				chIdx := int(h % uint64(updateWorkerCount))
-				fmt.Println("Sending update task for account", addr.Hex(), "to worker", chIdx)
+				fmt.Println("Sending update task for account", common.BytesToAddress(entry.Address[:]).Hex(), "to worker", chIdx)
 				updateTaskChs[chIdx] <- updateTask{
 					BlockNumber: blk.Number,
-					Account:     addr,
-					Balance:     blk.Balances[i],
+					Account:     common.BytesToAddress(entry.Address[:]),
+					Balance:     new(big.Int).SetBytes(entry.Balance),
 				}
 			}
-			fmt.Println("Block", blk.Number, "with", len(blk.ModifiedAccounts), "accounts sent to updateTaskCh")
+			fmt.Println("Block", blk.Number, "with", len(blk.Entries), "accounts sent to updateTaskCh")
 		}
 		for i := range updateWorkerCount {
 			close(updateTaskChs[i])
@@ -226,12 +351,12 @@ func generateCommitmentsV2(config *config.Config, precomputedData *config.Precom
 	wg.Wait()
 
 	// print the accounts seen
-	accountsSeen.Range(func(key, value interface{}) bool {
+	// accountsSeen.Range(func(key, value interface{}) bool {
 
-		seenAccountInfo := value.(segmenttree.SeenAccountInfo)
-		fmt.Println("Account", key.(common.Address).Hex(), "seen", seenAccountInfo.Count, "times, fetched from db", seenAccountInfo.DBFetchCount, "times, total time", seenAccountInfo.TotalDBFetchTime)
-		return true
-	})
+	// 	seenAccountInfo := value.(segmenttree.SeenAccountInfo)
+	// 	fmt.Println("Account", key.(common.Address).Hex(), "seen", seenAccountInfo.Count, "times, fetched from db", seenAccountInfo.DBFetchCount, "times, total time", seenAccountInfo.TotalDBFetchTime)
+	// 	return true
+	// })
 
 	cache.Close()
 	for i := range segmenttree.DB_SHARDS {
@@ -243,20 +368,20 @@ func generateCommitmentsV2(config *config.Config, precomputedData *config.Precom
 
 }
 
-func logChannelSize(blockInfoCh chan blockInfo, orderedBlockInfoCh chan blockInfo, updateTaskChs []chan updateTask) {
+func logChannelSize(blockInfoCh chan blockInfo, updateTaskChs []chan updateTask) {
 	// keep logging the size of the channel every 5 seconds until the channel is closed
 	for {
 		time.Sleep(1 * time.Second)
-		// remaining := cap(blockInfoCh) - len(blockInfoCh)
+		remaining := cap(blockInfoCh) - len(blockInfoCh)
 		// if remaining > 5 {
 		// 	fmt.Printf("BlockInfoCh: %d/%d\n", len(blockInfoCh), cap(blockInfoCh))
 		// }
-		// if remaining > 0 && remaining < 5 {
-		// 	fmt.Printf("⚠️ BlockInfoCh is almost full: %d/%d\n", len(blockInfoCh), cap(blockInfoCh))
-		// }
-		// if remaining <= 0 {
-		// 	fmt.Printf("🚨 BlockInfoCh is full: %d/%d\n", len(blockInfoCh), cap(blockInfoCh))
-		// }
+		if remaining > 0 && remaining < 5 {
+			fmt.Printf("⚠️ BlockInfoCh is almost full: %d/%d\n", len(blockInfoCh), cap(blockInfoCh))
+		}
+		if remaining <= 0 {
+			fmt.Printf("🚨 BlockInfoCh is full: %d/%d\n", len(blockInfoCh), cap(blockInfoCh))
+		}
 
 		// remaining = cap(orderedBlockInfoCh) - len(orderedBlockInfoCh)
 		// if remaining > 5 {
@@ -270,9 +395,9 @@ func logChannelSize(blockInfoCh chan blockInfo, orderedBlockInfoCh chan blockInf
 		// }
 		for i, updateTaskCh := range updateTaskChs {
 			remaining := cap(updateTaskCh) - len(updateTaskCh)
-			if remaining > 5 {
-				fmt.Printf("UpdateTaskCh %d: %d/%d\n", i, len(updateTaskCh), cap(updateTaskCh))
-			}
+			// if remaining > 5 {
+			// 	fmt.Printf("UpdateTaskCh %d: %d/%d\n", i, len(updateTaskCh), cap(updateTaskCh))
+			// }
 			if remaining > 0 && remaining < 5 {
 				fmt.Printf("⚠️ UpdateTaskCh %d is almost full: %d/%d\n", i, len(updateTaskCh), cap(updateTaskCh))
 			}

@@ -24,7 +24,7 @@ func main() {
 	profile := flag.Bool("p", true, "Profile the program")
 
 	// flags to generate commitments
-	numBlocks := flag.Int("numBlocks", 10_000, "Number of blocks to process")
+	numBlocks := flag.Int("n", 10_000, "Number of blocks to process")
 	// numTrackedAccounts := flag.Int("a", 1, "Number of tracked accounts")
 
 	// flags to generate proofs & verify proofs
@@ -79,7 +79,8 @@ func main() {
 
 	switch *mode {
 	case "commit":
-		generateCommitmentsV2(&config, precomputedData)
+		// generateCommitmentsV2(&config, precomputedData)
+		generateCommitmentsSimplified(&config, precomputedData)
 	case "proof":
 		generateProofs(common.HexToAddress(*queryAccount), uint64(*queryStartBlock)+config.StartingBlockNumber, uint64(*queryEndBlock)+config.StartingBlockNumber, precomputedData, &config)
 	case "verify":

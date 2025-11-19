@@ -12,7 +12,7 @@ import (
 	"github.com/nepal80m/samurai/internal/config"
 )
 
-const DB_SHARDS = 8
+const DB_SHARDS = 4
 
 type Cache struct {
 	C   *ristretto.Cache[[]byte, *AccountInfo]
@@ -46,7 +46,7 @@ type SeenAccountInfo struct {
 func (c *Cache) Update(k common.Address, initFn func(common.Address) *AccountInfo, loadFn func(common.Address, DB) *AccountInfo, mutate func(*AccountInfo, DB), accountsSeen *sync.Map) (*AccountInfo, error) {
 
 	var ai *AccountInfo
-	start := time.Now()
+	// start := time.Now()
 	seenInfo, seen := accountsSeen.Load(k)
 
 	dbIndex := xxhash.Sum64(k[:]) % DB_SHARDS
@@ -54,7 +54,7 @@ func (c *Cache) Update(k common.Address, initFn func(common.Address) *AccountInf
 
 	if seen {
 		seenAccountInfo := seenInfo.(SeenAccountInfo)
-		fmt.Printf("Account %s seen %d times before\n", k.Hex(), seenAccountInfo.Count)
+		// fmt.Printf("Account %s seen %d times before\n", k.Hex(), seenAccountInfo.Count)
 		if v, ok := c.C.Get(k[:]); ok {
 			// fmt.Println("Cache hit")
 			ai = v
@@ -65,7 +65,7 @@ func (c *Cache) Update(k common.Address, initFn func(common.Address) *AccountInf
 			})
 		} else {
 
-			fmt.Println("Cache miss for account", k.Hex(), " seen", seenAccountInfo.Count, "times before, fetching from db")
+			// fmt.Println("Cache miss for account", k.Hex(), " seen", seenAccountInfo.Count, "times before, fetching from db")
 			fetchStart := time.Now()
 			ai = loadFn(k, db)
 			fetchTime := time.Since(fetchStart)
@@ -97,10 +97,10 @@ func (c *Cache) Update(k common.Address, initFn func(common.Address) *AccountInf
 	// 		ai = initFn(k)
 	// 	}
 	// }
-	fmt.Println(k.Hex(), "get/init time:", time.Since(start))
-	start = time.Now()
+	// fmt.Println(k.Hex(), "get/init time:", time.Since(start))
+	// start = time.Now()
 	mutate(ai, db)
-	fmt.Println(k.Hex(), "mutate time:", time.Since(start))
+	// fmt.Println(k.Hex(), "mutate time:", time.Since(start))
 	// quitLog = logBlockedTime("CacheSet", 100*time.Millisecond)
 	// start = time.Now()
 	admitted := c.C.Set(k[:], ai, 1)
@@ -109,9 +109,9 @@ func (c *Cache) Update(k common.Address, initFn func(common.Address) *AccountInf
 	}
 	// fmt.Println(k.Hex(), "cache set time:", time.Since(start))
 	// start := time.Now()
-	start = time.Now()
+	// start = time.Now()
 	ai.Save(db)
-	fmt.Println(k.Hex(), "save time:", time.Since(start))
+	// fmt.Println(k.Hex(), "save time:", time.Since(start))
 	// close(quitLog)
 	// c.rc.Wait() // TODO: do i need to wait here?
 	return ai, nil

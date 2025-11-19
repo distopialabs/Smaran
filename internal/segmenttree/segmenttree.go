@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"math/big"
 	"sync"
-	"time"
 	"unsafe"
 
 	fr "github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
@@ -153,12 +152,12 @@ func CreateOrUpdateAccountInfo(account common.Address, balance *big.Int, blockNu
 	}
 
 	// quitLog := logBlockedTime("Update", 100*time.Millisecond)
-	start := time.Now()
+	// start := time.Now()
 	accountInfo, err := cache.Update(account, initFn, loadFn, mutate, accountsSeen)
 	if err != nil {
 		panic(err)
 	}
-	fmt.Println(account.Hex(), "update time:", time.Since(start))
+	// fmt.Println(account.Hex(), "update time:", time.Since(start))
 	// close(quitLog)
 	commitmentHash := accountInfo.CalculateFinalCommitment()
 	return commitmentHash
