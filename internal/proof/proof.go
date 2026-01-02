@@ -5,11 +5,16 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"math/big"
 	"os"
+	"time"
 
+	fr "github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
 	gnark_kzg "github.com/consensys/gnark-crypto/ecc/bls12-381/kzg"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/nepal80m/samurai/internal/config"
+	"github.com/nepal80m/samurai/internal/crypto/kzg"
+	"github.com/nepal80m/samurai/internal/math/polynomial"
 	"github.com/nepal80m/samurai/internal/segmenttree"
 
 	bls "github.com/consensys/gnark-crypto/ecc/bls12-381"
@@ -87,295 +92,295 @@ func BlockRangeToVersionRange(account common.Address, startingBlock uint64, endi
 
 }
 
-// func GetNewProofRange(account common.Address, startingVersion, endingVersion uint64, precomputedData *config.PrecomputedData, blockOffset uint64, db *pebble.DB) ([]*RangeProof, []*segmenttree.HistoricalBalance) {
-// 	// TODO: find the commits required to prove the range
-// 	reqCommits := findCommitmentsCoveringRange(int(startingVersion), int(endingVersion))
+func GetNewProofRange(account common.Address, startingVersion, endingVersion uint64, precomputedData *config.PrecomputedData, blockOffset uint64, db segmenttree.DB) ([]*RangeProof, []*segmenttree.HistoricalBalance) {
+	// TODO: find the commits required to prove the range
+	reqCommits := findCommitmentsCoveringRange(int(startingVersion), int(endingVersion))
 
-// 	lxRequiredBatchIdxs := make(map[uint64][]uint64)
-// 	for i := uint64(1); i <= segmenttree.MaxLayer; i++ {
-// 		lxRequiredBatchIdxs[i] = make([]uint64, 0)
-// 	}
-// 	fmt.Println("Required Commits:")
-// 	for _, reqCommit := range reqCommits {
-// 		lxRequiredBatchIdxs[uint64(reqCommit.layer)] = append(lxRequiredBatchIdxs[uint64(reqCommit.layer)], uint64(reqCommit.idx))
-// 		fmt.Printf("layer: %d, idx: %d\n", reqCommit.layer, reqCommit.idx)
-// 	}
-// 	start := time.Now()
-// 	requiredTreeBatchesMap, requiredHBInfos := RebuildSegmentTreeForProof(account, lxRequiredBatchIdxs, startingVersion, endingVersion, db, precomputedData)
-// 	fmt.Println("Time taken to rebuild segment tree", time.Since(start))
+	lxRequiredBatchIdxs := make(map[uint64][]uint64)
+	for i := uint64(1); i <= segmenttree.MaxLayer; i++ {
+		lxRequiredBatchIdxs[i] = make([]uint64, 0)
+	}
+	fmt.Println("Required Commits:")
+	for _, reqCommit := range reqCommits {
+		lxRequiredBatchIdxs[uint64(reqCommit.layer)] = append(lxRequiredBatchIdxs[uint64(reqCommit.layer)], uint64(reqCommit.idx))
+		fmt.Printf("layer: %d, idx: %d\n", reqCommit.layer, reqCommit.idx)
+	}
+	start := time.Now()
+	requiredTreeBatchesMap, requiredHBInfos := RebuildSegmentTreeForProof(account, lxRequiredBatchIdxs, startingVersion, endingVersion, db, precomputedData)
+	fmt.Println("Time taken to rebuild segment tree", time.Since(start))
 
-// 	// ------------------------------------------------------------
-// 	allRangeProofs := make([]*RangeProof, 0)
-// 	for _, reqCommit := range reqCommits {
-// 		layer := reqCommit.layer
-// 		idx := reqCommit.idx
+	// ------------------------------------------------------------
+	allRangeProofs := make([]*RangeProof, 0)
+	for _, reqCommit := range reqCommits {
+		layer := reqCommit.layer
+		idx := reqCommit.idx
 
-// 		nodesToInterpolate := findNodesToInterpolate(reqCommit, true)
+		nodesToInterpolate := findNodesToInterpolate(reqCommit, true)
 
-// 		fmt.Printf("\n\nlayer: %d, idx: %d, \n", reqCommit.layer, reqCommit.idx)
-// 		if reqCommit.BlockRange == nil {
-// 			fmt.Printf("Commitment is not covering any range.\n")
-// 		} else {
-// 			fmt.Printf("sb: %d, eb: %d\n", reqCommit.BlockRange.Start, reqCommit.BlockRange.End)
-// 		}
-// 		fmt.Printf("dependentCommitments: %v\n", reqCommit.dependentCommitments)
-// 		fmt.Printf("nodesToInterpolate: %v\n", nodesToInterpolate)
+		fmt.Printf("\n\nlayer: %d, idx: %d, \n", reqCommit.layer, reqCommit.idx)
+		if reqCommit.BlockRange == nil {
+			fmt.Printf("Commitment is not covering any range.\n")
+		} else {
+			fmt.Printf("sb: %d, eb: %d\n", reqCommit.BlockRange.Start, reqCommit.BlockRange.End)
+		}
+		fmt.Printf("dependentCommitments: %v\n", reqCommit.dependentCommitments)
+		fmt.Printf("nodesToInterpolate: %v\n", nodesToInterpolate)
 
-// 		treeKey := fmt.Sprintf("%d:%d", layer, idx)
-// 		tree := requiredTreeBatchesMap[treeKey]
+		treeKey := fmt.Sprintf("%d:%d", layer, idx)
+		tree := requiredTreeBatchesMap[treeKey]
 
-// 		xs1 := make([]int, len(tree))
-// 		ys1 := make([]fr.Element, len(tree))
-// 		for i, v := range tree {
-// 			xs1[i] = i
-// 			ys1[i] = polynomial.HashToFieldElement(v)
-// 		}
-// 		start = time.Now()
-// 		P := polynomial.Interpolate(xs1, ys1, precomputedData.V, precomputedData.Weights)
-// 		fmt.Println("Time taken to interpolate polynomial", time.Since(start))
+		xs1 := make([]int, len(tree))
+		ys1 := make([]fr.Element, len(tree))
+		for i, v := range tree {
+			xs1[i] = i
+			ys1[i] = polynomial.HashToFieldElement(v)
+		}
+		start = time.Now()
+		P := polynomial.Interpolate(xs1, ys1, precomputedData.V, precomputedData.Weights)
+		fmt.Println("Time taken to interpolate polynomial", time.Since(start))
 
-// 		start = time.Now()
-// 		storedCommitment := segmenttree.GetLxBatchCommitment(account, uint64(layer), uint64(idx), db)
-// 		fmt.Println("Time taken to get stored commitment", time.Since(start))
+		start = time.Now()
+		storedCommitment := segmenttree.GetLxBatchCommitment(account, uint64(layer), uint64(idx), db)
+		fmt.Println("Time taken to get stored commitment", time.Since(start))
 
-// 		// start = time.Now()
-// 		// computedCommitment, err := gnark_kzg.Commit(P, precomputedData.SRS.Inner.Pk)
-// 		// if err != nil {
-// 		// 	panic(err)
-// 		// }
-// 		// fmt.Println("Time taken to commit polynomial", time.Since(start))
-// 		// fmt.Printf("computedCommitment: %v\n", computedCommitment)
-// 		// fmt.Printf("storedCommitment: %v\n", storedCommitment)
-// 		// _ = computedCommitment
+		// start = time.Now()
+		// computedCommitment, err := gnark_kzg.Commit(P, precomputedData.SRS.Inner.Pk)
+		// if err != nil {
+		// 	panic(err)
+		// }
+		// fmt.Println("Time taken to commit polynomial", time.Since(start))
+		// fmt.Printf("computedCommitment: %v\n", computedCommitment)
+		// fmt.Printf("storedCommitment: %v\n", storedCommitment)
+		// _ = computedCommitment
 
-// 		// if computedCommitment != storedCommitment {
-// 		// 	panic("commitment calculated from polynomial does not match with the stored commitment")
-// 		// }
+		// if computedCommitment != storedCommitment {
+		// 	panic("commitment calculated from polynomial does not match with the stored commitment")
+		// }
 
-// 		Z := polynomial.VanishingPolynomial(nodesToInterpolate)
-// 		// ZCommit, _ := kzg.CommitG2(Z, precomputedData.SRS.G2Powers)
+		Z := polynomial.VanishingPolynomial(nodesToInterpolate)
+		// ZCommit, _ := kzg.CommitG2(Z, precomputedData.SRS.G2Powers)
 
-// 		xs := make([]fr.Element, len(nodesToInterpolate))
-// 		ys := make([]fr.Element, len(nodesToInterpolate))
-// 		for i, v := range nodesToInterpolate {
-// 			xs[i] = fr.NewElement(uint64(v))
-// 			ys[i] = polynomial.HashToFieldElement(tree[v])
+		xs := make([]fr.Element, len(nodesToInterpolate))
+		ys := make([]fr.Element, len(nodesToInterpolate))
+		for i, v := range nodesToInterpolate {
+			xs[i] = fr.NewElement(uint64(v))
+			ys[i] = polynomial.HashToFieldElement(tree[v])
 
-// 		}
+		}
 
-// 		I := kzg.Interpolate(xs, ys)
-// 		// ICommit, err := gnark_kzg.Commit(I, precomputedData.SRS.Inner.Pk)
-// 		// if err != nil {
-// 		// 	panic(err)
-// 		// }
-// 		diff := kzg.SubtractPolys(P, I)
-// 		Q := kzg.PolyDiv(diff, Z)
-// 		QCommit, err := gnark_kzg.Commit(Q, precomputedData.SRS.Inner.Pk)
-// 		if err != nil {
-// 			panic(err)
-// 		}
-// 		// qCommitBytes := QCommit.Bytes()
-// 		// qCommitHash := common.BytesToHash(qCommitBytes[:])
-// 		// fmt.Printf("qCommitmentHash: %s\n", qCommitHash)
+		I := kzg.Interpolate(xs, ys)
+		// ICommit, err := gnark_kzg.Commit(I, precomputedData.SRS.Inner.Pk)
+		// if err != nil {
+		// 	panic(err)
+		// }
+		diff := kzg.SubtractPolys(P, I)
+		Q := kzg.PolyDiv(diff, Z)
+		QCommit, err := gnark_kzg.Commit(Q, precomputedData.SRS.Inner.Pk)
+		if err != nil {
+			panic(err)
+		}
+		// qCommitBytes := QCommit.Bytes()
+		// qCommitHash := common.BytesToHash(qCommitBytes[:])
+		// fmt.Printf("qCommitmentHash: %s\n", qCommitHash)
 
-// 		// ok, err := PairingCheck(storedCommitment, QCommit, ICommit, ZCommit, precomputedData.SRS)
-// 		// if err != nil {
-// 		// 	panic(err)
-// 		// }
-// 		// if !ok {
-// 		// 	panic("pairing check failed.")
-// 		// } else {
-// 		// 	fmt.Println("Pairing check passed.✅")
-// 		// }
+		// ok, err := PairingCheck(storedCommitment, QCommit, ICommit, ZCommit, precomputedData.SRS)
+		// if err != nil {
+		// 	panic(err)
+		// }
+		// if !ok {
+		// 	panic("pairing check failed.")
+		// } else {
+		// 	fmt.Println("Pairing check passed.✅")
+		// }
 
-// 		rangeProof := &RangeProof{
-// 			idx:                  idx,
-// 			layer:                layer,
-// 			Commitment:           storedCommitment,
-// 			Proof:                QCommit,
-// 			BlockRange:           reqCommit.BlockRange,
-// 			dependentCommitments: reqCommit.dependentCommitments,
-// 		}
+		rangeProof := &RangeProof{
+			idx:                  idx,
+			layer:                layer,
+			Commitment:           storedCommitment,
+			Proof:                QCommit,
+			BlockRange:           reqCommit.BlockRange,
+			dependentCommitments: reqCommit.dependentCommitments,
+		}
 
-// 		allRangeProofs = append(allRangeProofs, rangeProof)
+		allRangeProofs = append(allRangeProofs, rangeProof)
 
-// 		// for i, v := range nodesToInterpolate {
-// 		// 	fmt.Printf("ys[%d]: %v\n", i, tree[v])
-// 		// }
-// 		// if QCommit == (bls.G1Affine{}) {
-// 		// 	fmt.Printf("I: %v\n", I)
-// 		// 	fmt.Printf("Z: %v\n", Z)
-// 		// 	panic("Proof is zero")
-// 		// }
+		// for i, v := range nodesToInterpolate {
+		// 	fmt.Printf("ys[%d]: %v\n", i, tree[v])
+		// }
+		// if QCommit == (bls.G1Affine{}) {
+		// 	fmt.Printf("I: %v\n", I)
+		// 	fmt.Printf("Z: %v\n", Z)
+		// 	panic("Proof is zero")
+		// }
 
-// 	}
-// 	return allRangeProofs, requiredHBInfos
-// }
+	}
+	return allRangeProofs, requiredHBInfos
+}
 
-// func GetRangeProofs(account common.Address, startingBlock, endingBlock int, V polynomial.Polynomial, weights []fr.Element, srs *kzg.MultiSRS, blockOffset uint64) ([]*RangeProof, []*big.Int) {
+func GetRangeProofs(account common.Address, startingBlock, endingBlock int, V polynomial.Polynomial, weights []fr.Element, srs *kzg.MultiSRS, blockOffset uint64) ([]*RangeProof, []*big.Int) {
 
-// 	// TODO: find the commits required to prove the range
+	// TODO: find the commits required to prove the range
 
-// 	// TODO: find relevant segment tree arrays (and fill them with commitment values)
-// 	// TODO: generate polynomial from the filled segment tree arrays
-// 	// TODO: generate proof for the polynomial
-// 	start := time.Now()
-// 	balances, err := batchSingleUserBalances(account, uint64(startingBlock)+blockOffset, uint64(endingBlock)+blockOffset)
-// 	if err != nil {
-// 		panic(err)
-// 	}
-// 	balanceFetchTime := time.Since(start)
-// 	fmt.Printf("Time taken to get balances: %v\n", balanceFetchTime)
+	// TODO: find relevant segment tree arrays (and fill them with commitment values)
+	// TODO: generate polynomial from the filled segment tree arrays
+	// TODO: generate proof for the polynomial
+	start := time.Now()
+	balances, err := batchSingleUserBalances(account, uint64(startingBlock)+blockOffset, uint64(endingBlock)+blockOffset)
+	if err != nil {
+		panic(err)
+	}
+	balanceFetchTime := time.Since(start)
+	fmt.Printf("Time taken to get balances: %v\n", balanceFetchTime)
 
-// 	allRangeProofs := make([]*RangeProof, 0)
+	allRangeProofs := make([]*RangeProof, 0)
 
-// 	reqCommits := findCommitmentsCoveringRange(startingBlock, endingBlock)
-// 	// for _, reqCommit := range reqCommits {
+	reqCommits := findCommitmentsCoveringRange(startingBlock, endingBlock)
+	// for _, reqCommit := range reqCommits {
 
-// 	// 	nodesToInterpolate := findNodesToInterpolate(reqCommit, true)
+	// 	nodesToInterpolate := findNodesToInterpolate(reqCommit, true)
 
-// 	// 	fmt.Printf("\n\nlayer: %d, idx: %d, \n", reqCommit.layer, reqCommit.idx)
-// 	// 	if reqCommit.BlockRange == nil {
-// 	// 		fmt.Printf("Commitment is not covering any range.\n")
-// 	// 	} else {
-// 	// 		fmt.Printf("sb: %d, eb: %d\n", reqCommit.BlockRange.Start, reqCommit.BlockRange.End)
-// 	// 	}
-// 	// 	fmt.Printf("dependentCommitments: %v\n", reqCommit.dependentCommitments)
-// 	// 	fmt.Printf("nodesToInterpolate: %v\n", nodesToInterpolate)
-// 	// }
-// 	for _, reqCommit := range reqCommits {
-// 		layer := reqCommit.layer
-// 		idx := reqCommit.idx
+	// 	fmt.Printf("\n\nlayer: %d, idx: %d, \n", reqCommit.layer, reqCommit.idx)
+	// 	if reqCommit.BlockRange == nil {
+	// 		fmt.Printf("Commitment is not covering any range.\n")
+	// 	} else {
+	// 		fmt.Printf("sb: %d, eb: %d\n", reqCommit.BlockRange.Start, reqCommit.BlockRange.End)
+	// 	}
+	// 	fmt.Printf("dependentCommitments: %v\n", reqCommit.dependentCommitments)
+	// 	fmt.Printf("nodesToInterpolate: %v\n", nodesToInterpolate)
+	// }
+	for _, reqCommit := range reqCommits {
+		layer := reqCommit.layer
+		idx := reqCommit.idx
 
-// 		nodesToInterpolate := findNodesToInterpolate(reqCommit, true)
+		nodesToInterpolate := findNodesToInterpolate(reqCommit, true)
 
-// 		fmt.Printf("\n\nlayer: %d, idx: %d, \n", reqCommit.layer, reqCommit.idx)
-// 		if reqCommit.BlockRange == nil {
-// 			fmt.Printf("Commitment is not covering any range.\n")
-// 		} else {
-// 			fmt.Printf("sb: %d, eb: %d\n", reqCommit.BlockRange.Start, reqCommit.BlockRange.End)
-// 		}
-// 		fmt.Printf("dependentCommitments: %v\n", reqCommit.dependentCommitments)
-// 		fmt.Printf("nodesToInterpolate: %v\n", nodesToInterpolate)
+		fmt.Printf("\n\nlayer: %d, idx: %d, \n", reqCommit.layer, reqCommit.idx)
+		if reqCommit.BlockRange == nil {
+			fmt.Printf("Commitment is not covering any range.\n")
+		} else {
+			fmt.Printf("sb: %d, eb: %d\n", reqCommit.BlockRange.Start, reqCommit.BlockRange.End)
+		}
+		fmt.Printf("dependentCommitments: %v\n", reqCommit.dependentCommitments)
+		fmt.Printf("nodesToInterpolate: %v\n", nodesToInterpolate)
 
-// 		// storedCommitment := lxCommitments[layer][idx]
-// 		tree, err := segmenttree.ReadTreeSegment(segmenttree.StoragePath, account, layer, idx)
-// 		if err != nil {
-// 			panic(err)
-// 		}
+		// storedCommitment := lxCommitments[layer][idx]
+		tree, err := segmenttree.ReadTreeSegment(segmenttree.StoragePath, account, layer, idx)
+		if err != nil {
+			panic(err)
+		}
 
-// 		// P := lxPolynomials[layer][idx]
-// 		xs1 := make([]int, len(tree))
-// 		ys1 := make([]fr.Element, len(tree))
-// 		for i, v := range tree {
-// 			xs1[i] = i
-// 			ys1[i] = polynomial.HashToFieldElement(v)
-// 		}
-// 		P := polynomial.Interpolate(xs1, ys1, V, weights)
+		// P := lxPolynomials[layer][idx]
+		xs1 := make([]int, len(tree))
+		ys1 := make([]fr.Element, len(tree))
+		for i, v := range tree {
+			xs1[i] = i
+			ys1[i] = polynomial.HashToFieldElement(v)
+		}
+		P := polynomial.Interpolate(xs1, ys1, V, weights)
 
-// 		computedCommitment, err := gnark_kzg.Commit(P, srs.Inner.Pk)
-// 		if err != nil {
-// 			panic(err)
-// 		}
-// 		// _ = computedCommitment
+		computedCommitment, err := gnark_kzg.Commit(P, srs.Inner.Pk)
+		if err != nil {
+			panic(err)
+		}
+		// _ = computedCommitment
 
-// 		// if computedCommitment != storedCommitment {
-// 		// 	panic("commitment calculated from polynomial does not match with the stored commitment")
-// 		// }
+		// if computedCommitment != storedCommitment {
+		// 	panic("commitment calculated from polynomial does not match with the stored commitment")
+		// }
 
-// 		// computedCommitmentHash := segmenttree.CommitmentToHash(computedCommitment)
-// 		// commitmentBytes := commitment.Bytes()
-// 		// commitmentHash := common.BytesToHash(commitmentBytes[:])
-// 		// fmt.Printf("pCommitHash: %v\n", computedCommitmentHash)
+		// computedCommitmentHash := segmenttree.CommitmentToHash(computedCommitment)
+		// commitmentBytes := commitment.Bytes()
+		// commitmentHash := common.BytesToHash(commitmentBytes[:])
+		// fmt.Printf("pCommitHash: %v\n", computedCommitmentHash)
 
-// 		// if layer < segmenttree.MaxLayer {
-// 		// 	modDepCommitIdx := 2*segmenttree.L2BatchSize - 1 + (idx % segmenttree.L2BatchSize)
-// 		// 	storedCommitmentHash := lxTrees[layer+1][idx/segmenttree.L2BatchSize][modDepCommitIdx]
-// 		// 	fmt.Printf("storedCommitmentHash: %v\n", storedCommitmentHash)
-// 		// 	if storedCommitmentHash != computedCommitmentHash {
-// 		// 		panic("commitment hash does not match")
-// 		// 	} else {
-// 		// 		fmt.Println("commitment hash matches with the commitment stored in upper layer storage")
-// 		// 	}
-// 		// }
+		// if layer < segmenttree.MaxLayer {
+		// 	modDepCommitIdx := 2*segmenttree.L2BatchSize - 1 + (idx % segmenttree.L2BatchSize)
+		// 	storedCommitmentHash := lxTrees[layer+1][idx/segmenttree.L2BatchSize][modDepCommitIdx]
+		// 	fmt.Printf("storedCommitmentHash: %v\n", storedCommitmentHash)
+		// 	if storedCommitmentHash != computedCommitmentHash {
+		// 		panic("commitment hash does not match")
+		// 	} else {
+		// 		fmt.Println("commitment hash matches with the commitment stored in upper layer storage")
+		// 	}
+		// }
 
-// 		Z := polynomial.VanishingPolynomial(nodesToInterpolate)
-// 		// ZCommit, _ := kzg.CommitG2(Z, srs.G2Powers)
+		Z := polynomial.VanishingPolynomial(nodesToInterpolate)
+		// ZCommit, _ := kzg.CommitG2(Z, srs.G2Powers)
 
-// 		// zCommitBytes := ZCommit.Bytes()
-// 		// zCommitHash := common.BytesToHash(zCommitBytes[:])
-// 		// fmt.Printf("zCommitHash: %s\n", zCommitHash)
+		// zCommitBytes := ZCommit.Bytes()
+		// zCommitHash := common.BytesToHash(zCommitBytes[:])
+		// fmt.Printf("zCommitHash: %s\n", zCommitHash)
 
-// 		xs := make([]fr.Element, len(nodesToInterpolate))
-// 		ys := make([]fr.Element, len(nodesToInterpolate))
-// 		for i, v := range nodesToInterpolate {
-// 			xs[i] = fr.NewElement(uint64(v))
+		xs := make([]fr.Element, len(nodesToInterpolate))
+		ys := make([]fr.Element, len(nodesToInterpolate))
+		for i, v := range nodesToInterpolate {
+			xs[i] = fr.NewElement(uint64(v))
 
-// 			// fmt.Printf("xs[%d]: %v\n", i, v)
-// 			// fmt.Printf("ysHash[%d]: %v\n", i, tree[v])
-// 			// fmt.Printf("ysHashEval[%d]: %v\n", i, polynomial.FieldElementToHash(P.Eval(&xs[i])))
+			// fmt.Printf("xs[%d]: %v\n", i, v)
+			// fmt.Printf("ysHash[%d]: %v\n", i, tree[v])
+			// fmt.Printf("ysHashEval[%d]: %v\n", i, polynomial.FieldElementToHash(P.Eval(&xs[i])))
 
-// 			ys[i] = polynomial.HashToFieldElement(tree[v])
+			ys[i] = polynomial.HashToFieldElement(tree[v])
 
-// 		}
+		}
 
-// 		// I := polynomial.Interpolate(nodesToInterpolate, ys, V, weights)
-// 		I := kzg.Interpolate(xs, ys)
-// 		// ICommit, err := gnark_kzg.Commit(I, srs.Inner.Pk)
-// 		// if err != nil {
-// 		// 	panic(err)
-// 		// }
-// 		// iCommitBytes := ICommit.Bytes()
-// 		// iCommitHash := common.BytesToHash(iCommitBytes[:])
-// 		// fmt.Printf("iCommitmentHash: %s\n", iCommitHash)
+		// I := polynomial.Interpolate(nodesToInterpolate, ys, V, weights)
+		I := kzg.Interpolate(xs, ys)
+		// ICommit, err := gnark_kzg.Commit(I, srs.Inner.Pk)
+		// if err != nil {
+		// 	panic(err)
+		// }
+		// iCommitBytes := ICommit.Bytes()
+		// iCommitHash := common.BytesToHash(iCommitBytes[:])
+		// fmt.Printf("iCommitmentHash: %s\n", iCommitHash)
 
-// 		diff := kzg.SubtractPolys(P, I)
-// 		Q := kzg.PolyDiv(diff, Z)
-// 		QCommit, err := gnark_kzg.Commit(Q, srs.Inner.Pk)
-// 		if err != nil {
-// 			panic(err)
-// 		}
-// 		// qCommitBytes := QCommit.Bytes()
-// 		// qCommitHash := common.BytesToHash(qCommitBytes[:])
-// 		// fmt.Printf("qCommitmentHash: %s\n", qCommitHash)
+		diff := kzg.SubtractPolys(P, I)
+		Q := kzg.PolyDiv(diff, Z)
+		QCommit, err := gnark_kzg.Commit(Q, srs.Inner.Pk)
+		if err != nil {
+			panic(err)
+		}
+		// qCommitBytes := QCommit.Bytes()
+		// qCommitHash := common.BytesToHash(qCommitBytes[:])
+		// fmt.Printf("qCommitmentHash: %s\n", qCommitHash)
 
-// 		// ok, err := PairingCheck(computedCommitment, QCommit, ICommit, ZCommit, srs)
-// 		// if err != nil {
-// 		// 	panic(err)
-// 		// }
-// 		// if !ok {
-// 		// 	panic("pairing check failed.")
-// 		// } else {
-// 		// 	fmt.Println("Pairing check passed.✅")
-// 		// }
+		// ok, err := PairingCheck(computedCommitment, QCommit, ICommit, ZCommit, srs)
+		// if err != nil {
+		// 	panic(err)
+		// }
+		// if !ok {
+		// 	panic("pairing check failed.")
+		// } else {
+		// 	fmt.Println("Pairing check passed.✅")
+		// }
 
-// 		rangeProof := &RangeProof{
-// 			idx:                  idx,
-// 			layer:                layer,
-// 			Commitment:           computedCommitment,
-// 			Proof:                QCommit,
-// 			BlockRange:           reqCommit.BlockRange,
-// 			dependentCommitments: reqCommit.dependentCommitments,
-// 		}
+		rangeProof := &RangeProof{
+			idx:                  idx,
+			layer:                layer,
+			Commitment:           computedCommitment,
+			Proof:                QCommit,
+			BlockRange:           reqCommit.BlockRange,
+			dependentCommitments: reqCommit.dependentCommitments,
+		}
 
-// 		allRangeProofs = append(allRangeProofs, rangeProof)
+		allRangeProofs = append(allRangeProofs, rangeProof)
 
-// 		// for i, v := range nodesToInterpolate {
-// 		// 	fmt.Printf("ys[%d]: %v\n", i, tree[v])
-// 		// }
-// 		// if QCommit == (bls.G1Affine{}) {
-// 		// 	fmt.Printf("I: %v\n", I)
-// 		// 	fmt.Printf("Z: %v\n", Z)
-// 		// 	panic("Proof is zero")
-// 		// }
+		// for i, v := range nodesToInterpolate {
+		// 	fmt.Printf("ys[%d]: %v\n", i, tree[v])
+		// }
+		// if QCommit == (bls.G1Affine{}) {
+		// 	fmt.Printf("I: %v\n", I)
+		// 	fmt.Printf("Z: %v\n", Z)
+		// 	panic("Proof is zero")
+		// }
 
-// 	}
-// 	fmt.Println("Number of range proofs:", len(allRangeProofs))
-// 	fmt.Printf("Time taken to get balances: %v\n", balanceFetchTime)
+	}
+	fmt.Println("Number of range proofs:", len(allRangeProofs))
+	fmt.Printf("Time taken to get balances: %v\n", balanceFetchTime)
 
-// 	return allRangeProofs, balances
+	return allRangeProofs, balances
 
-// }
+}
 
 func findCommitmentsCoveringRange(sb, eb int) []RangeCommitment {
 	rcCommitments := findRangeCoveringCommitments(sb, eb, 1)

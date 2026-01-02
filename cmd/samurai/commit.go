@@ -3,18 +3,14 @@ package main
 import (
 	"fmt"
 	"math/big"
-	"os"
-	"runtime"
 	"sync"
-	"sync/atomic"
 	"time"
 
-	"github.com/cespare/xxhash/v2"
-	"github.com/cockroachdb/pebble"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/nepal80m/samurai/internal/config"
 	"github.com/nepal80m/samurai/internal/dataset"
 	"github.com/nepal80m/samurai/internal/segmenttree"
+	"github.com/nepal80m/samurai/internal/utils"
 )
 
 // DBBackend specifies which database backend to use
@@ -34,337 +30,156 @@ type updateTask struct {
 	Balance     *big.Int
 }
 
-func generateCommitmentsSimplified(config *config.Config, precomputedData *config.PrecomputedData) {
+func generateCommitmentsSimplified(config *config.Config, caches []*segmenttree.Cache) {
 
-	var DB_DIR string
-	// var db segmenttree.DB
-	var dbs [segmenttree.DB_SHARDS]segmenttree.DB
-	var err error
+	// var DB_DIR string
+	// // var db segmenttree.DB
+	// var dbs = make([]segmenttree.DB, config.Database.Shards)
+	// var err error
 
-	for i := range segmenttree.DB_SHARDS {
-		DB_DIR = fmt.Sprintf("storage/samurai-shard-%d.db", i)
-		fmt.Println("Using Pebble database backend")
-		fmt.Println("Removing database directory", DB_DIR)
-		err = os.RemoveAll(DB_DIR)
-		if err != nil {
-			panic(fmt.Errorf("failed to remove database directory %s: %w", DB_DIR, err))
-		} else {
-			fmt.Println("Database directory", DB_DIR, "removed")
-		}
-		dbs[i], err = segmenttree.NewPebbleDB(DB_DIR, &pebble.Options{
-			MemTableSize: 2_147_483_648,
-			DisableWAL:   true,
-			Cache:        pebble.NewCache(2_147_483_648),
-		})
-		if err != nil {
-			panic(fmt.Errorf("failed to create Pebble database %s: %w", DB_DIR, err))
-		}
-	}
+	// for i := range config.Database.Shards {
+	// 	DB_DIR = fmt.Sprintf(STORAGE_PATH+"/samurai-shard-%d.db", i)
+	// 	fmt.Println("Removing database directory", DB_DIR)
+	// 	err = os.RemoveAll(DB_DIR)
+	// 	if err != nil {
+	// 		panic(fmt.Errorf("failed to remove database directory %s: %w", DB_DIR, err))
+	// 	} else {
+	// 		fmt.Println("Database directory", DB_DIR, "removed")
+	// 	}
+	// 	dbs[i], err = segmenttree.NewPebbleDB(DB_DIR, &pebble.Options{
+	// 		MemTableSize: 1_073_741_824, // 1_073_741_824, 2_147_483_648
+	// 		DisableWAL:   true,
+	// 		Cache:        pebble.NewCache(2_147_483_648),
+	// 	})
+	// 	if err != nil {
+	// 		panic(fmt.Errorf("failed to create Pebble database %s: %w", DB_DIR, err))
+	// 	}
+	// }
 
-	cache, err := segmenttree.NewCache(dbs, precomputedData)
-	if err != nil {
-		panic(err)
-	}
-
-	workers := runtime.NumCPU()
-	fmt.Println("Workers:", workers)
 	blockInfoCh := make(chan blockInfo, 1024)
-	// updateTaskCh := make(chan updateTask, 1<<10)
-	updateWorkerCount := workers * 4 //workers * 4 = 64
-
-	// create separate updateTaskCh for each worker
-	updateTaskChs := make([]chan updateTask, updateWorkerCount)
-	for i := range updateWorkerCount {
-		updateTaskChs[i] = make(chan updateTask, 10_000)
+	updateTaskChs := make([]chan updateTask, config.Workers.CommitWorkerCount)
+	for i := range config.Workers.CommitWorkerCount {
+		updateTaskChs[i] = make(chan updateTask, config.Workers.CommitWorkerChannelSize)
 	}
 
 	total_start := time.Now()
 
 	go logChannelSize(blockInfoCh, updateTaskChs)
 
-	var wg1 sync.WaitGroup
-	wg1.Add(1)
-	go func() {
-		defer wg1.Done()
-		r := dataset.NewDatasetReader(dataset.DATASET_DIR, dataset.SEGMENT_SIZE)
-		defer r.Close()
-		for bn := config.StartingBlockNumber; bn <= config.EndingBlockNumber; bn++ {
-			entries, err := r.GetBlock(uint32(bn))
-			if err != nil {
-				panic(fmt.Errorf("failed to get block %d from dataset: %w", bn, err))
-			}
-
-			blockInfoCh <- blockInfo{
-				Number:  bn,
-				Entries: entries,
-			}
-			fmt.Println("Block", bn, "sent to the channel")
-		}
-	}()
-	go func() {
-		wg1.Wait()
-		close(blockInfoCh)
-		fmt.Println("Time taken to fetch all blocks", time.Since(total_start))
-	}()
+	spawnBlockFetcher(config.Blocks.StartingBlockNumber, config.Blocks.EndingBlockNumber, blockInfoCh)
 
 	// feed update tasks
-
 	go func() {
-		for blk := range blockInfoCh {
-			// fmt.Println("Block", blk.Number, "with", len(blk.ModifiedAccounts), "accounts ready to be sent to updateTaskCh, waiting for channel to be ready", time.Since(total_start))
 
-			for _, entry := range blk.Entries {
-				h := xxhash.Sum64(entry.Address[:])
-				chIdx := int(h % uint64(updateWorkerCount))
-				updateTaskChs[chIdx] <- updateTask{
-					BlockNumber: blk.Number,
-					Account:     common.BytesToAddress(entry.Address[:]),
-					Balance:     new(big.Int).SetBytes(entry.Balance),
-				}
-			}
-			fmt.Println("Block", blk.Number, "with", len(blk.Entries), "accounts sent to updateTaskCh")
+		updateTaskQueues := make([]utils.Queue[updateTask], config.Workers.CommitWorkerCount)
+		for i := range config.Workers.CommitWorkerCount {
+			updateTaskQueues[i] = utils.NewQueue[updateTask]()
 		}
-		for i := range updateWorkerCount {
-			close(updateTaskChs[i])
-		}
-		fmt.Println("Time taken to feed all update tasks", time.Since(total_start))
-	}()
 
-	wg := sync.WaitGroup{}
-	// create syncmap to track the account seen
-	var accountsSeen sync.Map
-	for i := range updateWorkerCount {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for task := range updateTaskChs[i] {
-				// old_value, seen := accountsSeen.Load(task.Account)
-				// if !seen {
-				// 	accountsSeen.Store(task.Account, 1)
-				// } else {
-				// 	accountsSeen.Store(task.Account, old_value.(int)+1)
-				// }
-				// var seenCount int
-				// if old_value == nil {
-				// 	seenCount = 0
-				// } else {
-				// 	seenCount = old_value.(int)
-				// }
-				// _, seen := accountsSeen.LoadOrStore(task.Account, struct{}{})
-				// start := time.Now()
-				segmenttree.CreateOrUpdateAccountInfo(task.Account, task.Balance, task.BlockNumber, cache, &accountsSeen)
-				// fmt.Println("Block", task.BlockNumber, "account", task.Account.Hex(), "time:", time.Since(start))
-			}
-		}()
-	}
-	wg.Wait()
-
-	// print the accounts seen
-	// accountsSeen.Range(func(key, value interface{}) bool {
-
-	// 	seenAccountInfo := value.(segmenttree.SeenAccountInfo)
-	// 	fmt.Println("Account", key.(common.Address).Hex(), "seen", seenAccountInfo.Count, "times, fetched from db", seenAccountInfo.DBFetchCount, "times, total time", seenAccountInfo.TotalDBFetchTime)
-	// 	return true
-	// })
-
-	cache.Close()
-	for i := range segmenttree.DB_SHARDS {
-		dbs[i].Close()
-		fmt.Println("Database", i, "closed")
-	}
-
-	fmt.Println("Time taken to process all blocks", time.Since(total_start), time.Now())
-
-}
-
-func generateCommitmentsV2(config *config.Config, precomputedData *config.PrecomputedData) {
-
-	var DB_DIR string
-	// var db segmenttree.DB
-	var dbs [segmenttree.DB_SHARDS]segmenttree.DB
-	var err error
-
-	for i := range segmenttree.DB_SHARDS {
-		DB_DIR = fmt.Sprintf("storage/samurai-shard-%d.db", i)
-		fmt.Println("Using Pebble database backend")
-		fmt.Println("Removing database directory", DB_DIR)
-		err = os.RemoveAll(DB_DIR)
-		if err != nil {
-			panic(fmt.Errorf("failed to remove database directory %s: %w", DB_DIR, err))
-		} else {
-			fmt.Println("Database directory", DB_DIR, "removed")
-		}
-		dbs[i], err = segmenttree.NewPebbleDB(DB_DIR, &pebble.Options{
-			MemTableSize: 2_147_483_648,
-			DisableWAL:   true,
-			// Cache:        pebble.NewCache(2_147_483_648),
-		})
-		if err != nil {
-			panic(fmt.Errorf("failed to create Pebble database %s: %w", DB_DIR, err))
-		}
-	}
-
-	cache, err := segmenttree.NewCache(dbs, precomputedData)
-	if err != nil {
-		panic(err)
-	}
-
-	workers := runtime.NumCPU()
-	fmt.Println("Workers:", workers)
-	blockInfoCh := make(chan blockInfo, 1024)
-	orderedBlockInfoCh := make(chan blockInfo, 1024)
-	// updateTaskCh := make(chan updateTask, 1<<10)
-	fetchWorkerCount := 10           //workers * 2 = 32
-	updateWorkerCount := workers * 4 //workers * 4 = 64
-
-	// create separate updateTaskCh for each worker
-	updateTaskChs := make([]chan updateTask, updateWorkerCount)
-	for i := range updateWorkerCount {
-		updateTaskChs[i] = make(chan updateTask, 1024)
-	}
-
-	total_start := time.Now()
-
-	// go logChannelSize(blockInfoCh, orderedBlockInfoCh, updateTaskChs)
-
-	var wg1 sync.WaitGroup
-	nextBlockToFetch := config.StartingBlockNumber
-	r := dataset.NewDatasetReader(dataset.DATASET_DIR, dataset.SEGMENT_SIZE)
-	defer r.Close()
-	for range fetchWorkerCount {
-		wg1.Add(1)
-		go func() {
-			defer wg1.Done()
-			for {
-				bn := atomic.AddUint64(&nextBlockToFetch, 1) - 1
-				if bn > config.EndingBlockNumber {
+		// loop until the blockInfoCh is closed and all the updateTaskQueues are empty
+		// first check if the blockInfoCh is closed
+		// if not listen for blockInfoCh and enqueue the update tasks to the updateTaskQueues
+		blockInfoChClosed := false
+		for {
+			// Check if any queue has hit the limit
+			anyQueueAtLimit := false
+			for i := range config.Workers.CommitWorkerCount {
+				if updateTaskQueues[i].Size() >= config.Workers.CommitWorkerQueueSize {
+					anyQueueAtLimit = true
+					fmt.Printf("⚠️ Queue %d has hit the limit: %d tasks\n", i, updateTaskQueues[i].Size())
 					break
 				}
-
-				entries, err := r.GetBlock(uint32(bn))
-				if err != nil {
-					panic(fmt.Errorf("failed to get block %d from dataset: %w", bn, err))
-				}
-
-				blockInfoCh <- blockInfo{
-					Number:  bn,
-					Entries: entries,
-				}
-				fmt.Println("Block", bn, "sent to the channel")
 			}
-		}()
-	}
-	go func() {
-		wg1.Wait()
-		close(blockInfoCh)
-		fmt.Println("Time taken to fetch all blocks", time.Since(total_start))
-	}()
 
-	// Reorder the blockCh by the block number
-	// TODO: implement fixed sized array with rotating pointer instead of map.
-	go func() {
-		nextBlockToProcess := config.StartingBlockNumber
-		pendingBlocks := make(map[uint64]blockInfo)
-
-		for blkInfo := range blockInfoCh {
-			if blkInfo.Number == nextBlockToProcess {
-				orderedBlockInfoCh <- blkInfo
-				nextBlockToProcess++
-				for {
-					if blk, ok := pendingBlocks[nextBlockToProcess]; ok {
-						fmt.Println("Block", nextBlockToProcess, "ordered and sent to the channel")
-						orderedBlockInfoCh <- blk
-						delete(pendingBlocks, nextBlockToProcess)
-						nextBlockToProcess++
+			// Try to read from blockInfoCh (non-blocking) only if no queue is at limit
+			if !blockInfoChClosed && !anyQueueAtLimit {
+				select {
+				case blk, ok := <-blockInfoCh:
+					if !ok {
+						blockInfoChClosed = true
 					} else {
-						break
+						// Enqueue all entries from this block
+						for _, entry := range blk.Entries {
+							chIdx := utils.AddressToShardIndex(entry.Address, config.Workers.CommitWorkerCount)
+							updateTaskQueues[chIdx].Enqueue(updateTask{
+								BlockNumber: blk.Number,
+								Account:     common.BytesToAddress(entry.Address[:]),
+								Balance:     new(big.Int).SetBytes(entry.Balance),
+							})
+						}
+					}
+				default:
+					// No data available right now
+				}
+			}
+
+			// Drain queues to channels (non-blocking)
+			allQueuesEmpty := true
+			anyWorkDone := false
+
+			for i := range config.Workers.CommitWorkerCount {
+				// Drain as many items as possible from queue[i] to channel[i]
+				for !updateTaskQueues[i].IsEmpty() {
+					allQueuesEmpty = false
+
+					task, err := updateTaskQueues[i].Peek()
+					if err != nil {
+						panic(fmt.Errorf("failed to peek update task: %w", err))
+					}
+
+					// Try non-blocking send
+					select {
+					case updateTaskChs[i] <- task:
+						_, err := updateTaskQueues[i].Dequeue()
+						if err != nil {
+							panic(fmt.Errorf("failed to dequeue update task: %w", err))
+						}
+						anyWorkDone = true
+						// Successfully sent, continue draining this queue
+					default:
+						// Channel is full, move to next queue
+						goto nextQueue
 					}
 				}
-			} else {
-				pendingBlocks[blkInfo.Number] = blkInfo
+			nextQueue:
 			}
-			if len(pendingBlocks) > 1000 {
-				fmt.Println("🚨💾💣 Pending blocks:", len(pendingBlocks))
-				panic(fmt.Sprintf("Pending blocks exceeded safe limit: %d", len(pendingBlocks)))
-			} else if len(pendingBlocks) > 50 {
-				fmt.Println("⚠️💾💣 Pending blocks:", len(pendingBlocks))
-				// }
-			} else {
-				// fmt.Println("Pending blocks:", len(pendingBlocks))
+
+			// Exit condition: all queues empty and input closed
+			if allQueuesEmpty && blockInfoChClosed {
+				break
+			}
+
+			// Prevent busy-wait: sleep briefly if no work was done this iteration
+			if !anyWorkDone && allQueuesEmpty {
+				time.Sleep(time.Microsecond * 100)
 			}
 		}
-		close(orderedBlockInfoCh)
-		fmt.Println("Time taken to order all blocks", time.Since(total_start))
-	}()
 
-	// feed update tasks
-
-	go func() {
-		for blk := range orderedBlockInfoCh {
-			// fmt.Println("Block", blk.Number, "with", len(blk.ModifiedAccounts), "accounts ready to be sent to updateTaskCh, waiting for channel to be ready", time.Since(total_start))
-
-			for _, entry := range blk.Entries {
-				h := xxhash.Sum64(entry.Address[:])
-				chIdx := int(h % uint64(updateWorkerCount))
-				fmt.Println("Sending update task for account", common.BytesToAddress(entry.Address[:]).Hex(), "to worker", chIdx)
-				updateTaskChs[chIdx] <- updateTask{
-					BlockNumber: blk.Number,
-					Account:     common.BytesToAddress(entry.Address[:]),
-					Balance:     new(big.Int).SetBytes(entry.Balance),
-				}
-			}
-			fmt.Println("Block", blk.Number, "with", len(blk.Entries), "accounts sent to updateTaskCh")
-		}
-		for i := range updateWorkerCount {
+		fmt.Println("All update tasks fed to the updateTaskChs")
+		for i := range config.Workers.CommitWorkerCount {
 			close(updateTaskChs[i])
 		}
-		fmt.Println("Time taken to feed all update tasks", time.Since(total_start))
+		fmt.Println("All updateTaskChs closed")
 	}()
 
 	wg := sync.WaitGroup{}
 	// create syncmap to track the account seen
 	var accountsSeen sync.Map
-	for i := range updateWorkerCount {
+	for i := range config.Workers.CommitWorkerCount {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			for task := range updateTaskChs[i] {
-				// old_value, seen := accountsSeen.Load(task.Account)
-				// if !seen {
-				// 	accountsSeen.Store(task.Account, 1)
-				// } else {
-				// 	accountsSeen.Store(task.Account, old_value.(int)+1)
-				// }
-				// var seenCount int
-				// if old_value == nil {
-				// 	seenCount = 0
-				// } else {
-				// 	seenCount = old_value.(int)
-				// }
-				// _, seen := accountsSeen.LoadOrStore(task.Account, struct{}{})
-				// start := time.Now()
-				segmenttree.CreateOrUpdateAccountInfo(task.Account, task.Balance, task.BlockNumber, cache, &accountsSeen)
-				// fmt.Println("Block", task.BlockNumber, "account", task.Account.Hex(), "time:", time.Since(start))
+
+				segmenttree.CreateOrUpdateAccountInfo(task.Account, task.Balance, task.BlockNumber, caches[i], &accountsSeen)
 			}
 		}()
 	}
 	wg.Wait()
 
-	// print the accounts seen
-	// accountsSeen.Range(func(key, value interface{}) bool {
+	fmt.Println("Time taken to process", config.Blocks.EndingBlockNumber-config.Blocks.StartingBlockNumber+1, "blocks", time.Since(total_start), time.Now())
 
-	// 	seenAccountInfo := value.(segmenttree.SeenAccountInfo)
-	// 	fmt.Println("Account", key.(common.Address).Hex(), "seen", seenAccountInfo.Count, "times, fetched from db", seenAccountInfo.DBFetchCount, "times, total time", seenAccountInfo.TotalDBFetchTime)
-	// 	return true
-	// })
-
-	cache.Close()
-	for i := range segmenttree.DB_SHARDS {
-		dbs[i].Close()
-		fmt.Println("Database", i, "closed")
-	}
-
-	fmt.Println("Time taken to process all blocks", time.Since(total_start), time.Now())
+	fmt.Println("Total time taken to process all blocks", time.Since(total_start), time.Now())
 
 }
 
@@ -407,4 +222,32 @@ func logChannelSize(blockInfoCh chan blockInfo, updateTaskChs []chan updateTask)
 		}
 
 	}
+}
+
+// spawn a goroutine to fetch blocks from the dataset and send them to the blockInfoCh
+func spawnBlockFetcher(startingBlockNumber uint64, endingBlockNumber uint64, blockInfoCh chan blockInfo) {
+	var wg1 sync.WaitGroup
+	wg1.Add(1)
+	go func() {
+		defer wg1.Done()
+		r := dataset.NewDatasetReader(dataset.DATASET_DIR, dataset.SEGMENT_SIZE)
+		defer r.Close()
+		for bn := startingBlockNumber; bn <= endingBlockNumber; bn++ {
+			entries, err := r.GetBlock(uint32(bn))
+			if err != nil {
+				panic(fmt.Errorf("failed to get block %d from dataset: %w", bn, err))
+			}
+
+			blockInfoCh <- blockInfo{
+				Number:  bn,
+				Entries: entries,
+			}
+			fmt.Println("Block", bn, "sent to the channel")
+		}
+	}()
+	go func() {
+		wg1.Wait()
+		close(blockInfoCh)
+		fmt.Println("All blocks fetched and sent to the blockInfoCh, closing the channel")
+	}()
 }

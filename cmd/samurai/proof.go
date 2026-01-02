@@ -4,23 +4,25 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/cockroachdb/pebble"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/nepal80m/samurai/internal/config"
 	"github.com/nepal80m/samurai/internal/proof"
 	"github.com/nepal80m/samurai/internal/segmenttree"
+	"github.com/nepal80m/samurai/internal/utils"
 )
 
-func generateProofs(addr common.Address, queryStartBlock uint64, queryEndBlock uint64, precomputedData *config.PrecomputedData, config *config.Config) {
+func generateProofs(addr common.Address, queryStartBlock uint64, queryEndBlock uint64, dbs []segmenttree.DB, precomputedData *config.PrecomputedData, config *config.Config) {
 
-	DB_DIR := "samurai.db"
+	shardIdx := utils.AddressToShardIndex(addr, config.Database.Shards)
+	db := dbs[shardIdx]
+	// DB_DIR := "samurai.db"
 
 	// Opening the database
-	db, err := segmenttree.NewPebbleDB(DB_DIR, &pebble.Options{})
-	if err != nil {
-		panic(err)
-	}
-	defer db.Close()
+	// db, err := segmenttree.NewPebbleDB(DB_DIR, &pebble.Options{})
+	// if err != nil {
+	// 	panic(err)
+	// }
+	// defer db.Close()
 	fmt.Println("Generating range proofs for account", addr.Hex())
 	// convert query range in block numbers terms to version number terms
 	fmt.Println("Query start block", queryStartBlock, "Query end block", queryEndBlock)
@@ -28,7 +30,7 @@ func generateProofs(addr common.Address, queryStartBlock uint64, queryEndBlock u
 	fmt.Println("Starting version", startingVersion, "Ending version", endingVersion)
 
 	start := time.Now()
-	// rangeProofs, balanceInfos := proof.GetNewProofRange(addr, startingVersion, endingVersion, precomputedData, config.StartingBlockNumber, db)
+	rangeProofs, balanceInfos := proof.GetNewProofRange(addr, startingVersion, endingVersion, precomputedData, config.Blocks.StartingBlockNumber, db)
 	fmt.Println("Time taken to generate range proofs", time.Since(start))
 
 	// rangeProofs, balances := proof.GetRangeProofs(addr, int(startingVersion), int(endingVersion), precomputedData.V, precomputedData.Weights, precomputedData.SRS, config.StartingBlockNumber)

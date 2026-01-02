@@ -5,26 +5,25 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cespare/xxhash/v2"
 	ristretto "github.com/dgraph-io/ristretto/v2"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/nepal80m/samurai/internal/config"
 )
 
-const DB_SHARDS = 4
+// const DB_SHARDS = 32
 
 type Cache struct {
-	C   *ristretto.Cache[[]byte, *AccountInfo]
-	dbs [DB_SHARDS]DB
+	C  *ristretto.Cache[[]byte, *AccountInfo]
+	db DB
 
 	precomputedData *config.PrecomputedData
 }
 
-func NewCache(dbs [DB_SHARDS]DB, precomputedData *config.PrecomputedData) (*Cache, error) {
+func NewCache(db DB, precomputedData *config.PrecomputedData) (*Cache, error) {
 	rc, err := ristretto.NewCache(&ristretto.Config[[]byte, *AccountInfo]{
 		NumCounters: 2_097_152, // TODO: recommended is 10x maxCost (2^18)
-		MaxCost:     131072,    //32_768
+		MaxCost:     8192,      //2048,      //16_384,    //8192 = 4GB,      //131_072,    //32_768
 		BufferItems: 64,
 	})
 	if err != nil {
@@ -32,7 +31,7 @@ func NewCache(dbs [DB_SHARDS]DB, precomputedData *config.PrecomputedData) (*Cach
 	}
 	return &Cache{
 		C:               rc,
-		dbs:             dbs,
+		db:              db,
 		precomputedData: precomputedData,
 	}, nil
 }
@@ -49,8 +48,8 @@ func (c *Cache) Update(k common.Address, initFn func(common.Address) *AccountInf
 	// start := time.Now()
 	seenInfo, seen := accountsSeen.Load(k)
 
-	dbIndex := xxhash.Sum64(k[:]) % DB_SHARDS
-	db := c.dbs[dbIndex]
+	// dbIndex := xxhash.Sum64(k[:]) % DB_SHARDS
+	db := c.db
 
 	if seen {
 		seenAccountInfo := seenInfo.(SeenAccountInfo)

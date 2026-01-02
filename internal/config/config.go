@@ -3,19 +3,40 @@ package config
 import (
 	bls "github.com/consensys/gnark-crypto/ecc/bls12-381"
 	"github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/nepal80m/samurai/internal/crypto/kzg"
 	"github.com/nepal80m/samurai/internal/math/polynomial"
 )
 
 type Config struct {
-	// GethIPC             string
-	Client              *rpc.Client
+	Blocks   Blocks
+	Workers  Workers
+	Database Database
+	Queue    Queue
+	// PrecomputedData PrecomputedData
+}
+
+type Blocks struct {
 	StartingBlockNumber uint64
 	EndingBlockNumber   uint64
-	TrackedAccounts     []common.Address
-	PrecomputedData     *PrecomputedData
+}
+
+type Workers struct {
+	CommitWorkerCount       int
+	CommitWorkerQueueSize   int
+	CommitWorkerChannelSize int
+}
+
+type Database struct {
+	Shards       int
+	MemTableSize uint64
+	DisableWAL   bool
+	CacheSize    uint64
+	StoragePath  string
+}
+
+type Queue struct {
+	BlockInfoChannelSize  int
+	UpdateTaskChannelSize int
 }
 
 type PrecomputedData struct {
