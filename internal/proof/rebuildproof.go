@@ -15,7 +15,7 @@ import (
 // rebuilds the whole segment tree
 // uses stored commitments to fill the commitHash part of the batch trees
 // in this process, stores only the involved batch trees and returns them
-func RebuildSegmentTreeForProof(account common.Address, lxRequiredBatchIdxs map[uint64][]uint64, startingVersion uint64, endingVersion uint64, db segmenttree.DB, precomputedData *config.PrecomputedData) (map[string][]common.Hash, []*segmenttree.HistoricalBalance) {
+func RebuildSegmentTreeForProof(account common.Address, lxRequiredBatchIdxs map[uint64][]uint64, startingVersion uint64, endingVersion uint64, db segmenttree.DB, precomputedData *config.PrecomputedData) (map[string]segmenttree.BatchTree, []*segmenttree.HistoricalBalance) {
 
 	cbInfo, err := segmenttree.GetCurrentBalanceInfo(account, db)
 	if err != nil {
@@ -36,7 +36,7 @@ func RebuildSegmentTreeForProof(account common.Address, lxRequiredBatchIdxs map[
 	// accountInfo.CurrentLXBatchTree = new(segmenttree.LXBatchTree)
 	// add all historical balance info as leaf nodes
 
-	requiredTreeBatchesMap := make(map[string][]common.Hash)
+	requiredTreeBatchesMap := make(map[string]segmenttree.BatchTree)
 	requiredHBInfos := make([]*segmenttree.HistoricalBalance, 0)
 
 	for version := uint64(0); version < cbInfo.Version; version++ {
@@ -58,7 +58,7 @@ func RebuildSegmentTreeForProof(account common.Address, lxRequiredBatchIdxs map[
 		}
 		for layer := uint64(1); layer <= MaxLayer; layer++ {
 			if slices.Contains(lxRequiredBatchIdxs[layer], lxBatchIdx(layer)) {
-				treeBatch := accountInfo.CurrentBatchTree[layer-1]
+				treeBatch := accountInfo.CurrentLXBatchTree[layer-1]
 				key := fmt.Sprintf("%d:%d", layer, lxBatchIdx(layer))
 				requiredTreeBatchesMap[key] = treeBatch
 			}
@@ -71,7 +71,8 @@ func RebuildSegmentTreeForProof(account common.Address, lxRequiredBatchIdxs map[
 			key := fmt.Sprintf("%d:%d", layer, batchIdx)
 			treeBatch := requiredTreeBatchesMap[key]
 			fmt.Println("inserting commitment hashes for layer", layer, "batchIdx", batchIdx)
-			InsertCommitmentHashes(layer, batchIdx, treeBatch, account, cbInfo.Version, db)
+			InsertCommitmentHashes(layer, batchIdx, &treeBatch, account, cbInfo.Version, db)
+			requiredTreeBatchesMap[key] = treeBatch
 		}
 	}
 	return requiredTreeBatchesMap, requiredHBInfos
@@ -103,15 +104,16 @@ func AddLeafNode(accountInfo *segmenttree.AccountInfo, leafNodeIdx uint64, leafN
 	// Resetting for new batch
 	for layer := 1; layer <= MaxLayer; layer++ {
 		if (leafNodeIdx % (L1BatchSize * math.Pow(L2BatchSize, uint64(layer)-1))) == 0 {
-			accountInfo.CurrentBatchTree[layer-1] = make([]common.Hash, SegmentTreeSize)
-			// accountInfo.CurrentBatchTreeCommitments[layer-1] = gnark_kzg.Digest{}
+			accountInfo.CurrentLXBatchTree[layer-1] = segmenttree.BatchTree{}
+			// accountInfo.CurrentLXBatchCommitment[layer-1] = gnark_kzg.Digest{}
 		}
 	}
 	// TODO: uncomment this and replace the below code with this.
 	lXm1RootHash := leafNodeHash
 	for layer := uint64(1); layer <= MaxLayer; layer++ {
 		UpdateLXTree(accountInfo, lxBatchLeafNodeOffsetIdx(layer), lXm1RootHash, layer)
-		lXm1RootHash = accountInfo.CurrentBatchTree[layer-1][0]
+		lxRootHash := accountInfo.CurrentLXBatchTree[layer-1][0]
+		lXm1RootHash = lxRootHash
 	}
 
 	// // updating layer 1 tree of current batch and calculate its commitment
@@ -137,7 +139,7 @@ func AddLeafNode(accountInfo *segmenttree.AccountInfo, leafNodeIdx uint64, leafN
 
 func UpdateLXTree(accountInfo *segmenttree.AccountInfo, idx uint64, val common.Hash, layer uint64) {
 
-	tree := accountInfo.CurrentLXBatchTree[layer-1]
+	tree := &accountInfo.CurrentLXBatchTree[layer-1]
 
 	// updating the tree
 	// note: root hash of layer 1 is empty until the whole batch is filled. instead of updating the tree with empty hash everytime, we skip the tree update unless the root is filled. this is purely for optimization.
@@ -162,7 +164,7 @@ func UpdateLXTree(accountInfo *segmenttree.AccountInfo, idx uint64, val common.H
 
 }
 
-func InsertCommitmentHashes(layer uint64, batchIdx uint64, tree []common.Hash, account common.Address, latestVersion uint64, db segmenttree.DB) {
+func InsertCommitmentHashes(layer uint64, batchIdx uint64, tree *segmenttree.BatchTree, account common.Address, latestVersion uint64, db segmenttree.DB) {
 	if layer <= 1 || layer > MaxLayer {
 		panic("layer" + strconv.Itoa(int(layer)) + " is invalid")
 	}

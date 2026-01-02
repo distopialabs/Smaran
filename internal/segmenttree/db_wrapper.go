@@ -457,17 +457,14 @@ func GetBatchCommitment(account common.Address, layer, batchIdx uint64, db DB) g
 			panic(fmt.Errorf("failed to get batch commitments: %w", err))
 		}
 	}
+
+	commitmentBytes := make([]byte, len(val))
+	copy(commitmentBytes, val[:])
 	var commitment gnark_kzg.Digest
-	if dbEncoding == EncodingProto {
-		pb := &segmenttreepb.KZGDigest{}
-		if err := proto.Unmarshal(val, pb); err != nil {
-			panic(fmt.Errorf("failed to decode batch commitment: %w", err))
-		}
-		commitment = digestFromProto(pb)
-	} else {
-		if err := rlp.DecodeBytes(val, &commitment); err != nil {
-			panic(fmt.Errorf("failed to decode batch commitment: %w", err))
-		}
+	_, err = commitment.SetBytes(commitmentBytes)
+	if err != nil {
+		panic(fmt.Errorf("failed to set commitment: %w", err))
 	}
+
 	return commitment
 }

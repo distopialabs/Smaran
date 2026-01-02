@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/nepal80m/samurai/internal/config"
 	"github.com/nepal80m/samurai/internal/proof"
 	"github.com/nepal80m/samurai/internal/segmenttree"
@@ -32,6 +33,12 @@ func generateProofs(addr common.Address, queryStartBlock uint64, queryEndBlock u
 	start := time.Now()
 	rangeProofs, balanceInfos := proof.GetNewProofRange(addr, startingVersion, endingVersion, precomputedData, config.Blocks.StartingBlockNumber, db)
 	fmt.Println("Time taken to generate range proofs", time.Since(start))
+
+	fmt.Println("Range proofs", rangeProofs)
+	for _, b := range balanceInfos {
+		fmt.Println("Balance info", b.Version, b.StartBlock, b.EndBlock, b.Balance)
+		fmt.Println("Balance info", b.Version, hexutil.EncodeUint64(b.StartBlock), hexutil.EncodeUint64(b.EndBlock), hexutil.EncodeBig(b.Balance))
+	}
 
 	// rangeProofs, balances := proof.GetRangeProofs(addr, int(startingVersion), int(endingVersion), precomputedData.V, precomputedData.Weights, precomputedData.SRS, config.StartingBlockNumber)
 	// _ = rangeProofs

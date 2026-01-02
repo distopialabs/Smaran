@@ -100,7 +100,7 @@ func (accountInfo *AccountInfo) AddLeafNode(leafNodeIdx uint64, leafNodeHash com
 			return L2BatchSize - 1 + idx
 		}
 	}
-	_ = lxBatchLeafNodeOffsetIdx
+	// _ = lxBatchLeafNodeOffsetIdx
 
 	// 1: 0,0,0,0,0 - 1,1,1,1,1 - 2,2,2,2,2 - 3,3,3,3,3 - 4,4,4,4,4 - 0,0,0,0,0
 	// 2: 0,0,0,0,0 - 0,0,0,0,0 - 0,0,0,0,0 - 0,0,0,0,0 - 0,0,0,0,0 - 1,1,1,1,1
@@ -110,25 +110,25 @@ func (accountInfo *AccountInfo) AddLeafNode(leafNodeIdx uint64, leafNodeHash com
 	// l3CommitIndex := blockNumber / (L1BatchSize * L2BatchSize * L2BatchSize)
 	// l4CommitIndex := blockNumber / (L1BatchSize * L2BatchSize * L2BatchSize * L2BatchSize)
 
-	lxBatchIdx := func(layer uint64) uint64 {
-		if layer == 0 || layer > MaxLayer {
-			panic("layer" + strconv.Itoa(int(layer)) + " is not supported")
-		}
-		return leafNodeIdx / (L1BatchSize * math.Pow(L2BatchSize, layer-1))
-	}
+	// lxBatchIdx := func(layer uint64) uint64 {
+	// 	if layer == 0 || layer > MaxLayer {
+	// 		panic("layer" + strconv.Itoa(int(layer)) + " is not supported")
+	// 	}
+	// 	return leafNodeIdx / (L1BatchSize * math.Pow(L2BatchSize, layer-1))
+	// }
 
-	lxBatchSize := func(layer uint64) uint64 {
-		if layer == 0 || layer > MaxLayer {
-			panic("layer" + strconv.Itoa(int(layer)) + " is not supported")
-		}
-		if layer == 1 {
-			return L1BatchSize
-		}
-		return L2BatchSize
-	}
+	// lxBatchSize := func(layer uint64) uint64 {
+	// 	if layer == 0 || layer > MaxLayer {
+	// 		panic("layer" + strconv.Itoa(int(layer)) + " is not supported")
+	// 	}
+	// 	if layer == 1 {
+	// 		return L1BatchSize
+	// 	}
+	// 	return L2BatchSize
+	// }
 
-	_ = lxBatchIdx
-	_ = lxBatchSize
+	// _ = lxBatchIdx
+	// _ = lxBatchSize
 
 	// Resetting for new batch
 	for layer := 1; layer <= MaxLayer; layer++ {
@@ -138,37 +138,37 @@ func (accountInfo *AccountInfo) AddLeafNode(leafNodeIdx uint64, leafNodeHash com
 		}
 	}
 	// TODO: uncomment this and replace the below code with this. add if else conditionfor layer 1 and others.
-	// lXm1CommitHash := common.Hash{}
-	// lXm1RootHash := leafNodeHash
-	// for layer := uint64(1); layer <= MaxLayer; layer++ {
-	// 	lxCommit := accountInfo.UpdateLXTree(lxBatchSize(layer)-1+lxModIdx(layer), lXm1RootHash, lXm1CommitHash, layer)
-	// 	lxCommitHash := CommitmentToHash(lxCommit)
-	// 	lxRootHash := accountInfo.CurrentBatchTree[layer-1][0]
-	// 	lXm1CommitHash = lxCommitHash
-	// 	lXm1RootHash = lxRootHash
-	// }
+	lXm1CommitHash := common.Hash{}
+	lXm1RootHash := leafNodeHash
+	for layer := uint64(1); layer <= MaxLayer; layer++ {
+		lxCommit := accountInfo.UpdateLXTree(lxBatchLeafNodeOffsetIdx(layer), lXm1RootHash, lXm1CommitHash, layer)
+		lxCommitHash := CommitmentToHash(lxCommit)
+		lxRootHash := accountInfo.CurrentLXBatchTree[layer-1][0]
+		lXm1CommitHash = lxCommitHash
+		lXm1RootHash = lxRootHash
+	}
 
-	// updating layer 1 tree of current batch and calculate its commitment
-	l1Commit := accountInfo.UpdateLXTree(lxBatchLeafNodeOffsetIdx(1), leafNodeHash, common.Hash{}, 1)
-	l1CommitHash := CommitmentToHash(l1Commit)
-	l1RootHash := accountInfo.CurrentLXBatchTree[0][0]
+	// // updating layer 1 tree of current batch and calculate its commitment
+	// l1Commit := accountInfo.UpdateLXTree(lxBatchLeafNodeOffsetIdx(1), leafNodeHash, common.Hash{}, 1)
+	// l1CommitHash := CommitmentToHash(l1Commit)
+	// l1RootHash := accountInfo.CurrentLXBatchTree[0][0]
 
-	// updating layer 2
-	l2Commit := accountInfo.UpdateLXTree(lxBatchLeafNodeOffsetIdx(2), l1RootHash, l1CommitHash, 2)
-	l2CommitHash := CommitmentToHash(l2Commit)
-	l2RootHash := accountInfo.CurrentLXBatchTree[1][0]
+	// // updating layer 2
+	// l2Commit := accountInfo.UpdateLXTree(lxBatchLeafNodeOffsetIdx(2), l1RootHash, l1CommitHash, 2)
+	// l2CommitHash := CommitmentToHash(l2Commit)
+	// l2RootHash := accountInfo.CurrentLXBatchTree[1][0]
 
-	// updating layer 3
-	l3Commit := accountInfo.UpdateLXTree(lxBatchLeafNodeOffsetIdx(3), l2RootHash, l2CommitHash, 3)
-	l3CommitHash := CommitmentToHash(l3Commit)
-	l3RootHash := accountInfo.CurrentLXBatchTree[2][0]
+	// // updating layer 3
+	// l3Commit := accountInfo.UpdateLXTree(lxBatchLeafNodeOffsetIdx(3), l2RootHash, l2CommitHash, 3)
+	// l3CommitHash := CommitmentToHash(l3Commit)
+	// l3RootHash := accountInfo.CurrentLXBatchTree[2][0]
 
-	// updating layer 4
-	l4Commit := accountInfo.UpdateLXTree(lxBatchLeafNodeOffsetIdx(4), l3RootHash, l3CommitHash, 4)
-	l4CommitHash := CommitmentToHash(l4Commit)
-	l4RootHash := accountInfo.CurrentLXBatchTree[3][0]
-	_ = l4CommitHash
-	_ = l4RootHash
+	// // updating layer 4
+	// l4Commit := accountInfo.UpdateLXTree(lxBatchLeafNodeOffsetIdx(4), l3RootHash, l3CommitHash, 4)
+	// l4CommitHash := CommitmentToHash(l4Commit)
+	// l4RootHash := accountInfo.CurrentLXBatchTree[3][0]
+	// _ = l4CommitHash
+	// _ = l4RootHash
 
 }
 
