@@ -7,3 +7,6 @@ storage/
 temp/
 *.db
 *.log
+venv/
+*.csv
+*.png
