@@ -33,6 +33,11 @@ func main() {
 	numBlocks := flag.Int("n", 1000, "Number of blocks to process")
 	// numTrackedAccounts := flag.Int("a", 1, "Number of tracked accounts")
 
+	// benchmark flags
+	bench := flag.Bool("bench", false, "Enable benchmark mode for commit generation")
+	benchDuration := flag.Int("benchDuration", 300, "Benchmark duration in seconds (default: 5 minutes)")
+	benchOutputDir := flag.String("benchOutputDir", "/data/local/samurai/test/benchmark", "Directory to write benchmark CSV files")
+
 	// flags to generate proofs & verify proofs
 	queryStartBlock := flag.Int("queryStartBlock", 20, "Start block for query")
 	queryEndBlock := flag.Int("queryEndBlock", 20-1+100, "End block for query")
@@ -86,19 +91,27 @@ func main() {
 		WeightCommits: weightCommits,
 		SRS:           srs,
 	}
-	config := config.Config{
+	// Determine block range based on mode
+	startBlock := uint64(18908895) // first block of 2024
+	var endBlock uint64
+	if *bench {
+		// Benchmark mode: use unbounded range (will stop on timer or when dataset exhausted)
+		endBlock = 21_700_000 // Last block in dataset, but fetcher will stop gracefully if exhausted
+	} else {
+		// Production mode: use -n flag
+		endBlock = startBlock + uint64(*numBlocks-1)
+	}
+
+	cfg := config.Config{
 		Blocks: config.Blocks{
-			// StartingBlockNumber: 18910944,                        // first block of 2024
-			// EndingBlockNumber:   18910944 + uint64(*numBlocks-1), // last block of 2024
-			StartingBlockNumber: 18908895,                        // first block of 2024
-			EndingBlockNumber:   18908895 + uint64(*numBlocks-1), // last block of 2024
-			// EndingBlockNumber: 21525890, // last block of 2024
+			StartingBlockNumber: startBlock,
+			EndingBlockNumber:   endBlock,
 		},
 
 		Workers: config.Workers{
 			CommitWorkerCount:       32,
 			CommitWorkerQueueSize:   1_000_000,
-			CommitWorkerChannelSize: 5_000,
+			CommitWorkerChannelSize: 1_000,
 		},
 		Database: config.Database{
 			Shards:       32,
@@ -111,14 +124,19 @@ func main() {
 			BlockInfoChannelSize:  1024,
 			UpdateTaskChannelSize: 5_000,
 		},
+		Benchmark: config.Benchmark{
+			Enabled:      *bench,
+			DurationSecs: *benchDuration,
+			OutputDir:    *benchOutputDir,
+		},
 	}
 
 	// Setting up the databases and caches
-	dbs := make([]segmenttree.DB, config.Database.Shards)
-	caches := make([]*segmenttree.Cache, config.Database.Shards)
+	dbs := make([]segmenttree.DB, cfg.Database.Shards)
+	caches := make([]*segmenttree.Cache, cfg.Database.Shards)
 
-	for i := range config.Database.Shards {
-		DB_DIR := fmt.Sprintf(config.Database.StoragePath+"/samurai-shard-%d.db", i)
+	for i := range cfg.Database.Shards {
+		DB_DIR := fmt.Sprintf(cfg.Database.StoragePath+"/samurai-shard-%d.db", i)
 
 		if *mode == "commit" && true {
 			fmt.Println("Removing database directory", DB_DIR)
@@ -130,9 +148,9 @@ func main() {
 			}
 		}
 		db, err := segmenttree.NewPebbleDB(DB_DIR, &pebble.Options{
-			MemTableSize: config.Database.MemTableSize,
-			DisableWAL:   config.Database.DisableWAL,
-			Cache:        pebble.NewCache(int64(config.Database.CacheSize)),
+			MemTableSize: cfg.Database.MemTableSize,
+			DisableWAL:   cfg.Database.DisableWAL,
+			Cache:        pebble.NewCache(int64(cfg.Database.CacheSize)),
 		})
 		if err != nil {
 			panic(fmt.Errorf("failed to create Pebble database %s: %w", DB_DIR, err))
@@ -147,19 +165,22 @@ func main() {
 
 	switch *mode {
 	case "commit":
-		// generateCommitmentsV2(&config, precomputedData)
-		generateCommitmentsSimplified(&config, caches)
+		if cfg.Benchmark.Enabled {
+			generateCommitmentsBenchmark(&cfg, caches)
+		} else {
+			generateCommitmentsSimplified(&cfg, caches)
+		}
 	case "proof":
-		generateProofs(common.HexToAddress(*queryAccount), uint64(*queryStartBlock)+config.Blocks.StartingBlockNumber, uint64(*queryEndBlock)+config.Blocks.StartingBlockNumber, dbs, precomputedData, &config)
+		generateProofs(common.HexToAddress(*queryAccount), uint64(*queryStartBlock)+cfg.Blocks.StartingBlockNumber, uint64(*queryEndBlock)+cfg.Blocks.StartingBlockNumber, dbs, precomputedData, &cfg)
 	case "verify":
 		verifyProofs(*queryStartBlock, *queryEndBlock, V, weights, srs)
 	}
 
-	for i := range config.Database.Shards {
+	for i := range cfg.Database.Shards {
 		caches[i].Close()
 		fmt.Println("Cache", i, "closed")
 	}
-	for i := range config.Database.Shards {
+	for i := range cfg.Database.Shards {
 		dbs[i].Close()
 		fmt.Println("Database", i, "closed")
 	}

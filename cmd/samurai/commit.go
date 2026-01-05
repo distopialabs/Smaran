@@ -28,6 +28,8 @@ type updateTask struct {
 	BlockNumber uint64
 	Account     common.Address
 	Balance     *big.Int
+	EnqueuedAt  int64 // UnixNano timestamp when added to channel
+
 }
 
 func generateCommitmentsSimplified(config *config.Config, caches []*segmenttree.Cache) {

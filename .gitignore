@@ -10,3 +10,5 @@ temp/
 venv/
 *.csv
 *.png
+benchmark_output/
+requirements.txt

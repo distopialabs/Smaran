@@ -8,11 +8,18 @@ import (
 )
 
 type Config struct {
-	Blocks   Blocks
-	Workers  Workers
-	Database Database
-	Queue    Queue
+	Blocks    Blocks
+	Workers   Workers
+	Database  Database
+	Queue     Queue
+	Benchmark Benchmark
 	// PrecomputedData PrecomputedData
+}
+
+type Benchmark struct {
+	Enabled      bool
+	DurationSecs int    // How long to run the benchmark (seconds)
+	OutputDir    string // Directory to write benchmark CSV files
 }
 
 type Blocks struct {
