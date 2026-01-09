@@ -11,15 +11,19 @@ type Config struct {
 	Blocks    Blocks
 	Workers   Workers
 	Database  Database
+	Cache     Cache
 	Queue     Queue
 	Benchmark Benchmark
 	// PrecomputedData PrecomputedData
 }
 
 type Benchmark struct {
-	Enabled      bool
-	DurationSecs int    // How long to run the benchmark (seconds)
-	OutputDir    string // Directory to write benchmark CSV files
+	Enabled              bool
+	DurationSecs         int    // How long to run the benchmark (seconds)
+	OutputDir            string // Directory to write benchmark CSV files
+	CollectDBMetrics     bool   // Collect Pebble DB metrics (compaction, L0 files, etc.)
+	CollectPipelineSizes bool   // Collect queue and channel sizes per shard
+	CollectCacheMetrics  bool   // Collect Ristretto cache metrics (hits, misses, size)
 }
 
 type Blocks struct {
@@ -39,6 +43,12 @@ type Database struct {
 	DisableWAL   bool
 	CacheSize    uint64
 	StoragePath  string
+}
+
+type Cache struct {
+	NumCounters   uint64
+	MaxCost       uint64
+	EnableMetrics bool // Enable Ristretto metrics collection (has some overhead)
 }
 
 type Queue struct {

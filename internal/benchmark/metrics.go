@@ -12,6 +12,7 @@ import (
 
 // UpdateMetric records timing data for a single update operation
 type UpdateMetric struct {
+	WorkerID      int
 	BlockNumber   uint64
 	LatencyNs     int64 // Time from enqueue to completion
 	CompletedAtNs int64 // Absolute timestamp when completed
@@ -91,7 +92,7 @@ func NewMetricsCollector(outputDir string) (*MetricsCollector, error) {
 	}
 
 	// Write CSV headers
-	mc.updateBuf.WriteString("block_number,latency_ns,completed_at_ns\n")
+	mc.updateBuf.WriteString("worker_id,block_number,latency_ns,completed_at_ns\n")
 	mc.blockBuf.WriteString("block_number,submitted_at_ns,completed_at_ns,update_count\n")
 
 	// Start background writers
@@ -110,7 +111,7 @@ func NewMetricsCollector(outputDir string) (*MetricsCollector, error) {
 func (mc *MetricsCollector) updateWriter() {
 	defer mc.wg.Done()
 	for m := range mc.updateCh {
-		fmt.Fprintf(mc.updateBuf, "%d,%d,%d\n", m.BlockNumber, m.LatencyNs, m.CompletedAtNs)
+		fmt.Fprintf(mc.updateBuf, "%d,%d,%d,%d\n", m.WorkerID, m.BlockNumber, m.LatencyNs, m.CompletedAtNs)
 		mc.totalUpdates.Add(1)
 	}
 }
@@ -139,7 +140,7 @@ func (mc *MetricsCollector) RecordBlockSubmitted(blockNumber uint64, updateCount
 
 // RecordUpdateCompleted records when an update completes
 // Returns true if this was the last update for the block
-func (mc *MetricsCollector) RecordUpdateCompleted(blockNumber uint64, enqueuedAtNs int64) {
+func (mc *MetricsCollector) RecordUpdateCompleted(workerID int, blockNumber uint64, enqueuedAtNs int64) {
 	if mc.closed.Load() {
 		return
 	}
@@ -150,6 +151,7 @@ func (mc *MetricsCollector) RecordUpdateCompleted(blockNumber uint64, enqueuedAt
 	// Record update metric
 	select {
 	case mc.updateCh <- UpdateMetric{
+		WorkerID:      workerID,
 		BlockNumber:   blockNumber,
 		LatencyNs:     latency,
 		CompletedAtNs: completedAt,

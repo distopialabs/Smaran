@@ -9,6 +9,11 @@ type PebbleDB struct {
 	db *pebble.DB
 }
 
+// Metrics returns the current Pebble database metrics
+func (p *PebbleDB) Metrics() *pebble.Metrics {
+	return p.db.Metrics()
+}
+
 // NewPebbleDB creates a new PebbleDB wrapper
 func NewPebbleDB(path string, opts *pebble.Options) (*PebbleDB, error) {
 	db, err := pebble.Open(path, opts)

@@ -17,17 +17,63 @@ import (
 
 // generateCommitmentsBenchmark runs the commit generation in benchmark mode
 // It runs for a fixed duration, collecting detailed metrics
-func generateCommitmentsBenchmark(cfg *config.Config, caches []*segmenttree.Cache) {
+func generateCommitmentsBenchmark(cfg *config.Config, caches []*segmenttree.Cache, dbs []*segmenttree.PebbleDB) {
 	fmt.Printf("\n🚀 Starting Benchmark Mode\n")
 	fmt.Printf("   Duration: %d seconds\n", cfg.Benchmark.DurationSecs)
 	fmt.Printf("   Workers: %d\n", cfg.Workers.CommitWorkerCount)
 
-	// Initialize metrics collector
+	// Initialize metrics collector (always enabled for latency/throughput)
 	metrics, err := benchmark.NewMetricsCollector(cfg.Benchmark.OutputDir)
 	if err != nil {
 		panic(fmt.Errorf("failed to create metrics collector: %w", err))
 	}
 	defer metrics.Close()
+
+	// Initialize DB metrics collector (optional)
+	var dbMetrics *benchmark.DBMetricsCollector
+	if cfg.Benchmark.CollectDBMetrics {
+		dbMetrics, err = benchmark.NewDBMetricsCollector(cfg.Benchmark.OutputDir)
+		if err != nil {
+			panic(fmt.Errorf("failed to create DB metrics collector: %w", err))
+		}
+		defer dbMetrics.Close()
+
+		// Convert dbs to PebbleMetricsProvider interface slice
+		dbProviders := make([]benchmark.PebbleMetricsProvider, len(dbs))
+		for i, db := range dbs {
+			dbProviders[i] = db
+		}
+		// Start periodic DB metrics collection (every 1 second)
+		dbMetrics.StartPeriodicCollection(dbProviders, time.Second)
+	}
+
+	// Initialize pipeline metrics collector (optional)
+	var pipelineMetrics *benchmark.PipelineMetricsCollector
+	if cfg.Benchmark.CollectPipelineSizes {
+		pipelineMetrics, err = benchmark.NewPipelineMetricsCollector(cfg.Benchmark.OutputDir)
+		if err != nil {
+			panic(fmt.Errorf("failed to create pipeline metrics collector: %w", err))
+		}
+		defer pipelineMetrics.Close()
+	}
+
+	// Initialize cache metrics collector (optional)
+	var cacheMetrics *benchmark.CacheMetricsCollector
+	if cfg.Benchmark.CollectCacheMetrics {
+		cacheMetrics, err = benchmark.NewCacheMetricsCollector(cfg.Benchmark.OutputDir)
+		if err != nil {
+			panic(fmt.Errorf("failed to create cache metrics collector: %w", err))
+		}
+		defer cacheMetrics.Close()
+
+		// Convert caches to CacheMetricsProvider interface slice
+		cacheProviders := make([]benchmark.CacheMetricsProvider, len(caches))
+		for i, cache := range caches {
+			cacheProviders[i] = cache
+		}
+		// Start periodic cache metrics collection (every 1 second)
+		cacheMetrics.StartPeriodicCollection(cacheProviders, time.Second)
+	}
 
 	// Channels
 	blockInfoCh := make(chan blockInfo, cfg.Queue.BlockInfoChannelSize)
@@ -43,7 +89,7 @@ func generateCommitmentsBenchmark(cfg *config.Config, caches []*segmenttree.Cach
 	benchStart := time.Now()
 	benchDuration := time.Duration(cfg.Benchmark.DurationSecs) * time.Second
 
-	// go logChannelSize(blockInfoCh, updateTaskChs)
+	go logChannelSizeBench(blockInfoCh, updateTaskChs)
 
 	// Start block fetcher (runs for benchDuration)
 	go spawnBlockFetcherBenchmark(
@@ -62,7 +108,7 @@ func generateCommitmentsBenchmark(cfg *config.Config, caches []*segmenttree.Cach
 	}()
 
 	// Feed update tasks (with timing)
-	go feedUpdateTasksBenchmark(cfg, blockInfoCh, updateTaskChs, &stopFetching)
+	go feedUpdateTasksBenchmark(cfg, blockInfoCh, updateTaskChs, &stopFetching, pipelineMetrics)
 
 	// Start workers
 	wg := sync.WaitGroup{}
@@ -80,7 +126,7 @@ func generateCommitmentsBenchmark(cfg *config.Config, caches []*segmenttree.Cach
 					&accountsSeen,
 				)
 				// Record completion
-				metrics.RecordUpdateCompleted(task.BlockNumber, task.EnqueuedAt)
+				metrics.RecordUpdateCompleted(workerID, task.BlockNumber, task.EnqueuedAt)
 			}
 		}(i)
 	}
@@ -140,14 +186,33 @@ func feedUpdateTasksBenchmark(
 	blockInfoCh chan blockInfo,
 	updateTaskChs []chan updateTask,
 	stopFeeding *atomic.Bool,
+	pipelineMetrics *benchmark.PipelineMetricsCollector,
 ) {
 	updateTaskQueues := make([]utils.Queue[updateTask], cfg.Workers.CommitWorkerCount)
 	for i := range cfg.Workers.CommitWorkerCount {
 		updateTaskQueues[i] = utils.NewQueue[updateTask]()
 	}
 
+	// Start pipeline metrics collection if enabled
+	if pipelineMetrics != nil {
+		queueSizes := func(shardID int) int {
+			return updateTaskQueues[shardID].Size()
+		}
+		channelSizes := func(shardID int) (int, int) {
+			return len(updateTaskChs[shardID]), cap(updateTaskChs[shardID])
+		}
+		pipelineMetrics.StartPeriodicCollection(
+			cfg.Workers.CommitWorkerCount,
+			queueSizes,
+			channelSizes,
+			100*time.Millisecond, // Sample every 100ms
+		)
+	}
+
 	blockInfoChClosed := false
-	for {
+	allUpdateTaskQueuesEmpty := false
+	for !(blockInfoChClosed && allUpdateTaskQueuesEmpty) {
+
 		// Check if benchmark timer expired - stop feeding from queues
 		if stopFeeding.Load() {
 			// Count remaining items in queues that won't be processed
@@ -157,6 +222,22 @@ func feedUpdateTasksBenchmark(
 			}
 			fmt.Printf("⏱️ Update feeder stopped by timer. Dropped %d queued updates.\n", totalDropped)
 			break
+		}
+
+		// check if all updateTaskCh are full
+		allUpdateTaskChsFull := true
+		for i := range cfg.Workers.CommitWorkerCount {
+			if len(updateTaskChs[i]) < cfg.Workers.CommitWorkerChannelSize {
+				allUpdateTaskChsFull = false
+				break
+			}
+		}
+		if allUpdateTaskChsFull {
+			sleepTime := time.Millisecond * 500
+			// fmt.Println("All updateTaskChs are full, skipping the fetch of new blocks and sleeping for", sleepTime)
+			// TODO: decide whether to sleep for a longer time or not
+			time.Sleep(sleepTime)
+			continue
 		}
 
 		// Check if any queue has hit the limit
@@ -169,6 +250,7 @@ func feedUpdateTasksBenchmark(
 			}
 		}
 
+		anyWorkDone := false
 		// Try to read from blockInfoCh (non-blocking) only if no queue is at limit
 		if !blockInfoChClosed && !anyQueueAtLimit {
 			select {
@@ -176,6 +258,8 @@ func feedUpdateTasksBenchmark(
 				if !ok {
 					blockInfoChClosed = true
 				} else {
+					anyWorkDone = true
+
 					// Enqueue all entries from this block
 					for _, entry := range blk.Entries {
 						chIdx := utils.AddressToShardIndex(entry.Address, cfg.Workers.CommitWorkerCount)
@@ -193,13 +277,12 @@ func feedUpdateTasksBenchmark(
 		}
 
 		// Drain queues to channels (non-blocking)
-		allQueuesEmpty := true
-		anyWorkDone := false
+		allUpdateTaskQueuesEmpty = true
 
 		for i := range cfg.Workers.CommitWorkerCount {
 			// Drain as many items as possible from queue[i] to channel[i]
 			for !updateTaskQueues[i].IsEmpty() {
-				allQueuesEmpty = false
+				allUpdateTaskQueuesEmpty = false
 
 				task, err := updateTaskQueues[i].Peek()
 				if err != nil {
@@ -225,13 +308,8 @@ func feedUpdateTasksBenchmark(
 		nextQueue:
 		}
 
-		// Exit condition: all queues empty and input closed
-		if allQueuesEmpty && blockInfoChClosed {
-			break
-		}
-
 		// Prevent busy-wait: sleep briefly if no work was done this iteration
-		if !anyWorkDone && allQueuesEmpty {
+		if !anyWorkDone {
 			time.Sleep(time.Microsecond * 100)
 		}
 	}
@@ -241,4 +319,47 @@ func feedUpdateTasksBenchmark(
 		close(updateTaskChs[i])
 	}
 	fmt.Println("📤 All worker channels closed")
+}
+func logChannelSizeBench(blockInfoCh chan blockInfo, updateTaskChs []chan updateTask) {
+	// keep logging the size of the channel every 5 seconds until the channel is closed
+	for {
+		time.Sleep(1 * time.Millisecond)
+		// remaining := cap(blockInfoCh) - len(blockInfoCh)
+		// // if remaining > 5 {
+		// // 	fmt.Printf("BlockInfoCh: %d/%d\n", len(blockInfoCh), cap(blockInfoCh))
+		// // }
+		// if remaining > 0 && remaining < 5 {
+		// 	fmt.Printf("⚠️ BlockInfoCh is almost full: %d/%d\n", len(blockInfoCh), cap(blockInfoCh))
+		// }
+		// if remaining <= 0 {
+		// 	fmt.Printf("🚨 BlockInfoCh is full: %d/%d\n", len(blockInfoCh), cap(blockInfoCh))
+		// }
+
+		// remaining = cap(orderedBlockInfoCh) - len(orderedBlockInfoCh)
+		// if remaining > 5 {
+		// 	fmt.Printf("OrderedBlockInfoCh: %d/%d\n", len(orderedBlockInfoCh), cap(orderedBlockInfoCh))
+		// }
+		// if remaining > 0 && remaining < 5 {
+		// 	fmt.Printf("⚠️ OrderedBlockInfoCh is almost full, %d/%d\n", len(orderedBlockInfoCh), cap(orderedBlockInfoCh))
+		// }
+		// if remaining <= 0 {
+		// 	fmt.Printf("🚨 OrderedBlockInfoCh is full: %d/%d\n", len(orderedBlockInfoCh), cap(orderedBlockInfoCh))
+		// }
+		for i, updateTaskCh := range updateTaskChs {
+			if len(updateTaskCh) < 10 {
+				fmt.Printf("🚨 UpdateTaskCh %d is almost empty: %d/%d\n", i, len(updateTaskCh), cap(updateTaskCh))
+			}
+			// remaining := cap(updateTaskCh) - len(updateTaskCh)
+			// if remaining > 5 {
+			// 	fmt.Printf("UpdateTaskCh %d: %d/%d\n", i, len(updateTaskCh), cap(updateTaskCh))
+			// }
+			// if remaining > 0 && remaining < 5 {
+			// 	fmt.Printf("⚠️ UpdateTaskCh %d is almost full: %d/%d\n", i, len(updateTaskCh), cap(updateTaskCh))
+			// }
+			// if remaining <= 0 {
+			// 	fmt.Printf("🚨 UpdateTaskCh %d is full: %d/%d\n", i, len(updateTaskCh), cap(updateTaskCh))
+			// }
+		}
+
+	}
 }

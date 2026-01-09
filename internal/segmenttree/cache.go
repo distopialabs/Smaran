@@ -20,11 +20,15 @@ type Cache struct {
 	precomputedData *config.PrecomputedData
 }
 
-func NewCache(db DB, precomputedData *config.PrecomputedData) (*Cache, error) {
+func NewCache(db DB, cfg *config.Cache, precomputedData *config.PrecomputedData) (*Cache, error) {
 	rc, err := ristretto.NewCache(&ristretto.Config[[]byte, *AccountInfo]{
-		NumCounters: 2_097_152, // TODO: recommended is 10x maxCost (2^18)
-		MaxCost:     8192,      //2048,      //16_384,    //8192 = 4GB,      //131_072,    //32_768
+		NumCounters: int64(cfg.NumCounters), // TODO: recommended is 10x maxCost (2^18)
+		MaxCost:     int64(cfg.MaxCost),     //2048,      //16_384,    //8192 = 4GB,      //131_072,    //32_768
 		BufferItems: 64,
+		Metrics:     cfg.EnableMetrics, // Enable ristretto metrics collection for benchmarking
+		// Cost: func(value *AccountInfo) int64 {
+		// 	return 513 * 1024 // 513kb
+		// },
 	})
 	if err != nil {
 		return nil, err
@@ -34,6 +38,11 @@ func NewCache(db DB, precomputedData *config.PrecomputedData) (*Cache, error) {
 		db:              db,
 		precomputedData: precomputedData,
 	}, nil
+}
+
+// Metrics returns the underlying Ristretto cache metrics (nil if metrics not enabled)
+func (c *Cache) Metrics() *ristretto.Metrics {
+	return c.C.Metrics
 }
 
 type SeenAccountInfo struct {
@@ -102,7 +111,7 @@ func (c *Cache) Update(k common.Address, initFn func(common.Address) *AccountInf
 	// fmt.Println(k.Hex(), "mutate time:", time.Since(start))
 	// quitLog = logBlockedTime("CacheSet", 100*time.Millisecond)
 	// start = time.Now()
-	admitted := c.C.Set(k[:], ai, 1)
+	admitted := c.C.Set(k[:], ai, 525312)
 	if !admitted {
 		fmt.Println(k.Hex(), "❌Cache set rejected")
 	}

@@ -21,6 +21,7 @@ func (q *Queue[T]) Dequeue() (T, error) {
 		return zero, errors.New("queue is empty")
 	}
 	val := (*q)[0]
+	(*q)[0] = zero
 	*q = (*q)[1:]
 	return val, nil
 }

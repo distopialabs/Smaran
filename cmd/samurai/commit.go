@@ -66,13 +66,12 @@ func generateCommitmentsSimplified(config *config.Config, caches []*segmenttree.
 
 	total_start := time.Now()
 
-	go logChannelSize(blockInfoCh, updateTaskChs)
+	// go logChannelSize(blockInfoCh, updateTaskChs)
 
 	spawnBlockFetcher(config.Blocks.StartingBlockNumber, config.Blocks.EndingBlockNumber, blockInfoCh)
 
 	// feed update tasks
 	go func() {
-
 		updateTaskQueues := make([]utils.Queue[updateTask], config.Workers.CommitWorkerCount)
 		for i := range config.Workers.CommitWorkerCount {
 			updateTaskQueues[i] = utils.NewQueue[updateTask]()
@@ -82,25 +81,48 @@ func generateCommitmentsSimplified(config *config.Config, caches []*segmenttree.
 		// first check if the blockInfoCh is closed
 		// if not listen for blockInfoCh and enqueue the update tasks to the updateTaskQueues
 		blockInfoChClosed := false
-		for {
-			// Check if any queue has hit the limit
-			anyQueueAtLimit := false
+		allUpdateTaskQueuesEmpty := false
+		for !(blockInfoChClosed && allUpdateTaskQueuesEmpty) {
+
+			// check if all updateTaskCh are full
+			allUpdateTaskChsFull := true
 			for i := range config.Workers.CommitWorkerCount {
-				if updateTaskQueues[i].Size() >= config.Workers.CommitWorkerQueueSize {
-					anyQueueAtLimit = true
-					fmt.Printf("⚠️ Queue %d has hit the limit: %d tasks\n", i, updateTaskQueues[i].Size())
+				if len(updateTaskChs[i]) < config.Workers.CommitWorkerChannelSize {
+					allUpdateTaskChsFull = false
 					break
 				}
 			}
+			if allUpdateTaskChsFull {
+				sleepTime := time.Millisecond * 500
+				fmt.Println("All updateTaskChs are full, skipping the fetch of new blocks and sleeping for", sleepTime)
+				// TODO: decide whether to sleep for a longer time or not
+				time.Sleep(sleepTime)
+				continue
+			}
 
-			// Try to read from blockInfoCh (non-blocking) only if no queue is at limit
+			// Check if any queue has hit the memory limit
+			anyQueueAtLimit := false
+			// maxQueueSize := 0
+			for i := range config.Workers.CommitWorkerCount {
+				queueSize := updateTaskQueues[i].Size()
+				// if queueSize > maxQueueSize {
+				// 	maxQueueSize = queueSize
+				// }
+
+				if queueSize >= config.Workers.CommitWorkerQueueSize {
+					anyQueueAtLimit = true
+					fmt.Printf("⚠️ Queue %d has hit the limit: %d tasks\n", i, queueSize)
+					break
+				}
+			}
+			// fmt.Printf("Max queue size utilized: %d\n", maxQueueSize)
+			anyWorkDone := false
+			// Try to read from blockInfoCh and add entries to the updateTaskQueues only if no queue is at limit (prevent memory bloat)
 			if !blockInfoChClosed && !anyQueueAtLimit {
 				select {
 				case blk, ok := <-blockInfoCh:
-					if !ok {
-						blockInfoChClosed = true
-					} else {
-						// Enqueue all entries from this block
+					if ok {
+						anyWorkDone = true
 						for _, entry := range blk.Entries {
 							chIdx := utils.AddressToShardIndex(entry.Address, config.Workers.CommitWorkerCount)
 							updateTaskQueues[chIdx].Enqueue(updateTask{
@@ -109,27 +131,25 @@ func generateCommitmentsSimplified(config *config.Config, caches []*segmenttree.
 								Balance:     new(big.Int).SetBytes(entry.Balance),
 							})
 						}
+					} else {
+						blockInfoChClosed = true
 					}
 				default:
-					// No data available right now
 				}
 			}
-
-			// Drain queues to channels (non-blocking)
-			allQueuesEmpty := true
-			anyWorkDone := false
+			// Drain updateTaskQueues to updateTaskChs
+			allUpdateTaskQueuesEmpty = true
 
 			for i := range config.Workers.CommitWorkerCount {
 				// Drain as many items as possible from queue[i] to channel[i]
 				for !updateTaskQueues[i].IsEmpty() {
-					allQueuesEmpty = false
+					allUpdateTaskQueuesEmpty = false
 
 					task, err := updateTaskQueues[i].Peek()
 					if err != nil {
 						panic(fmt.Errorf("failed to peek update task: %w", err))
 					}
 
-					// Try non-blocking send
 					select {
 					case updateTaskChs[i] <- task:
 						_, err := updateTaskQueues[i].Dequeue()
@@ -146,13 +166,8 @@ func generateCommitmentsSimplified(config *config.Config, caches []*segmenttree.
 			nextQueue:
 			}
 
-			// Exit condition: all queues empty and input closed
-			if allQueuesEmpty && blockInfoChClosed {
-				break
-			}
-
 			// Prevent busy-wait: sleep briefly if no work was done this iteration
-			if !anyWorkDone && allQueuesEmpty {
+			if !anyWorkDone {
 				time.Sleep(time.Microsecond * 100)
 			}
 		}
