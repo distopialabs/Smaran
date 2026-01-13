@@ -15,12 +15,12 @@ import (
 
 type Cache struct {
 	C  *ristretto.Cache[[]byte, *AccountInfo]
-	db DB
+	db *SamuraiDB
 
 	precomputedData *config.PrecomputedData
 }
 
-func NewCache(db DB, cfg *config.Cache, precomputedData *config.PrecomputedData) (*Cache, error) {
+func NewCache(db *SamuraiDB, cfg *config.Cache, precomputedData *config.PrecomputedData) (*Cache, error) {
 	rc, err := ristretto.NewCache(&ristretto.Config[[]byte, *AccountInfo]{
 		NumCounters: int64(cfg.NumCounters), // TODO: recommended is 10x maxCost (2^18)
 		MaxCost:     int64(cfg.MaxCost),     //2048,      //16_384,    //8192 = 4GB,      //131_072,    //32_768
@@ -29,6 +29,9 @@ func NewCache(db DB, cfg *config.Cache, precomputedData *config.PrecomputedData)
 		// Cost: func(value *AccountInfo) int64 {
 		// 	return 513 * 1024 // 513kb
 		// },
+		OnExit: func(val *AccountInfo) {
+			val.Save(db)
+		},
 	})
 	if err != nil {
 		return nil, err
@@ -51,7 +54,7 @@ type SeenAccountInfo struct {
 	TotalDBFetchTime time.Duration
 }
 
-func (c *Cache) Update(k common.Address, initFn func(common.Address) *AccountInfo, loadFn func(common.Address, DB) *AccountInfo, mutate func(*AccountInfo, DB), accountsSeen *sync.Map) (*AccountInfo, error) {
+func (c *Cache) Update(k common.Address, initFn func(common.Address) *AccountInfo, loadFn func(common.Address, *SamuraiDB) *AccountInfo, mutate func(*AccountInfo, *SamuraiDB), accountsSeen *sync.Map) (*AccountInfo, error) {
 
 	var ai *AccountInfo
 	// start := time.Now()
@@ -111,14 +114,15 @@ func (c *Cache) Update(k common.Address, initFn func(common.Address) *AccountInf
 	// fmt.Println(k.Hex(), "mutate time:", time.Since(start))
 	// quitLog = logBlockedTime("CacheSet", 100*time.Millisecond)
 	// start = time.Now()
-	admitted := c.C.Set(k[:], ai, 525312)
+	admitted := c.C.Set(k[:], ai, 525312) //525312
 	if !admitted {
 		fmt.Println(k.Hex(), "❌Cache set rejected")
 	}
+	c.C.Wait()
 	// fmt.Println(k.Hex(), "cache set time:", time.Since(start))
 	// start := time.Now()
 	// start = time.Now()
-	ai.Save(db)
+	// ai.Save(db)
 	// fmt.Println(k.Hex(), "save time:", time.Since(start))
 	// close(quitLog)
 	// c.rc.Wait() // TODO: do i need to wait here?

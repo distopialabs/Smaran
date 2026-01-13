@@ -39,12 +39,12 @@ type RangeProof struct {
 	dependentCommitments []int
 }
 
-func BinarySearchVersionByBlockNumber(blockNumber uint64, searchStart uint64, searchEnd uint64, account common.Address, db segmenttree.DB) (uint64, error) {
+func BinarySearchVersionByBlockNumber(blockNumber uint64, searchStart uint64, searchEnd uint64, account common.Address, db *segmenttree.SamuraiDB) (uint64, error) {
 	L := searchStart
 	R := searchEnd
 	for L <= R {
 		m := (L + R) / 2
-		hbInfo := segmenttree.GetHistoricalBalance(account, m, db)
+		hbInfo := segmenttree.GetHistoricalBalance(account, m, db.HistoryDB)
 		if hbInfo.StartBlock <= blockNumber && blockNumber <= hbInfo.EndBlock {
 			return m, nil
 		} else if blockNumber < hbInfo.StartBlock {
@@ -59,9 +59,9 @@ func BinarySearchVersionByBlockNumber(blockNumber uint64, searchStart uint64, se
 	}
 	return 0, errors.New("version not found")
 }
-func BlockRangeToVersionRange(account common.Address, startingBlock uint64, endingBlock uint64, config *config.Config, db segmenttree.DB) (uint64, uint64) {
+func BlockRangeToVersionRange(account common.Address, startingBlock uint64, endingBlock uint64, config *config.Config, db *segmenttree.SamuraiDB) (uint64, uint64) {
 
-	cbInfo, err := segmenttree.GetCurrentBalanceInfo(account, db)
+	cbInfo, err := segmenttree.GetCurrentBalanceInfo(account, db.StateDB)
 	if err != nil {
 		fmt.Printf("Error getting current balance info for account %s: %v\n", account.Hex(), err)
 		panic(err)
@@ -91,7 +91,7 @@ func BlockRangeToVersionRange(account common.Address, startingBlock uint64, endi
 
 }
 
-func GetNewProofRange(account common.Address, startingVersion, endingVersion uint64, precomputedData *config.PrecomputedData, blockOffset uint64, db segmenttree.DB) ([]*RangeProof, []*segmenttree.HistoricalBalance) {
+func GetNewProofRange(account common.Address, startingVersion, endingVersion uint64, precomputedData *config.PrecomputedData, blockOffset uint64, db *segmenttree.SamuraiDB) ([]*RangeProof, []*segmenttree.HistoricalBalance) {
 	// TODO: find the commits required to prove the range
 	reqCommits := findCommitmentsCoveringRange(int(startingVersion), int(endingVersion))
 
@@ -139,7 +139,7 @@ func GetNewProofRange(account common.Address, startingVersion, endingVersion uin
 		fmt.Println("Time taken to interpolate polynomial", time.Since(start))
 
 		start = time.Now()
-		storedCommitment := segmenttree.GetBatchCommitment(account, uint64(layer), uint64(idx), db)
+		storedCommitment := segmenttree.GetBatchCommitment(account, uint64(layer), uint64(idx), db.StateDB)
 		fmt.Println("Time taken to get stored commitment", time.Since(start))
 
 		// start = time.Now()

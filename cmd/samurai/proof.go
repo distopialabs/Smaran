@@ -12,7 +12,7 @@ import (
 	"github.com/nepal80m/samurai/internal/utils"
 )
 
-func generateProofs(addr common.Address, queryStartBlock uint64, queryEndBlock uint64, dbs []segmenttree.DB, precomputedData *config.PrecomputedData, config *config.Config) {
+func generateProofs(addr common.Address, queryStartBlock uint64, queryEndBlock uint64, dbs []*segmenttree.SamuraiDB, precomputedData *config.PrecomputedData, config *config.Config) {
 
 	shardIdx := utils.AddressToShardIndex(addr, config.Database.Shards)
 	db := dbs[shardIdx]

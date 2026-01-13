@@ -36,3 +36,25 @@ type Batch interface {
 	// Close closes the batch
 	Close() error
 }
+
+// SamuraiDB holds references to the split database instances
+type SamuraiDB struct {
+	StateDB   DB
+	TreeDB    DB
+	HistoryDB DB
+}
+
+// Close closes all underlying databases
+func (s *SamuraiDB) Close() error {
+	if err := s.StateDB.Close(); err != nil {
+		return err
+	}
+	if err := s.TreeDB.Close(); err != nil {
+		return err
+	}
+	if err := s.HistoryDB.Close(); err != nil {
+		return err
+	}
+	return nil
+}
+

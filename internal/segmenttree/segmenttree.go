@@ -14,11 +14,15 @@ import (
 	"github.com/nepal80m/samurai/internal/math/polynomial"
 )
 
-const L1BatchSize = 2048
+// const L1BatchSize = 2048
+// const L1BatchSize = 1024
+const L1BatchSize = 512
 
 // const L1BatchSize = 8
 
-const L2BatchSize = 1365
+// const L2BatchSize = 1365
+// const L2BatchSize = 682
+const L2BatchSize = 341
 
 // const L2BatchSize = 5
 
@@ -116,9 +120,9 @@ func CreateOrUpdateAccountInfo(account common.Address, balance *big.Int, blockNu
 		accountInfo := NewAccountInfo(account, cache.precomputedData)
 		return accountInfo
 	}
-	loadFn := func(account common.Address, db DB) *AccountInfo {
+	loadFn := func(account common.Address, db *SamuraiDB) *AccountInfo {
 		// start := time.Now()
-		cbInfo, err := GetCurrentBalanceInfo(account, db)
+		cbInfo, err := GetCurrentBalanceInfo(account, db.StateDB)
 		if err != nil {
 			if err != ErrNotFound {
 				panic(err)
@@ -130,8 +134,8 @@ func CreateOrUpdateAccountInfo(account common.Address, balance *big.Int, blockNu
 			// innerStart := time.Now()
 			// TODO: tried using iterator here, but it was slower. need to investigate again.
 			// batchTree, batchCommitments := GetCurrentLXBatchTreeAndCommitments(account, cbInfo.Version, cache.db)
-			batchTree := GetCurrentLXBatchTree(account, db)
-			batchCommitments := GetLXBatchCommitments(account, cbInfo.Version, db)
+			batchTree := GetCurrentLXBatchTree(account, db.TreeDB)
+			batchCommitments := GetLXBatchCommitments(account, cbInfo.Version, db.StateDB)
 			// fmt.Println("Time taken to get batch tree and commitments from db", time.Since(innerStart))
 			accountInfo := &AccountInfo{
 				Account:                  account,
@@ -145,7 +149,7 @@ func CreateOrUpdateAccountInfo(account common.Address, balance *big.Int, blockNu
 
 		}
 	}
-	mutate := func(accountInfo *AccountInfo, db DB) {
+	mutate := func(accountInfo *AccountInfo, db *SamuraiDB) {
 		// start := time.Now()
 		accountInfo.Update(blockNumber, balance, db)
 		// fmt.Println("Time taken to mutate account info", time.Since(start))

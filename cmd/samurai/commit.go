@@ -34,30 +34,6 @@ type updateTask struct {
 
 func generateCommitmentsSimplified(config *config.Config, caches []*segmenttree.Cache) {
 
-	// var DB_DIR string
-	// // var db segmenttree.DB
-	// var dbs = make([]segmenttree.DB, config.Database.Shards)
-	// var err error
-
-	// for i := range config.Database.Shards {
-	// 	DB_DIR = fmt.Sprintf(STORAGE_PATH+"/samurai-shard-%d.db", i)
-	// 	fmt.Println("Removing database directory", DB_DIR)
-	// 	err = os.RemoveAll(DB_DIR)
-	// 	if err != nil {
-	// 		panic(fmt.Errorf("failed to remove database directory %s: %w", DB_DIR, err))
-	// 	} else {
-	// 		fmt.Println("Database directory", DB_DIR, "removed")
-	// 	}
-	// 	dbs[i], err = segmenttree.NewPebbleDB(DB_DIR, &pebble.Options{
-	// 		MemTableSize: 1_073_741_824, // 1_073_741_824, 2_147_483_648
-	// 		DisableWAL:   true,
-	// 		Cache:        pebble.NewCache(2_147_483_648),
-	// 	})
-	// 	if err != nil {
-	// 		panic(fmt.Errorf("failed to create Pebble database %s: %w", DB_DIR, err))
-	// 	}
-	// }
-
 	blockInfoCh := make(chan blockInfo, 1024)
 	updateTaskChs := make([]chan updateTask, config.Workers.CommitWorkerCount)
 	for i := range config.Workers.CommitWorkerCount {
@@ -84,21 +60,21 @@ func generateCommitmentsSimplified(config *config.Config, caches []*segmenttree.
 		allUpdateTaskQueuesEmpty := false
 		for !(blockInfoChClosed && allUpdateTaskQueuesEmpty) {
 
-			// check if all updateTaskCh are full
-			allUpdateTaskChsFull := true
-			for i := range config.Workers.CommitWorkerCount {
-				if len(updateTaskChs[i]) < config.Workers.CommitWorkerChannelSize {
-					allUpdateTaskChsFull = false
-					break
-				}
-			}
-			if allUpdateTaskChsFull {
-				sleepTime := time.Millisecond * 500
-				fmt.Println("All updateTaskChs are full, skipping the fetch of new blocks and sleeping for", sleepTime)
-				// TODO: decide whether to sleep for a longer time or not
-				time.Sleep(sleepTime)
-				continue
-			}
+			// // check if all updateTaskCh are full
+			// allUpdateTaskChsFull := true
+			// for i := range config.Workers.CommitWorkerCount {
+			// 	if len(updateTaskChs[i]) < config.Workers.CommitWorkerChannelSize {
+			// 		allUpdateTaskChsFull = false
+			// 		break
+			// 	}
+			// }
+			// if allUpdateTaskChsFull {
+			// 	sleepTime := time.Millisecond * 500
+			// 	// fmt.Println("All updateTaskChs are full, skipping the fetch of new blocks and sleeping for", sleepTime)
+			// 	// TODO: decide whether to sleep for a longer time or not
+			// 	time.Sleep(sleepTime)
+			// 	continue
+			// }
 
 			// Check if any queue has hit the memory limit
 			anyQueueAtLimit := false
@@ -178,6 +154,23 @@ func generateCommitmentsSimplified(config *config.Config, caches []*segmenttree.
 		}
 		fmt.Println("All updateTaskChs closed")
 	}()
+
+	// // log cache metrics
+	// go func() {
+	// 	for {
+	// 		time.Sleep(1 * time.Second)
+	// 		for i := range config.Database.Shards {
+	// 			m := caches[i].Metrics()
+	// 			fmt.Println("\n\nCache", i, "metrics:")
+	// 			fmt.Println("Hits Ratio:", float64(m.Hits())/float64(m.Hits()+m.Misses()))
+	// 			fmt.Println("Misses Ratio:", float64(m.Misses())/float64(m.Hits()+m.Misses()))
+	// 			fmt.Println("NetCost:", m.CostAdded()-m.CostEvicted())
+	// 			fmt.Println("NetKeys:", m.KeysAdded()-m.KeysEvicted())
+	// 			fmt.Println("SetsRejected:", m.SetsRejected())
+	// 			fmt.Println("SetsDropped:", m.SetsDropped())
+	// 		}
+	// 	}
+	// }()
 
 	wg := sync.WaitGroup{}
 	// create syncmap to track the account seen
@@ -259,7 +252,7 @@ func spawnBlockFetcher(startingBlockNumber uint64, endingBlockNumber uint64, blo
 				Number:  bn,
 				Entries: entries,
 			}
-			fmt.Println("Block", bn, "sent to the channel")
+			// fmt.Println("Block", bn, "sent to the channel")
 		}
 	}()
 	go func() {

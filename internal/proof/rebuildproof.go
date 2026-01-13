@@ -15,9 +15,9 @@ import (
 // rebuilds the whole segment tree
 // uses stored commitments to fill the commitHash part of the batch trees
 // in this process, stores only the involved batch trees and returns them
-func RebuildSegmentTreeForProof(account common.Address, lxRequiredBatchIdxs map[uint64][]uint64, startingVersion uint64, endingVersion uint64, db segmenttree.DB, precomputedData *config.PrecomputedData) (map[string]segmenttree.BatchTree, []*segmenttree.HistoricalBalance) {
+func RebuildSegmentTreeForProof(account common.Address, lxRequiredBatchIdxs map[uint64][]uint64, startingVersion uint64, endingVersion uint64, db *segmenttree.SamuraiDB, precomputedData *config.PrecomputedData) (map[string]segmenttree.BatchTree, []*segmenttree.HistoricalBalance) {
 
-	cbInfo, err := segmenttree.GetCurrentBalanceInfo(account, db)
+	cbInfo, err := segmenttree.GetCurrentBalanceInfo(account, db.StateDB)
 	if err != nil {
 		panic(err)
 	}
@@ -40,7 +40,7 @@ func RebuildSegmentTreeForProof(account common.Address, lxRequiredBatchIdxs map[
 	requiredHBInfos := make([]*segmenttree.HistoricalBalance, 0)
 
 	for version := uint64(0); version < cbInfo.Version; version++ {
-		hbInfo := segmenttree.GetHistoricalBalance(account, version, db)
+		hbInfo := segmenttree.GetHistoricalBalance(account, version, db.HistoryDB)
 
 		AddLeafNode(accountInfo, hbInfo.Version, hbInfo.Hash())
 
@@ -164,7 +164,7 @@ func UpdateLXTree(accountInfo *segmenttree.AccountInfo, idx uint64, val common.H
 
 }
 
-func InsertCommitmentHashes(layer uint64, batchIdx uint64, tree *segmenttree.BatchTree, account common.Address, latestVersion uint64, db segmenttree.DB) {
+func InsertCommitmentHashes(layer uint64, batchIdx uint64, tree *segmenttree.BatchTree, account common.Address, latestVersion uint64, db *segmenttree.SamuraiDB) {
 	if layer <= 1 || layer > MaxLayer {
 		panic("layer" + strconv.Itoa(int(layer)) + " is invalid")
 	}
@@ -181,7 +181,7 @@ func InsertCommitmentHashes(layer uint64, batchIdx uint64, tree *segmenttree.Bat
 	lxm1BatchIdxEnd := min(lxm1BatchIdxStart+L2BatchSize-1, latestLxBatchIdx(layer-1))
 	for batchIdx := lxm1BatchIdxStart; batchIdx <= lxm1BatchIdxEnd; batchIdx++ {
 		fmt.Println("fetching commitment for layer", layer-1, "batchIdx", batchIdx, "latestLxBatchIdx", latestLxBatchIdx(layer-1))
-		commitment := segmenttree.GetBatchCommitment(account, layer-1, batchIdx, db)
+		commitment := segmenttree.GetBatchCommitment(account, layer-1, batchIdx, db.StateDB)
 		commitmentHash := segmenttree.CommitmentToHash(commitment)
 		treeIdx := batchIdx - lxm1BatchIdxStart + (2 * L2BatchSize) - 1
 		tree[treeIdx] = commitmentHash

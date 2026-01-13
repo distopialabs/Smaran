@@ -15,7 +15,7 @@ import (
 	fr "github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
 )
 
-func (accountInfo *AccountInfo) Update(blockNumber uint64, balance *big.Int, db DB) {
+func (accountInfo *AccountInfo) Update(blockNumber uint64, balance *big.Int, db *SamuraiDB) {
 	prevCb := accountInfo.CurrentBalanceInfo
 
 	if prevCb == nil {
@@ -48,7 +48,7 @@ func (accountInfo *AccountInfo) Update(blockNumber uint64, balance *big.Int, db 
 
 	// Save
 	// start = time.Now()
-	StoreHistoricalBalance(accountInfo.Account, hb, db)
+	// StoreHistoricalBalance(accountInfo.Account, hb, db.HistoryDB)
 	// fmt.Println("Time taken to store historical balance in db", time.Since(start))
 
 }
@@ -61,10 +61,10 @@ func (accountInfo *AccountInfo) CalculateFinalCommitment() common.Hash {
 
 }
 
-func (accountInfo *AccountInfo) Save(db DB) {
-	StoreCurrentBalanceInfo(accountInfo.Account, accountInfo.CurrentBalanceInfo, db)
-	StoreCurrentLXBatchTree(accountInfo.Account, accountInfo.CurrentLXBatchTree, db)
-	StoreLXBatchCommitments(accountInfo.Account, accountInfo.CurrentBalanceInfo.Version, accountInfo.CurrentLXBatchCommitment, db)
+func (accountInfo *AccountInfo) Save(db *SamuraiDB) {
+	StoreCurrentBalanceInfo(accountInfo.Account, accountInfo.CurrentBalanceInfo, db.StateDB)
+	StoreCurrentLXBatchTree(accountInfo.Account, accountInfo.CurrentLXBatchTree, db.TreeDB)
+	StoreLXBatchCommitments(accountInfo.Account, accountInfo.CurrentBalanceInfo.Version, accountInfo.CurrentLXBatchCommitment, db.StateDB)
 }
 
 // updates the current batch tree, and commitments. resets them if needed.
