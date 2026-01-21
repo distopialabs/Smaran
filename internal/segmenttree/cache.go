@@ -1,8 +1,7 @@
 package segmenttree
 
 import (
-	"fmt"
-	"sync"
+	"log"
 	"time"
 
 	ristretto "github.com/dgraph-io/ristretto/v2"
@@ -54,78 +53,33 @@ type SeenAccountInfo struct {
 	TotalDBFetchTime time.Duration
 }
 
-func (c *Cache) Update(k common.Address, initFn func(common.Address) *AccountInfo, loadFn func(common.Address, *SamuraiDB) *AccountInfo, mutate func(*AccountInfo, *SamuraiDB), accountsSeen *sync.Map) (*AccountInfo, error) {
+func (c *Cache) Update(k common.Address, initFn func(common.Address) *AccountInfo, loadFn func(common.Address, *SamuraiDB) *AccountInfo, mutate func(*AccountInfo, *SamuraiDB)) (*AccountInfo, error) {
 
 	var ai *AccountInfo
-	// start := time.Now()
-	seenInfo, seen := accountsSeen.Load(k)
 
-	// dbIndex := xxhash.Sum64(k[:]) % DB_SHARDS
 	db := c.db
 
-	if seen {
-		seenAccountInfo := seenInfo.(SeenAccountInfo)
-		// fmt.Printf("Account %s seen %d times before\n", k.Hex(), seenAccountInfo.Count)
-		if v, ok := c.C.Get(k[:]); ok {
-			// fmt.Println("Cache hit")
-			ai = v
-			accountsSeen.Store(k, SeenAccountInfo{
-				Count:            seenAccountInfo.Count + 1,
-				DBFetchCount:     seenAccountInfo.DBFetchCount,
-				TotalDBFetchTime: seenAccountInfo.TotalDBFetchTime,
-			})
-		} else {
-
-			// fmt.Println("Cache miss for account", k.Hex(), " seen", seenAccountInfo.Count, "times before, fetching from db")
-			fetchStart := time.Now()
-			ai = loadFn(k, db)
-			fetchTime := time.Since(fetchStart)
-			accountsSeen.Store(k, SeenAccountInfo{
-				Count:            seenAccountInfo.Count + 1,
-				DBFetchCount:     seenAccountInfo.DBFetchCount + 1,
-				TotalDBFetchTime: seenAccountInfo.TotalDBFetchTime + fetchTime,
-			})
-			if ai == nil {
-				panic("Seen account not found in db, initializing")
-				// ai = initFn(k)
-			}
-		}
+	if v, ok := c.C.Get(k[:]); ok {
+		// cache hit
+		ai = v
 	} else {
-		ai = initFn(k)
-		accountsSeen.Store(k, SeenAccountInfo{
-			Count:            1,
-			DBFetchCount:     0,
-			TotalDBFetchTime: 0,
-		})
+		// cache miss
+		// load from db
+		ai = loadFn(k, db)
+
+		if ai == nil {
+			// not found in db, initialize
+			ai = initFn(k)
+		}
 	}
-	// if v, ok := c.rc.Get(k[:]); ok {
-	// 	// fmt.Println("Cache hit")
-	// 	ai = v
-	// } else {
-	// 	// fmt.Println("Cache miss")
-	// 	ai = loadFn(k)
-	// 	if ai == nil {
-	// 		ai = initFn(k)
-	// 	}
-	// }
-	// fmt.Println(k.Hex(), "get/init time:", time.Since(start))
-	// start = time.Now()
+
 	mutate(ai, db)
-	// fmt.Println(k.Hex(), "mutate time:", time.Since(start))
-	// quitLog = logBlockedTime("CacheSet", 100*time.Millisecond)
-	// start = time.Now()
 	admitted := c.C.Set(k[:], ai, 525312) //525312
 	if !admitted {
-		fmt.Println(k.Hex(), "❌Cache set rejected")
+		log.Fatal("❌Cache set rejected")
 	}
-	c.C.Wait()
-	// fmt.Println(k.Hex(), "cache set time:", time.Since(start))
-	// start := time.Now()
-	// start = time.Now()
-	// ai.Save(db)
-	// fmt.Println(k.Hex(), "save time:", time.Since(start))
-	// close(quitLog)
-	// c.rc.Wait() // TODO: do i need to wait here?
+	// c.C.Wait()
+
 	return ai, nil
 }
 

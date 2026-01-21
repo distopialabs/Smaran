@@ -87,14 +87,14 @@ func main() {
 		},
 		Database: config.Database{
 			Shards:       32,
-			MemTableSize: 1_073_741_824, // 536_870_912 = 500MB ,1_073_741_824, 2_147_483_648 = 2GB, default is 4mb
+			MemTableSize: 64 << 20, // 64MB (Reduced to avoid compaction stalls and memory pressure)
 			DisableWAL:   true,
-			CacheSize:    8_000_000, // default is 8MB
+			CacheSize:    80_000_000, // default is 8MB
 			StoragePath:  "/data/local/samurai/test/storage",
 		},
 		Cache: config.Cache{
-			NumCounters:   2_097_152,   // ?: recommended is 10x maxCost (2^18)
-			MaxCost:       536_870_912, // 75_000_000, //536_870_912, 1_073_741_824, 2_147_483_648
+			NumCounters:   2_097_152,     // ?: recommended is 10x maxCost (2^18)
+			MaxCost:       1_073_741_824, //536870912, // 256MB per shard (Total 32*256MB = 8GB). Reduced from 1GB to prevent OOM/Swap.
 			EnableMetrics: *benchCacheMetrics,
 		},
 		Queue: config.Queue{
@@ -143,9 +143,13 @@ func main() {
 
 		// Create StateDB
 		stateDB, err := segmenttree.NewPebbleDB(stateDBPath, &pebble.Options{
-			MemTableSize: cfg.Database.MemTableSize, // Default memtable size
-			DisableWAL:   cfg.Database.DisableWAL,
-			Cache:        pebble.NewCache(int64(cfg.Database.CacheSize)),
+			MemTableSize:              268435456, //268435456, // 256MB (Safe for 96 DBs)
+			L0CompactionThreshold:     2,
+			L0CompactionFileThreshold: 2000,                    // Balanced threshold
+			LBaseMaxBytes:             2147483648,              // Keep 2GB LBase
+			MaxConcurrentCompactions:  func() int { return 4 }, // 4 threads per DB (Total ~128)
+			DisableWAL:                cfg.Database.DisableWAL,
+			Cache:                     pebble.NewCache(int64(cfg.Database.CacheSize)),
 		})
 		if err != nil {
 			panic(fmt.Errorf("failed to create StateDB %s: %w", stateDBPath, err))
@@ -153,9 +157,13 @@ func main() {
 
 		// Create TreeDB (optimized for large values if needed, for now same options)
 		treeDB, err := segmenttree.NewPebbleDB(treeDBPath, &pebble.Options{
-			MemTableSize: cfg.Database.MemTableSize,
-			DisableWAL:   cfg.Database.DisableWAL,
-			Cache:        pebble.NewCache(int64(cfg.Database.CacheSize)),
+			MemTableSize:              268435456,
+			L0CompactionThreshold:     2,
+			L0CompactionFileThreshold: 2000,
+			LBaseMaxBytes:             2 << 30,
+			MaxConcurrentCompactions:  func() int { return 4 },
+			DisableWAL:                cfg.Database.DisableWAL,
+			Cache:                     pebble.NewCache(int64(cfg.Database.CacheSize)),
 		})
 		if err != nil {
 			panic(fmt.Errorf("failed to create TreeDB %s: %w", treeDBPath, err))
@@ -163,9 +171,13 @@ func main() {
 
 		// Create HistoryDB (append-only)
 		historyDB, err := segmenttree.NewPebbleDB(historyDBPath, &pebble.Options{
-			MemTableSize: cfg.Database.MemTableSize,
-			DisableWAL:   cfg.Database.DisableWAL,
-			Cache:        pebble.NewCache(int64(cfg.Database.CacheSize)),
+			MemTableSize:              268435456,
+			L0CompactionThreshold:     2,
+			L0CompactionFileThreshold: 2000,
+			LBaseMaxBytes:             2 << 30,
+			MaxConcurrentCompactions:  func() int { return 4 },
+			DisableWAL:                cfg.Database.DisableWAL,
+			Cache:                     pebble.NewCache(int64(cfg.Database.CacheSize)),
 		})
 		if err != nil {
 			panic(fmt.Errorf("failed to create HistoryDB %s: %w", historyDBPath, err))

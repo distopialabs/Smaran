@@ -174,14 +174,14 @@ func generateCommitmentsSimplified(config *config.Config, caches []*segmenttree.
 
 	wg := sync.WaitGroup{}
 	// create syncmap to track the account seen
-	var accountsSeen sync.Map
+	// var accountsSeen sync.Map
 	for i := range config.Workers.CommitWorkerCount {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			for task := range updateTaskChs[i] {
 
-				segmenttree.CreateOrUpdateAccountInfo(task.Account, task.Balance, task.BlockNumber, caches[i], &accountsSeen)
+				segmenttree.CreateOrUpdateAccountInfo(task.Account, task.Balance, task.BlockNumber, caches[i])
 			}
 		}()
 	}

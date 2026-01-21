@@ -112,7 +112,6 @@ func generateCommitmentsBenchmark(cfg *config.Config, caches []*segmenttree.Cach
 
 	// Start workers
 	wg := sync.WaitGroup{}
-	var accountsSeen sync.Map
 	for i := range cfg.Workers.CommitWorkerCount {
 		wg.Add(1)
 		go func(workerID int) {
@@ -123,7 +122,6 @@ func generateCommitmentsBenchmark(cfg *config.Config, caches []*segmenttree.Cach
 					task.Balance,
 					task.BlockNumber,
 					caches[workerID],
-					&accountsSeen,
 				)
 				// Record completion
 				metrics.RecordUpdateCompleted(workerID, task.BlockNumber, task.EnqueuedAt)

@@ -3,7 +3,9 @@ package segmenttree
 import (
 	"fmt"
 	"strconv"
+	"strings"
 
+	"github.com/cockroachdb/pebble"
 	gnark_kzg "github.com/consensys/gnark-crypto/ecc/bls12-381/kzg"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/rlp"
@@ -189,6 +191,10 @@ func GenerateCurrentLXBatchTreeKey(account common.Address, layer uint64) string 
 	return "user:" + account.Hex() + ":batch_tree:" + strconv.Itoa(int(layer))
 }
 
+func GenerateBatchTreeChunkKey(account common.Address, layer uint64, chunkIdx int) string {
+	return "user:" + account.Hex() + ":batch_tree:" + strconv.Itoa(int(layer)) + ":chunk:" + strconv.Itoa(chunkIdx)
+}
+
 // func StoreCurrentBatchTree(account common.Address, version uint64, batchTree *BatchTree, db *pebble.DB) {
 // 	lastLeafNodeIdx := version - 1
 // 	lxBatchIdx := func(layer uint64) uint64 {
@@ -211,77 +217,163 @@ func GenerateCurrentLXBatchTreeKey(account common.Address, layer uint64) string 
 //			}
 //		}
 //	}
-func StoreCurrentLXBatchTree(account common.Address, batchTree *LXBatchTree, db DB) {
+func StoreCurrentLXBatchTree(account common.Address, batchTree *LXBatchTree, dirtyChunks *[MaxLayer]map[int]bool, db DB) {
 	for layer := uint64(1); layer <= MaxLayer; layer++ {
-		key := GenerateCurrentLXBatchTreeKey(account, layer)
-		var err error
-		val := batchTree[layer-1].MarshalBinary()
-		// if dbEncoding == EncodingProto {
-		// 	bt := (*BatchTree)(&batchTree[layer-1])
-		// 	val, err = proto.Marshal(protoFromBatchTree(bt))
-		// } else {
-		// 	val, err = rlp.EncodeToBytes(batchTree[layer-1])
-		// }
-		// if err != nil {
-		// 	panic(fmt.Errorf("failed to encode batch tree: %w", err))
-		// }
-		err = db.Set([]byte(key), val, false)
-		if err != nil {
-			panic(fmt.Errorf("failed to store batch tree: %w", err))
+		// If dirtyChunks is explicitly nil, we write ALL chunks (safe default/full migration).
+		// If dirtyChunks is provided but empty, we write NOTHING (no changes).
+
+		if dirtyChunks == nil {
+			// Write all chunks
+			totalChunks := SegmentTreeSize / ChunkSize
+			for chunkIdx := 0; chunkIdx < totalChunks; chunkIdx++ {
+				key := GenerateBatchTreeChunkKey(account, layer, chunkIdx)
+				startIdx := chunkIdx * ChunkSize
+				endIdx := startIdx + ChunkSize
+
+				chunkData := make([]byte, (endIdx-startIdx)*common.HashLength)
+				for i := startIdx; i < endIdx; i++ {
+					copy(chunkData[(i-startIdx)*common.HashLength:], batchTree[layer-1][i][:])
+				}
+
+				err := db.Set([]byte(key), chunkData, false)
+				if err != nil {
+					panic(fmt.Errorf("failed to store batch tree chunk: %w", err))
+				}
+			}
+		} else {
+			chunksToUpdate := dirtyChunks[layer-1]
+			if len(chunksToUpdate) == 0 {
+				continue
+			}
+
+			for chunkIdx := range chunksToUpdate {
+				key := GenerateBatchTreeChunkKey(account, layer, chunkIdx)
+				startIdx := chunkIdx * ChunkSize
+				endIdx := startIdx + ChunkSize
+				if endIdx > SegmentTreeSize {
+					endIdx = SegmentTreeSize
+				}
+
+				chunkData := make([]byte, (endIdx-startIdx)*common.HashLength)
+				for i := startIdx; i < endIdx; i++ {
+					copy(chunkData[(i-startIdx)*common.HashLength:], batchTree[layer-1][i][:])
+				}
+
+				err := db.Set([]byte(key), chunkData, false)
+				if err != nil {
+					panic(fmt.Errorf("failed to store batch tree chunk: %w", err))
+				}
+			}
 		}
 	}
 }
 
-func BatchStoreCurrentLXBatchTree(account common.Address, batchTree *LXBatchTree, b Batch) {
+func BatchStoreCurrentLXBatchTree(account common.Address, batchTree *LXBatchTree, dirtyChunks *[MaxLayer]map[int]bool, b Batch) {
 	for layer := uint64(1); layer <= MaxLayer; layer++ {
-		key := GenerateCurrentLXBatchTreeKey(account, layer)
-		// var val []byte
-		// var err error
-		val := batchTree[layer-1].MarshalBinary()
-		// if dbEncoding == EncodingProto {
-		// 	bt := (*BatchTree)(&batchTree[layer-1])
-		// 	val, err = proto.Marshal(protoFromBatchTree(bt))
-		// } else {
-		// 	val, err = rlp.EncodeToBytes(batchTree[layer-1])
-		// }
-		// if err != nil {
-		// 	panic(fmt.Errorf("failed to encode batch tree: %w", err))
-		// }
-		b.Set([]byte(key), val, false)
+		if dirtyChunks == nil {
+			totalChunks := SegmentTreeSize / ChunkSize
+			for chunkIdx := 0; chunkIdx < totalChunks; chunkIdx++ {
+				key := GenerateBatchTreeChunkKey(account, layer, chunkIdx)
+				startIdx := chunkIdx * ChunkSize
+				endIdx := startIdx + ChunkSize
+
+				chunkData := make([]byte, (endIdx-startIdx)*common.HashLength)
+				for i := startIdx; i < endIdx; i++ {
+					copy(chunkData[(i-startIdx)*common.HashLength:], batchTree[layer-1][i][:])
+				}
+				b.Set([]byte(key), chunkData, false)
+			}
+		} else {
+			chunksToUpdate := dirtyChunks[layer-1]
+			if len(chunksToUpdate) == 0 {
+				continue
+			}
+			for chunkIdx := range chunksToUpdate {
+				key := GenerateBatchTreeChunkKey(account, layer, chunkIdx)
+				startIdx := chunkIdx * ChunkSize
+				endIdx := startIdx + ChunkSize
+				if endIdx > SegmentTreeSize {
+					endIdx = SegmentTreeSize
+				}
+
+				chunkData := make([]byte, (endIdx-startIdx)*common.HashLength)
+				for i := startIdx; i < endIdx; i++ {
+					copy(chunkData[(i-startIdx)*common.HashLength:], batchTree[layer-1][i][:])
+				}
+				b.Set([]byte(key), chunkData, false)
+			}
+		}
 	}
 }
 
 func GetCurrentLXBatchTree(account common.Address, db DB) *LXBatchTree {
 	var batchTree LXBatchTree
+	pdb, ok := db.(*PebbleDB)
+	if !ok {
+		panic("GetCurrentLXBatchTree requires PebbleDB for iteration")
+	}
+
 	for layer := uint64(1); layer <= MaxLayer; layer++ {
-		key := GenerateCurrentLXBatchTreeKey(account, layer)
-		val, err := db.Get([]byte(key))
+		// We use prefix iteration to find all chunks for this layer
+		prefix := []byte(GenerateCurrentLXBatchTreeKey(account, layer) + ":chunk:")
+
+		iterOpts := &pebble.IterOptions{
+			LowerBound: prefix,
+			UpperBound: func() []byte {
+				ub := make([]byte, len(prefix))
+				copy(ub, prefix)
+				for i := len(ub) - 1; i >= 0; i-- {
+					ub[i]++
+					if ub[i] != 0 {
+						break
+					}
+				}
+				return ub
+			}(),
+		}
+
+		iter, err := pdb.db.NewIter(iterOpts)
 		if err != nil {
-			if err == ErrNotFound {
-				panic(fmt.Errorf("batch tree not found for layer %d", layer))
-			} else {
-				panic(fmt.Errorf("failed to get batch tree: %w", err))
+			panic(fmt.Errorf("failed to create iterator: %w", err))
+		}
+		defer iter.Close()
+
+		foundChunks := false
+		for iter.First(); iter.Valid(); iter.Next() {
+			foundChunks = true
+			key := string(iter.Key())
+			// Extract chunk index from key
+			// Key format: ...:chunk:<idx>
+			// We can split by :
+			parts := strings.Split(key, ":")
+			chunkIdxStr := parts[len(parts)-1]
+			chunkIdx, err := strconv.Atoi(chunkIdxStr)
+			if err != nil {
+				panic(fmt.Errorf("invalid chunk index in key %s: %w", key, err))
+			}
+
+			val := iter.Value()
+			// Deserialize chunk
+			// Expect length to be ChunkSize * 32 (or less for last chunk)
+
+			startIdx := chunkIdx * ChunkSize
+			// Loop through bytes 32 at a time
+			for i := 0; i < len(val); i += common.HashLength {
+				treeIdx := startIdx + (i / common.HashLength)
+				if treeIdx < SegmentTreeSize {
+					copy(batchTree[layer-1][treeIdx][:], val[i:i+common.HashLength])
+				}
 			}
 		}
-		var tree BatchTree
-		if err := tree.UnmarshalBinary(val); err != nil {
-			panic(fmt.Errorf("failed to decode batch tree: %w", err))
+
+		if !foundChunks {
+			// If not found, it's a new tree, just return empty (which is default 0s)
+			// checking for legacy not needed as we are starting fresh
 		}
-		batchTree[layer-1] = tree
-		// if dbEncoding == EncodingProto {
-		// 	pb := &segmenttreepb.BatchTree{}
-		// 	if err := proto.Unmarshal(val, pb); err != nil {
-		// 		panic(fmt.Errorf("failed to decode batch tree: %w", err))
-		// 	}
-		// 	tree := batchTreeFromProto(pb)
-		// 	batchTree[layer-1] = tree
-		// } else {
-		// 	var tree BatchTree
-		// 	if err := rlp.DecodeBytes(val, &tree); err != nil {
-		// 		panic(fmt.Errorf("failed to decode batch tree: %w", err))
-		// 	}
-		// 	batchTree[layer-1] = tree
-		// }
+
+		if err := iter.Error(); err != nil {
+			panic(fmt.Errorf("iterator error: %w", err))
+		}
 	}
 	return &batchTree
 }

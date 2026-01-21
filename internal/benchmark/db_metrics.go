@@ -57,9 +57,12 @@ type DBMetricsCollector struct {
 	dbBuf  *bufio.Writer
 
 	// Synchronization
-	wg     sync.WaitGroup
-	stopCh chan struct{}
-	closed atomic.Bool
+	wg      sync.WaitGroup
+	stopCh  atomic.Bool
+	stopSig chan struct{}
+	closed  atomic.Bool
+
+	producerWg sync.WaitGroup
 
 	// Stats
 	totalSamples atomic.Int64
@@ -85,7 +88,7 @@ func NewDBMetricsCollector(outputDir string) (*DBMetricsCollector, error) {
 		metricsCh: make(chan DBMetric, 10000),
 		dbFile:    dbFile,
 		dbBuf:     bufio.NewWriterSize(dbFile, 1<<18), // 256KB buffer
-		stopCh:    make(chan struct{}),
+		stopSig:   make(chan struct{}),
 		startTime: time.Now(),
 	}
 
@@ -183,9 +186,9 @@ func (dmc *DBMetricsCollector) CollectMetrics(dbs []PebbleMetricsProvider) {
 
 // StartPeriodicCollection starts collecting metrics at the specified interval
 func (dmc *DBMetricsCollector) StartPeriodicCollection(dbs []PebbleMetricsProvider, interval time.Duration) {
-	dmc.wg.Add(1)
+	dmc.producerWg.Add(1)
 	go func() {
-		defer dmc.wg.Done()
+		defer dmc.producerWg.Done()
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 
@@ -193,7 +196,7 @@ func (dmc *DBMetricsCollector) StartPeriodicCollection(dbs []PebbleMetricsProvid
 			select {
 			case <-ticker.C:
 				dmc.CollectMetrics(dbs)
-			case <-dmc.stopCh:
+			case <-dmc.stopSig:
 				return
 			}
 		}
@@ -207,12 +210,13 @@ func (dmc *DBMetricsCollector) Close() error {
 	}
 
 	// Signal periodic collector to stop
-	close(dmc.stopCh)
+	close(dmc.stopSig)
+	dmc.producerWg.Wait() // Wait for producers to stop
 
 	// Close channel to signal writer to stop
 	close(dmc.metricsCh)
 
-	// Wait for goroutines to finish
+	// Wait for consumers to finish
 	dmc.wg.Wait()
 
 	// Flush and close file

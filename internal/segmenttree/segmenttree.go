@@ -3,7 +3,6 @@ package segmenttree
 import (
 	"fmt"
 	"math/big"
-	"sync"
 	"unsafe"
 
 	fr "github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
@@ -14,19 +13,22 @@ import (
 	"github.com/nepal80m/samurai/internal/math/polynomial"
 )
 
-// const L1BatchSize = 2048
+const L1BatchSize = 2048
+
 // const L1BatchSize = 1024
-const L1BatchSize = 512
+// const L1BatchSize = 512
 
 // const L1BatchSize = 8
 
-// const L2BatchSize = 1365
+const L2BatchSize = 1365
+
 // const L2BatchSize = 682
-const L2BatchSize = 341
+// const L2BatchSize = 341
 
 // const L2BatchSize = 5
 
 const MaxLayer = 4
+const ChunkSize = 64
 
 const SegmentTreeSize = L1BatchSize * 2 //2048 * 2 = 4096
 
@@ -69,6 +71,7 @@ type AccountInfo struct {
 	CurrentBalanceInfo       *CurrentBalance
 	CurrentLXBatchTree       *LXBatchTree
 	CurrentLXBatchCommitment *LXBatchCommitment
+	DirtyChunks              [MaxLayer]map[int]bool
 
 	// TODO: do i need to store this here? can i just store it in cache struct?
 	PrecomputedData *config.PrecomputedData
@@ -88,6 +91,7 @@ func NewAccountInfo(account common.Address, precomputedData *config.PrecomputedD
 		// },
 		CurrentLXBatchTree:       new(LXBatchTree),
 		CurrentLXBatchCommitment: new(LXBatchCommitment),
+		DirtyChunks:              InitDirtyChunks(),
 		PrecomputedData:          precomputedData,
 	}
 	return accountInfo
@@ -114,12 +118,13 @@ func (a *AccountInfo) DeepCopy() *AccountInfo {
 	return c
 }
 
-func CreateOrUpdateAccountInfo(account common.Address, balance *big.Int, blockNumber uint64, cache *Cache, accountsSeen *sync.Map) common.Hash {
+func CreateOrUpdateAccountInfo(account common.Address, balance *big.Int, blockNumber uint64, cache *Cache) common.Hash {
 
 	initFn := func(account common.Address) *AccountInfo {
 		accountInfo := NewAccountInfo(account, cache.precomputedData)
 		return accountInfo
 	}
+	// return account info from db, if not found return nil
 	loadFn := func(account common.Address, db *SamuraiDB) *AccountInfo {
 		// start := time.Now()
 		cbInfo, err := GetCurrentBalanceInfo(account, db.StateDB)
@@ -143,7 +148,9 @@ func CreateOrUpdateAccountInfo(account common.Address, balance *big.Int, blockNu
 				CurrentLXBatchTree:       batchTree,
 				CurrentLXBatchCommitment: batchCommitments,
 				PrecomputedData:          cache.precomputedData,
+				DirtyChunks:              InitDirtyChunks(),
 			}
+
 			// fmt.Println("Time taken to load account info from db", time.Since(start))
 			return accountInfo
 
@@ -157,7 +164,7 @@ func CreateOrUpdateAccountInfo(account common.Address, balance *big.Int, blockNu
 
 	// quitLog := logBlockedTime("Update", 100*time.Millisecond)
 	// start := time.Now()
-	accountInfo, err := cache.Update(account, initFn, loadFn, mutate, accountsSeen)
+	accountInfo, err := cache.Update(account, initFn, loadFn, mutate)
 	if err != nil {
 		panic(err)
 	}
@@ -165,4 +172,12 @@ func CreateOrUpdateAccountInfo(account common.Address, balance *big.Int, blockNu
 	// close(quitLog)
 	commitmentHash := accountInfo.CalculateFinalCommitment()
 	return commitmentHash
+}
+
+func InitDirtyChunks() [MaxLayer]map[int]bool {
+	var dirtyChunks [MaxLayer]map[int]bool
+	for i := 0; i < MaxLayer; i++ {
+		dirtyChunks[i] = make(map[int]bool)
+	}
+	return dirtyChunks
 }

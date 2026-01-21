@@ -63,7 +63,7 @@ func (accountInfo *AccountInfo) CalculateFinalCommitment() common.Hash {
 
 func (accountInfo *AccountInfo) Save(db *SamuraiDB) {
 	StoreCurrentBalanceInfo(accountInfo.Account, accountInfo.CurrentBalanceInfo, db.StateDB)
-	StoreCurrentLXBatchTree(accountInfo.Account, accountInfo.CurrentLXBatchTree, db.TreeDB)
+	StoreCurrentLXBatchTree(accountInfo.Account, accountInfo.CurrentLXBatchTree, &accountInfo.DirtyChunks, db.TreeDB)
 	StoreLXBatchCommitments(accountInfo.Account, accountInfo.CurrentBalanceInfo.Version, accountInfo.CurrentLXBatchCommitment, db.StateDB)
 }
 
@@ -174,6 +174,15 @@ func (accountInfo *AccountInfo) AddLeafNode(leafNodeIdx uint64, leafNodeHash com
 
 func (accountInfo *AccountInfo) UpdateLXTree(idx uint64, val common.Hash, lXm1CommitHash common.Hash, layer uint64) bls.G1Affine {
 
+	// Note:
+	//
+	// # required tree index:
+	// tree[L2BatchSize+idx]
+	//
+	// # updated tree index:
+	// for layer >1: L2BatchSize + idx
+	// for layer 1: idx
+
 	tree := &accountInfo.CurrentLXBatchTree[layer-1]
 	prevCommit := accountInfo.CurrentLXBatchCommitment[layer-1]
 
@@ -188,6 +197,9 @@ func (accountInfo *AccountInfo) UpdateLXTree(idx uint64, val common.Hash, lXm1Co
 
 		existingLXm1CommitHash := tree[L2BatchSize+idx]
 		tree[L2BatchSize+idx] = lXm1CommitHash
+		// Mark chunk dirty
+		chunkIdx := int((L2BatchSize + idx) / ChunkSize)
+		accountInfo.DirtyChunks[layer-1][chunkIdx] = true
 
 		incCommitBigInt := lXm1CommitHash.Big()
 
@@ -201,10 +213,17 @@ func (accountInfo *AccountInfo) UpdateLXTree(idx uint64, val common.Hash, lXm1Co
 
 	}
 
+	// required index: all parentidx (and its left and right children)
+	//updated index: idx, parentidx
+
 	// updating the tree
 	// note: root hash of layer 1 is empty until the whole batch is filled. instead of updating the tree with empty hash everytime, we skip the tree update unless the root is filled. this is purely for optimization.
 	if (val != common.Hash{}) {
 		tree[idx] = val
+		// Mark chunk dirty
+		chunkIdx := int(idx / ChunkSize)
+		accountInfo.DirtyChunks[layer-1][chunkIdx] = true
+
 		updatedIndices := []uint64{idx}
 		updatedXs := []uint64{idx}
 		updatedYs := []*big.Int{val.Big()}
@@ -218,6 +237,10 @@ func (accountInfo *AccountInfo) UpdateLXTree(idx uint64, val common.Hash, lXm1Co
 				break
 			}
 			tree[parentIdx] = BytesToPoseidonHash(lChild.Bytes(), rChild.Bytes())
+
+			// Mark chunk dirty
+			chunkIdx := int(parentIdx / ChunkSize)
+			accountInfo.DirtyChunks[layer-1][chunkIdx] = true
 
 			updatedIndices = append(updatedIndices, parentIdx)
 			updatedXs = append(updatedXs, parentIdx)
