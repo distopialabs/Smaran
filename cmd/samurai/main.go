@@ -1,222 +1,70 @@
 package main
 
 import (
-	"flag"
 	"fmt"
 	"log"
 	_ "net/http/pprof"
-	"os"
 	"runtime"
 	"time"
 
-	"github.com/cockroachdb/pebble"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/nepal80m/samurai/internal/crypto/kzg"
-
-	"github.com/nepal80m/samurai/internal/config"
-	"github.com/nepal80m/samurai/internal/segmenttree"
+	"github.com/nepal80m/samurai/cmd/samurai/commands"
 )
 
-// const STORAGE_PATH = "/data/local/samurai/test/storage"
-// const PROFILE_PATH = "/data/local/samurai/test/profiles"
-
 func main() {
-	mode := flag.String("mode", "commit", "Mode to run: commit, proof, verify")
-	numBlocks := flag.Int("n", 10000, "Number of blocks to process")
-
-	// profiling flags
-	profile := flag.Bool("p", true, "Profile the program")
-	profilePath := flag.String("profilePath", "/data/local/samurai/test/profiles", "Path to write profile files")
-	// benchmark flags
-	bench := flag.Bool("bench", false, "Enable benchmark mode for commit generation")
-	benchDuration := flag.Int("benchDuration", 300, "Benchmark duration in seconds (default: 5 minutes)")
-	benchOutputDir := flag.String("benchOutputDir", "/data/local/samurai/test/benchmark", "Directory to write benchmark CSV files")
-	benchDBMetrics := flag.Bool("benchDBMetrics", false, "Collect Pebble DB metrics (compaction, L0 files, etc.)")
-	benchPipeline := flag.Bool("benchPipeline", false, "Collect pipeline sizes (queue and channel sizes per shard)")
-	benchCacheMetrics := flag.Bool("benchCacheMetrics", true, "Collect Ristretto cache metrics (hits, misses, size)")
-
-	// flags to generate proofs & verify proofs
-	// TODO: accept these as parameters on rpc calls
-	queryStartBlock := flag.Int("queryStartBlock", 20, "Start block for query")
-	queryEndBlock := flag.Int("queryEndBlock", 20-1+100, "End block for query")
-	queryAccount := flag.String("queryAccount", "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", "Account to query")
-
-	flag.Parse()
+	flags := ParseFlags()
 
 	fmt.Println("Starting Samurai", time.Now())
 	fmt.Println("NumCPU:", runtime.NumCPU())
-	fmt.Println("Mode:", *mode)
+	fmt.Println("Mode:", flags.Mode)
 
-	if *profile {
-		defer ProfileCPU(*profilePath)()
+	if flags.Profile {
+		defer ProfileCPU(flags.ProfilePath)()
 	}
 
-	srs, err := kzg.SetupSRS(segmenttree.SegmentTreeSize)
+	// Setup precomputed cryptographic data
+	precomputedData, err := SetupPrecomputedData()
 	if err != nil {
-		log.Fatalf("failed to setup SRS: %v", err)
-	}
-	// V, weights := polynomial.LoadBarycentricData(segmenttree.SegmentTreeSize)
-	V, weights, weightCommits := kzg.LoadBarycentricData(segmenttree.SegmentTreeSize, srs)
-	precomputedData := &config.PrecomputedData{
-		V:             V,
-		Weights:       weights,
-		WeightCommits: weightCommits,
-		SRS:           srs,
+		log.Fatalf("failed to setup precomputed data: %v", err)
 	}
 
-	startBlock := uint64(18908895) // first block of 2024 18908895
-	var endBlock uint64            // last block of 2024, 21525890
-	if *bench {
-		// benchmark mode: use unbounded range (will stop on timer or when dataset exhausted)
-		endBlock = 21_700_000 // last block in dataset, but fetcher will stop gracefully if exhausted
-	} else {
-		// production mode
-		endBlock = startBlock + uint64(*numBlocks-1)
+	// Build configuration from flags
+	cfg := BuildConfig(flags)
+
+	// Setup databases (clean on commit mode)
+	cleanOnCommit := flags.Mode == "commit"
+	dbs, pebbleDbs, err := SetupDatabases(cfg, cleanOnCommit)
+	if err != nil {
+		log.Fatalf("failed to setup databases: %v", err)
 	}
 
-	cfg := config.Config{
-		Blocks: config.Blocks{
-			StartingBlockNumber: startBlock,
-			EndingBlockNumber:   endBlock,
-		},
-
-		Workers: config.Workers{
-			CommitWorkerCount:       32,
-			CommitWorkerQueueSize:   1_000_000,
-			CommitWorkerChannelSize: 5_000,
-		},
-		Database: config.Database{
-			Shards:       32,
-			MemTableSize: 64 << 20, // 64MB (Reduced to avoid compaction stalls and memory pressure)
-			DisableWAL:   true,
-			CacheSize:    80_000_000, // default is 8MB
-			StoragePath:  "/data/local/samurai/test/storage",
-		},
-		Cache: config.Cache{
-			NumCounters:   2_097_152,     // ?: recommended is 10x maxCost (2^18)
-			MaxCost:       1_073_741_824, //536870912, // 256MB per shard (Total 32*256MB = 8GB). Reduced from 1GB to prevent OOM/Swap.
-			EnableMetrics: *benchCacheMetrics,
-		},
-		Queue: config.Queue{
-			BlockInfoChannelSize:  1024,
-			UpdateTaskChannelSize: 5_000, // todo: not being used, using CommitWorkerChannelSize instead
-		},
-		Benchmark: config.Benchmark{
-			Enabled:              *bench,
-			DurationSecs:         *benchDuration,
-			OutputDir:            *benchOutputDir,
-			CollectDBMetrics:     *benchDBMetrics,
-			CollectPipelineSizes: *benchPipeline,
-			CollectCacheMetrics:  *benchCacheMetrics,
-		},
+	// Setup caches
+	caches, err := SetupCaches(dbs, cfg, precomputedData)
+	if err != nil {
+		log.Fatalf("failed to setup caches: %v", err)
 	}
 
-	// Setting up the databases and caches
-	dbs := make([]*segmenttree.SamuraiDB, cfg.Database.Shards)
-	// TODO: remove this from main
-	pebbleDbs := make([]*segmenttree.PebbleDB, cfg.Database.Shards)
-	caches := make([]*segmenttree.Cache, cfg.Database.Shards)
+	// Cleanup on exit
+	defer Cleanup(caches, dbs)
 
-	for i := range cfg.Database.Shards {
-		// DB_DIR := fmt.Sprintf(cfg.Database.StoragePath+"/samurai-shard-%d.db", i)
-		stateDBPath := fmt.Sprintf(cfg.Database.StoragePath+"/samurai-shard-%d-state.db", i)
-		treeDBPath := fmt.Sprintf(cfg.Database.StoragePath+"/samurai-shard-%d-tree.db", i)
-		historyDBPath := fmt.Sprintf(cfg.Database.StoragePath+"/samurai-shard-%d-history.db", i)
-
-		if *mode == "commit" && true {
-			// fmt.Println("Removing database directory", DB_DIR)
-			// err = os.RemoveAll(DB_DIR)
-			// if err != nil {
-			// 	panic(fmt.Errorf("failed to remove database directory %s: %w", DB_DIR, err))
-			// } else {
-			// 	fmt.Println("Database directory", DB_DIR, "removed")
-			// }
-			dirsToRemove := []string{stateDBPath, treeDBPath, historyDBPath}
-			for _, dir := range dirsToRemove {
-				fmt.Println("Removing database directory", dir)
-				err = os.RemoveAll(dir)
-				if err != nil {
-					panic(fmt.Errorf("failed to remove database directory %s: %w", dir, err))
-				}
-			}
-		}
-
-		// Create StateDB
-		stateDB, err := segmenttree.NewPebbleDB(stateDBPath, &pebble.Options{
-			MemTableSize:              268435456, //268435456, // 256MB (Safe for 96 DBs)
-			L0CompactionThreshold:     2,
-			L0CompactionFileThreshold: 2000,                    // Balanced threshold
-			LBaseMaxBytes:             2147483648,              // Keep 2GB LBase
-			MaxConcurrentCompactions:  func() int { return 4 }, // 4 threads per DB (Total ~128)
-			DisableWAL:                cfg.Database.DisableWAL,
-			Cache:                     pebble.NewCache(int64(cfg.Database.CacheSize)),
-		})
-		if err != nil {
-			panic(fmt.Errorf("failed to create StateDB %s: %w", stateDBPath, err))
-		}
-
-		// Create TreeDB (optimized for large values if needed, for now same options)
-		treeDB, err := segmenttree.NewPebbleDB(treeDBPath, &pebble.Options{
-			MemTableSize:              268435456,
-			L0CompactionThreshold:     2,
-			L0CompactionFileThreshold: 2000,
-			LBaseMaxBytes:             2 << 30,
-			MaxConcurrentCompactions:  func() int { return 4 },
-			DisableWAL:                cfg.Database.DisableWAL,
-			Cache:                     pebble.NewCache(int64(cfg.Database.CacheSize)),
-		})
-		if err != nil {
-			panic(fmt.Errorf("failed to create TreeDB %s: %w", treeDBPath, err))
-		}
-
-		// Create HistoryDB (append-only)
-		historyDB, err := segmenttree.NewPebbleDB(historyDBPath, &pebble.Options{
-			MemTableSize:              268435456,
-			L0CompactionThreshold:     2,
-			L0CompactionFileThreshold: 2000,
-			LBaseMaxBytes:             2 << 30,
-			MaxConcurrentCompactions:  func() int { return 4 },
-			DisableWAL:                cfg.Database.DisableWAL,
-			Cache:                     pebble.NewCache(int64(cfg.Database.CacheSize)),
-		})
-		if err != nil {
-			panic(fmt.Errorf("failed to create HistoryDB %s: %w", historyDBPath, err))
-		}
-
-		samuraiDB := &segmenttree.SamuraiDB{
-			StateDB:   stateDB,
-			TreeDB:    treeDB,
-			HistoryDB: historyDB,
-		}
-
-		cache, err := segmenttree.NewCache(samuraiDB, &cfg.Cache, precomputedData)
-		if err != nil {
-			panic(err)
-		}
-		dbs[i] = samuraiDB
-		pebbleDbs[i] = treeDB // Just for benchmarking hooks if needed, or update to nil
-		caches[i] = cache
-	}
-
-	switch *mode {
+	// Execute mode
+	switch flags.Mode {
 	case "commit":
 		if cfg.Benchmark.Enabled {
-			generateCommitmentsBenchmark(&cfg, caches, pebbleDbs)
+			commands.RunCommitBenchmark(cfg, caches, pebbleDbs)
 		} else {
-			generateCommitmentsSimplified(&cfg, caches)
+			commands.RunCommit(cfg, caches)
 		}
 	case "proof":
-		generateProofs(common.HexToAddress(*queryAccount), uint64(*queryStartBlock)+cfg.Blocks.StartingBlockNumber, uint64(*queryEndBlock)+cfg.Blocks.StartingBlockNumber, dbs, precomputedData, &cfg)
+		addr := common.HexToAddress(flags.QueryAccount)
+		startBlock := uint64(flags.QueryStartBlock)
+		endBlock := uint64(flags.QueryEndBlock)
+		commands.RunProof(addr, startBlock, endBlock, dbs, precomputedData, cfg)
+	case "serve":
+		commands.RunServe(flags.ServerPort, dbs, precomputedData, cfg)
 	case "verify":
-		verifyProofs(*queryStartBlock, *queryEndBlock, V, weights, srs)
-	}
-
-	for i := range cfg.Database.Shards {
-		caches[i].Close()
-		fmt.Println("Cache", i, "closed")
-	}
-	for i := range cfg.Database.Shards {
-		dbs[i].Close()
-		fmt.Println("Database", i, "closed")
+		commands.RunVerify(flags.QueryStartBlock, flags.QueryEndBlock, precomputedData.V, precomputedData.Weights, precomputedData.SRS)
+	default:
+		log.Fatalf("unknown mode: %s", flags.Mode)
 	}
 }

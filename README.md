@@ -7,7 +7,7 @@
 ```
 git clone https://github.com/distopialabs/Samurai.git
 go mod tidy
-go run ./cmd/samurai -mode commit -numBlocks 100
+go run ./cmd/samurai -mode commit -n 100
 ```
 
 ## How to generate performance graph
@@ -25,14 +25,17 @@ go tool pprof -http=:8080 samurai ./profiles/cpu.prof
 
 ---
 
-## Build protobuf files
+
+# Start the server
 ```
-protoc --go_out=. --go_opt=paths=source_relative internal/segmenttree/pb/segmenttree.proto
+./samurai -mode serve -port 50051
+```
+# In another terminal, query with the client
+```
+./proofc -server localhost:50051 -account 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2 -startBlock 20 -endBlock 119
 ```
 
-## Contributors:
-- Asim Nepal
-- Shistata Subedi
-- Shubham Mishra
-- Suyash Gupta
----
+## Build protobuf files
+```
+protoc --go_out=. --go_opt=paths=source_relative internal/tree/pb/segmenttree.proto
+```

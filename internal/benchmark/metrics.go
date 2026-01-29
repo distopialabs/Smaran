@@ -37,6 +37,7 @@ type blockTracker struct {
 type MetricsCollector struct {
 	updateCh chan UpdateMetric
 	blockCh  chan BlockMetric
+	proofCh  chan ProofMetric
 
 	// Block tracking: blockNumber -> *blockTracker
 	blockTrackers sync.Map
@@ -44,8 +45,10 @@ type MetricsCollector struct {
 	// Output files
 	updateFile *os.File
 	blockFile  *os.File
+	proofFile  *os.File
 	updateBuf  *bufio.Writer
 	blockBuf   *bufio.Writer
+	proofBuf   *bufio.Writer
 
 	// Synchronization
 	wg     sync.WaitGroup
@@ -76,33 +79,43 @@ func NewMetricsCollector(outputDir string) (*MetricsCollector, error) {
 	// Create block metrics file
 	blockPath := filepath.Join(outputDir, fmt.Sprintf("bench_blocks_%s.csv", timestamp))
 	blockFile, err := os.Create(blockPath)
+	// Create proof metrics file
+	proofPath := filepath.Join(outputDir, fmt.Sprintf("bench_proofs_%s.csv", timestamp))
+	proofFile, err := os.Create(proofPath)
 	if err != nil {
 		updateFile.Close()
-		return nil, fmt.Errorf("failed to create block metrics file: %w", err)
+		blockFile.Close()
+		return nil, fmt.Errorf("failed to create proof metrics file: %w", err)
 	}
 
 	mc := &MetricsCollector{
 		updateCh:   make(chan UpdateMetric, 100000), // Large buffer for low contention
 		blockCh:    make(chan BlockMetric, 10000),
+		proofCh:    make(chan ProofMetric, 10000),
 		updateFile: updateFile,
 		blockFile:  blockFile,
+		proofFile:  proofFile,
 		updateBuf:  bufio.NewWriterSize(updateFile, 1<<20), // 1MB buffer
 		blockBuf:   bufio.NewWriterSize(blockFile, 1<<18),  // 256KB buffer
+		proofBuf:   bufio.NewWriterSize(proofFile, 1<<18),
 		startTime:  time.Now(),
 	}
 
 	// Write CSV headers
 	mc.updateBuf.WriteString("worker_id,block_number,latency_ns,completed_at_ns\n")
 	mc.blockBuf.WriteString("block_number,submitted_at_ns,completed_at_ns,update_count\n")
+	mc.proofBuf.WriteString("account,start_block,end_block,generation_time_ms,range_proofs,balance_infos,timestamp_ns\n")
 
 	// Start background writers
-	mc.wg.Add(2)
+	mc.wg.Add(3)
 	go mc.updateWriter()
 	go mc.blockWriter()
+	go mc.proofWriter()
 
 	fmt.Printf("📊 Benchmark metrics will be written to:\n")
 	fmt.Printf("   Updates: %s\n", updatePath)
 	fmt.Printf("   Blocks:  %s\n", blockPath)
+	fmt.Printf("   Proofs:  %s\n", proofPath)
 
 	return mc, nil
 }
@@ -188,6 +201,7 @@ func (mc *MetricsCollector) Close() error {
 	// Close channels to signal writers to stop
 	close(mc.updateCh)
 	close(mc.blockCh)
+	close(mc.proofCh)
 
 	// Wait for writers to finish
 	mc.wg.Wait()
@@ -195,8 +209,10 @@ func (mc *MetricsCollector) Close() error {
 	// Flush and close files
 	mc.updateBuf.Flush()
 	mc.blockBuf.Flush()
+	mc.proofBuf.Flush()
 	mc.updateFile.Close()
 	mc.blockFile.Close()
+	mc.proofFile.Close()
 
 	// Print summary
 	duration := time.Since(mc.startTime)
@@ -209,4 +225,44 @@ func (mc *MetricsCollector) Close() error {
 	fmt.Printf("   Total Blocks: %d (%.2f blocks/sec)\n", totalBlocks, float64(totalBlocks)/duration.Seconds())
 
 	return nil
+}
+
+// ProofMetric records timing data for a proof generation request
+type ProofMetric struct {
+	Account           string
+	StartBlock        uint64
+	EndBlock          uint64
+	GenerationTimeMs  int64
+	RangeProofsCount  int
+	BalanceInfosCount int
+	Timestamp         int64
+}
+
+// RecordProofGeneration records a proof generation metric
+func (mc *MetricsCollector) RecordProofGeneration(account string, startBlock, endBlock uint64, genTimeMs int64, rpCount, biCount int) {
+	if mc.closed.Load() {
+		return
+	}
+
+	select {
+	case mc.proofCh <- ProofMetric{
+		Account:           account,
+		StartBlock:        startBlock,
+		EndBlock:          endBlock,
+		GenerationTimeMs:  genTimeMs,
+		RangeProofsCount:  rpCount,
+		BalanceInfosCount: biCount,
+		Timestamp:         time.Now().UnixNano(),
+	}:
+	default:
+	}
+}
+
+// Add proof support to MetricsCollector
+func (mc *MetricsCollector) proofWriter() {
+	defer mc.wg.Done()
+	for m := range mc.proofCh {
+		fmt.Fprintf(mc.proofBuf, "%s,%d,%d,%d,%d,%d,%d\n",
+			m.Account, m.StartBlock, m.EndBlock, m.GenerationTimeMs, m.RangeProofsCount, m.BalanceInfosCount, m.Timestamp)
+	}
 }

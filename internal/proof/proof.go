@@ -13,16 +13,19 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/nepal80m/samurai/internal/config"
 	"github.com/nepal80m/samurai/internal/crypto/kzg"
-	"github.com/nepal80m/samurai/internal/math/polynomial"
-	"github.com/nepal80m/samurai/internal/segmenttree"
+	"github.com/nepal80m/samurai/internal/crypto/polynomial"
+	"github.com/nepal80m/samurai/internal/db"
+	"github.com/nepal80m/samurai/internal/tree"
 
 	bls "github.com/consensys/gnark-crypto/ecc/bls12-381"
 )
 
+// BlockRange represents a contiguous range of blocks.
 type BlockRange struct {
 	Start, End int
 }
 
+// RangeCommitment represents a commitment required to prove a block range.
 type RangeCommitment struct {
 	idx                  int
 	layer                int
@@ -30,21 +33,23 @@ type RangeCommitment struct {
 	dependentCommitments []int
 }
 
+// RangeProof represents a proof for a range of blocks.
 type RangeProof struct {
-	idx                  int
-	layer                int
+	Idx                  int
+	Layer                int
 	Commitment           gnark_kzg.Digest
 	Proof                bls.G1Affine
 	BlockRange           *BlockRange
-	dependentCommitments []int
+	DependentCommitments []int
 }
 
-func BinarySearchVersionByBlockNumber(blockNumber uint64, searchStart uint64, searchEnd uint64, account common.Address, db *segmenttree.SamuraiDB) (uint64, error) {
+// BinarySearchVersionByBlockNumber finds the version for a given block number using binary search.
+func BinarySearchVersionByBlockNumber(blockNumber uint64, searchStart uint64, searchEnd uint64, account common.Address, db *db.SamuraiDB) (uint64, error) {
 	L := searchStart
 	R := searchEnd
 	for L <= R {
 		m := (L + R) / 2
-		hbInfo := segmenttree.GetHistoricalBalance(account, m, db.HistoryDB)
+		hbInfo := tree.GetHistoricalBalance(account, m, db.HistoryDB)
 		if hbInfo.StartBlock <= blockNumber && blockNumber <= hbInfo.EndBlock {
 			return m, nil
 		} else if blockNumber < hbInfo.StartBlock {
@@ -59,9 +64,11 @@ func BinarySearchVersionByBlockNumber(blockNumber uint64, searchStart uint64, se
 	}
 	return 0, errors.New("version not found")
 }
-func BlockRangeToVersionRange(account common.Address, startingBlock uint64, endingBlock uint64, config *config.Config, db *segmenttree.SamuraiDB) (uint64, uint64) {
 
-	cbInfo, err := segmenttree.GetCurrentBalanceInfo(account, db.StateDB)
+// BlockRangeToVersionRange converts a block range to a version range for a given account.
+func BlockRangeToVersionRange(account common.Address, startingBlock uint64, endingBlock uint64, config *config.Config, db *db.SamuraiDB) (uint64, uint64) {
+
+	cbInfo, err := tree.GetCurrentBalanceInfo(account, db.StateDB)
 	if err != nil {
 		fmt.Printf("Error getting current balance info for account %s: %v\n", account.Hex(), err)
 		panic(err)
@@ -91,12 +98,12 @@ func BlockRangeToVersionRange(account common.Address, startingBlock uint64, endi
 
 }
 
-func GetNewProofRange(account common.Address, startingVersion, endingVersion uint64, precomputedData *config.PrecomputedData, blockOffset uint64, db *segmenttree.SamuraiDB) ([]*RangeProof, []*segmenttree.HistoricalBalance) {
-	// TODO: find the commits required to prove the range
+// GetNewProofRange generates range proofs for a given account and version range.
+func GetNewProofRange(account common.Address, startingVersion, endingVersion uint64, precomputedData *config.PrecomputedData, blockOffset uint64, db *db.SamuraiDB) ([]*RangeProof, []*tree.HistoricalBalance) {
 	reqCommits := findCommitmentsCoveringRange(int(startingVersion), int(endingVersion))
 
 	lxRequiredBatchIdxs := make(map[uint64][]uint64)
-	for i := uint64(1); i <= segmenttree.MaxLayer; i++ {
+	for i := uint64(1); i <= tree.MaxLayer; i++ {
 		lxRequiredBatchIdxs[i] = make([]uint64, 0)
 	}
 	fmt.Println("Required Commits:")
@@ -108,7 +115,6 @@ func GetNewProofRange(account common.Address, startingVersion, endingVersion uin
 	requiredTreeBatchesMap, requiredHBInfos := RebuildSegmentTreeForProof(account, lxRequiredBatchIdxs, startingVersion, endingVersion, db, precomputedData)
 	fmt.Println("Time taken to rebuild segment tree", time.Since(start))
 
-	// ------------------------------------------------------------
 	allRangeProofs := make([]*RangeProof, 0)
 	for _, reqCommit := range reqCommits {
 		layer := reqCommit.layer
@@ -126,11 +132,11 @@ func GetNewProofRange(account common.Address, startingVersion, endingVersion uin
 		fmt.Printf("nodesToInterpolate: %v\n", nodesToInterpolate)
 
 		treeKey := fmt.Sprintf("%d:%d", layer, idx)
-		tree := requiredTreeBatchesMap[treeKey]
+		batchTree := requiredTreeBatchesMap[treeKey]
 
-		xs1 := make([]int, len(tree))
-		ys1 := make([]fr.Element, len(tree))
-		for i, v := range tree {
+		xs1 := make([]int, len(batchTree))
+		ys1 := make([]fr.Element, len(batchTree))
+		for i, v := range batchTree {
 			xs1[i] = i
 			ys1[i] = polynomial.HashToFieldElement(v)
 		}
@@ -139,22 +145,8 @@ func GetNewProofRange(account common.Address, startingVersion, endingVersion uin
 		fmt.Println("Time taken to interpolate polynomial", time.Since(start))
 
 		start = time.Now()
-		storedCommitment := segmenttree.GetBatchCommitment(account, uint64(layer), uint64(idx), db.StateDB)
+		storedCommitment := tree.GetBatchCommitment(account, uint64(layer), uint64(idx), db.StateDB)
 		fmt.Println("Time taken to get stored commitment", time.Since(start))
-
-		// start = time.Now()
-		// computedCommitment, err := gnark_kzg.Commit(P, precomputedData.SRS.Inner.Pk)
-		// if err != nil {
-		// 	panic(err)
-		// }
-		// fmt.Println("Time taken to commit polynomial", time.Since(start))
-		// fmt.Printf("computedCommitment: %v\n", computedCommitment)
-		// fmt.Printf("storedCommitment: %v\n", storedCommitment)
-		// _ = computedCommitment
-
-		// if computedCommitment != storedCommitment {
-		// 	panic("commitment calculated from polynomial does not match with the stored commitment")
-		// }
 
 		Z := polynomial.VanishingPolynomial(nodesToInterpolate)
 		// ZCommit, _ := kzg.CommitG2(Z, precomputedData.SRS.G2Powers)
@@ -163,8 +155,7 @@ func GetNewProofRange(account common.Address, startingVersion, endingVersion uin
 		ys := make([]fr.Element, len(nodesToInterpolate))
 		for i, v := range nodesToInterpolate {
 			xs[i] = fr.NewElement(uint64(v))
-			ys[i] = polynomial.HashToFieldElement(tree[v])
-
+			ys[i] = polynomial.HashToFieldElement(batchTree[v])
 		}
 
 		I := kzg.Interpolate(xs, ys)
@@ -178,9 +169,6 @@ func GetNewProofRange(account common.Address, startingVersion, endingVersion uin
 		if err != nil {
 			panic(err)
 		}
-		// qCommitBytes := QCommit.Bytes()
-		// qCommitHash := common.BytesToHash(qCommitBytes[:])
-		// fmt.Printf("qCommitmentHash: %s\n", qCommitHash)
 
 		// ok, err := PairingCheck(storedCommitment, QCommit, ICommit, ZCommit, precomputedData.SRS)
 		// if err != nil {
@@ -193,195 +181,20 @@ func GetNewProofRange(account common.Address, startingVersion, endingVersion uin
 		// }
 
 		rangeProof := &RangeProof{
-			idx:                  idx,
-			layer:                layer,
+			Idx:                  idx,
+			Layer:                layer,
 			Commitment:           storedCommitment,
 			Proof:                QCommit,
 			BlockRange:           reqCommit.BlockRange,
-			dependentCommitments: reqCommit.dependentCommitments,
+			DependentCommitments: reqCommit.dependentCommitments,
 		}
 
 		allRangeProofs = append(allRangeProofs, rangeProof)
-
-		// for i, v := range nodesToInterpolate {
-		// 	fmt.Printf("ys[%d]: %v\n", i, tree[v])
-		// }
-		// if QCommit == (bls.G1Affine{}) {
-		// 	fmt.Printf("I: %v\n", I)
-		// 	fmt.Printf("Z: %v\n", Z)
-		// 	panic("Proof is zero")
-		// }
-
 	}
 	return allRangeProofs, requiredHBInfos
 }
 
-// DEPRECATED: use GetNewProofRange instead
-// func GetRangeProofs(account common.Address, startingBlock, endingBlock int, V polynomial.Polynomial, weights []fr.Element, srs *kzg.MultiSRS, blockOffset uint64) ([]*RangeProof, []*big.Int) {
-
-// 	// TODO: find the commits required to prove the range
-
-// 	// TODO: find relevant segment tree arrays (and fill them with commitment values)
-// 	// TODO: generate polynomial from the filled segment tree arrays
-// 	// TODO: generate proof for the polynomial
-// 	start := time.Now()
-// 	balances, err := batchSingleUserBalances(account, uint64(startingBlock)+blockOffset, uint64(endingBlock)+blockOffset)
-// 	if err != nil {
-// 		panic(err)
-// 	}
-// 	balanceFetchTime := time.Since(start)
-// 	fmt.Printf("Time taken to get balances: %v\n", balanceFetchTime)
-
-// 	allRangeProofs := make([]*RangeProof, 0)
-
-// 	reqCommits := findCommitmentsCoveringRange(startingBlock, endingBlock)
-// 	// for _, reqCommit := range reqCommits {
-
-// 	// 	nodesToInterpolate := findNodesToInterpolate(reqCommit, true)
-
-// 	// 	fmt.Printf("\n\nlayer: %d, idx: %d, \n", reqCommit.layer, reqCommit.idx)
-// 	// 	if reqCommit.BlockRange == nil {
-// 	// 		fmt.Printf("Commitment is not covering any range.\n")
-// 	// 	} else {
-// 	// 		fmt.Printf("sb: %d, eb: %d\n", reqCommit.BlockRange.Start, reqCommit.BlockRange.End)
-// 	// 	}
-// 	// 	fmt.Printf("dependentCommitments: %v\n", reqCommit.dependentCommitments)
-// 	// 	fmt.Printf("nodesToInterpolate: %v\n", nodesToInterpolate)
-// 	// }
-// 	for _, reqCommit := range reqCommits {
-// 		layer := reqCommit.layer
-// 		idx := reqCommit.idx
-
-// 		nodesToInterpolate := findNodesToInterpolate(reqCommit, true)
-
-// 		fmt.Printf("\n\nlayer: %d, idx: %d, \n", reqCommit.layer, reqCommit.idx)
-// 		if reqCommit.BlockRange == nil {
-// 			fmt.Printf("Commitment is not covering any range.\n")
-// 		} else {
-// 			fmt.Printf("sb: %d, eb: %d\n", reqCommit.BlockRange.Start, reqCommit.BlockRange.End)
-// 		}
-// 		fmt.Printf("dependentCommitments: %v\n", reqCommit.dependentCommitments)
-// 		fmt.Printf("nodesToInterpolate: %v\n", nodesToInterpolate)
-
-// 		// storedCommitment := lxCommitments[layer][idx]
-// 		tree, err := segmenttree.ReadTreeSegment(segmenttree.StoragePath, account, layer, idx)
-// 		if err != nil {
-// 			panic(err)
-// 		}
-
-// 		// P := lxPolynomials[layer][idx]
-// 		xs1 := make([]int, len(tree))
-// 		ys1 := make([]fr.Element, len(tree))
-// 		for i, v := range tree {
-// 			xs1[i] = i
-// 			ys1[i] = polynomial.HashToFieldElement(v)
-// 		}
-// 		P := polynomial.Interpolate(xs1, ys1, V, weights)
-
-// 		computedCommitment, err := gnark_kzg.Commit(P, srs.Inner.Pk)
-// 		if err != nil {
-// 			panic(err)
-// 		}
-// 		// _ = computedCommitment
-
-// 		// if computedCommitment != storedCommitment {
-// 		// 	panic("commitment calculated from polynomial does not match with the stored commitment")
-// 		// }
-
-// 		// computedCommitmentHash := segmenttree.CommitmentToHash(computedCommitment)
-// 		// commitmentBytes := commitment.Bytes()
-// 		// commitmentHash := common.BytesToHash(commitmentBytes[:])
-// 		// fmt.Printf("pCommitHash: %v\n", computedCommitmentHash)
-
-// 		// if layer < segmenttree.MaxLayer {
-// 		// 	modDepCommitIdx := 2*segmenttree.L2BatchSize - 1 + (idx % segmenttree.L2BatchSize)
-// 		// 	storedCommitmentHash := lxTrees[layer+1][idx/segmenttree.L2BatchSize][modDepCommitIdx]
-// 		// 	fmt.Printf("storedCommitmentHash: %v\n", storedCommitmentHash)
-// 		// 	if storedCommitmentHash != computedCommitmentHash {
-// 		// 		panic("commitment hash does not match")
-// 		// 	} else {
-// 		// 		fmt.Println("commitment hash matches with the commitment stored in upper layer storage")
-// 		// 	}
-// 		// }
-
-// 		Z := polynomial.VanishingPolynomial(nodesToInterpolate)
-// 		// ZCommit, _ := kzg.CommitG2(Z, srs.G2Powers)
-
-// 		// zCommitBytes := ZCommit.Bytes()
-// 		// zCommitHash := common.BytesToHash(zCommitBytes[:])
-// 		// fmt.Printf("zCommitHash: %s\n", zCommitHash)
-
-// 		xs := make([]fr.Element, len(nodesToInterpolate))
-// 		ys := make([]fr.Element, len(nodesToInterpolate))
-// 		for i, v := range nodesToInterpolate {
-// 			xs[i] = fr.NewElement(uint64(v))
-
-// 			// fmt.Printf("xs[%d]: %v\n", i, v)
-// 			// fmt.Printf("ysHash[%d]: %v\n", i, tree[v])
-// 			// fmt.Printf("ysHashEval[%d]: %v\n", i, polynomial.FieldElementToHash(P.Eval(&xs[i])))
-
-// 			ys[i] = polynomial.HashToFieldElement(tree[v])
-
-// 		}
-
-// 		// I := polynomial.Interpolate(nodesToInterpolate, ys, V, weights)
-// 		I := kzg.Interpolate(xs, ys)
-// 		// ICommit, err := gnark_kzg.Commit(I, srs.Inner.Pk)
-// 		// if err != nil {
-// 		// 	panic(err)
-// 		// }
-// 		// iCommitBytes := ICommit.Bytes()
-// 		// iCommitHash := common.BytesToHash(iCommitBytes[:])
-// 		// fmt.Printf("iCommitmentHash: %s\n", iCommitHash)
-
-// 		diff := kzg.SubtractPolys(P, I)
-// 		Q := kzg.PolyDiv(diff, Z)
-// 		QCommit, err := gnark_kzg.Commit(Q, srs.Inner.Pk)
-// 		if err != nil {
-// 			panic(err)
-// 		}
-// 		// qCommitBytes := QCommit.Bytes()
-// 		// qCommitHash := common.BytesToHash(qCommitBytes[:])
-// 		// fmt.Printf("qCommitmentHash: %s\n", qCommitHash)
-
-// 		// ok, err := PairingCheck(computedCommitment, QCommit, ICommit, ZCommit, srs)
-// 		// if err != nil {
-// 		// 	panic(err)
-// 		// }
-// 		// if !ok {
-// 		// 	panic("pairing check failed.")
-// 		// } else {
-// 		// 	fmt.Println("Pairing check passed.✅")
-// 		// }
-
-// 		rangeProof := &RangeProof{
-// 			idx:                  idx,
-// 			layer:                layer,
-// 			Commitment:           computedCommitment,
-// 			Proof:                QCommit,
-// 			BlockRange:           reqCommit.BlockRange,
-// 			dependentCommitments: reqCommit.dependentCommitments,
-// 		}
-
-// 		allRangeProofs = append(allRangeProofs, rangeProof)
-
-// 		// for i, v := range nodesToInterpolate {
-// 		// 	fmt.Printf("ys[%d]: %v\n", i, tree[v])
-// 		// }
-// 		// if QCommit == (bls.G1Affine{}) {
-// 		// 	fmt.Printf("I: %v\n", I)
-// 		// 	fmt.Printf("Z: %v\n", Z)
-// 		// 	panic("Proof is zero")
-// 		// }
-
-// 	}
-// 	fmt.Println("Number of range proofs:", len(allRangeProofs))
-// 	fmt.Printf("Time taken to get balances: %v\n", balanceFetchTime)
-
-// 	return allRangeProofs, balances
-
-// }
-
+// findCommitmentsCoveringRange finds all commitments needed to cover the given block range.
 func findCommitmentsCoveringRange(sb, eb int) []RangeCommitment {
 	rcCommitments := findRangeCoveringCommitments(sb, eb, 1)
 	reqCommitments := addDepencencyCommitments(rcCommitments)
@@ -390,6 +203,7 @@ func findCommitmentsCoveringRange(sb, eb int) []RangeCommitment {
 
 }
 
+// addDepencencyCommitments adds dependency commitments for upper layers.
 func addDepencencyCommitments(dependentCommitments []RangeCommitment) []RangeCommitment {
 
 	commitHashMap := make(map[string]*RangeCommitment)
@@ -407,11 +221,11 @@ func addDepencencyCommitments(dependentCommitments []RangeCommitment) []RangeCom
 			panic(err)
 		}
 
-		if dCommit.layer == segmenttree.MaxLayer {
+		if dCommit.layer == tree.MaxLayer {
 			continue
 		}
 
-		reqCommitIdx := dCommit.idx / segmenttree.L2BatchSize
+		reqCommitIdx := dCommit.idx / tree.L2BatchSize
 		reqCommitLayer := dCommit.layer + 1
 
 		reqCommitKey := fmt.Sprintf("%d:%d", reqCommitLayer, reqCommitIdx)
@@ -437,17 +251,12 @@ func addDepencencyCommitments(dependentCommitments []RangeCommitment) []RangeCom
 	return reqCommitments
 }
 
-// Given a starting block, ending block, and layer, get all the commitments required to prove it.
-// layer is passed for recursion. check getRequiredCommitments.py for more details.
-// returns a list of commitments required to prove the range.
-// each commitment is a list of [idx, sb, eb, layer]
-// idx is index of commitment in the storage.
-// layer is the layer of the commitment.
-// this commitment should cover the range of block of index sb to eb.
+// findRangeCoveringCommitments finds all commitments required to cover a block range at a given layer.
+// Returns a list of RangeCommitment where each commitment covers a portion of the range.
 func findRangeCoveringCommitments(sb, eb int, layer int) []RangeCommitment {
 	reqCommitments := make([]RangeCommitment, 0)
 
-	l0BatchSize := segmenttree.L1BatchSize * Pow(segmenttree.L2BatchSize, layer-1)
+	l0BatchSize := tree.L1BatchSize * Pow(tree.L2BatchSize, layer-1)
 
 	hasLeftFragment := sb%(l0BatchSize) != 0
 	hasRightFragment := eb%(l0BatchSize) != l0BatchSize-1
@@ -456,7 +265,6 @@ func findRangeCoveringCommitments(sb, eb int, layer int) []RangeCommitment {
 	rightCommitIndex := eb / (l0BatchSize)
 
 	if leftCommitIndex == rightCommitIndex && (hasLeftFragment || hasRightFragment) {
-		// commitments = append(commitments, []int{leftCommitIndex, sb, eb, layer})
 		reqCommitments = append(reqCommitments, RangeCommitment{
 			idx:        leftCommitIndex,
 			layer:      layer,
@@ -469,7 +277,6 @@ func findRangeCoveringCommitments(sb, eb int, layer int) []RangeCommitment {
 	if hasLeftFragment {
 		leftFragmentStart := sb
 		leftFragmentEnd := (leftCommitIndex+1)*l0BatchSize - 1
-		// commitments = append(commitments, []int{leftCommitIndex, leftFragmentStart, leftFragmentEnd, layer})
 
 		reqCommitments = append(reqCommitments, RangeCommitment{
 			idx:        leftCommitIndex,
@@ -483,7 +290,6 @@ func findRangeCoveringCommitments(sb, eb int, layer int) []RangeCommitment {
 
 		rightFragmentStart := rightCommitIndex * l0BatchSize
 		rightFragmentEnd := eb
-		// commitments = append(commitments, []int{rightCommitIndex, rightFragmentStart, rightFragmentEnd, layer})
 
 		reqCommitments = append(reqCommitments, RangeCommitment{
 			idx:        rightCommitIndex,
@@ -492,7 +298,7 @@ func findRangeCoveringCommitments(sb, eb int, layer int) []RangeCommitment {
 		})
 		eb = rightFragmentStart - 1
 	}
-	if sb < eb && layer < segmenttree.MaxLayer {
+	if sb < eb && layer < tree.MaxLayer {
 		upperLayerCommitments := findRangeCoveringCommitments(sb, eb, layer+1)
 		reqCommitments = append(reqCommitments, upperLayerCommitments...)
 	}
@@ -501,6 +307,7 @@ func findRangeCoveringCommitments(sb, eb int, layer int) []RangeCommitment {
 
 }
 
+// findNodesToInterpolate finds the tree nodes that need to be interpolated for a commitment.
 func findNodesToInterpolate(commitment RangeCommitment, includeDependentCommitments bool) []int {
 
 	layer := commitment.layer
@@ -512,7 +319,7 @@ func findNodesToInterpolate(commitment RangeCommitment, includeDependentCommitme
 			if layer <= 1 {
 				panic("layer1 cannot have dependents")
 			}
-			modDepCommitIdx := 2*segmenttree.L2BatchSize - 1 + (depCommitIdx % segmenttree.L2BatchSize)
+			modDepCommitIdx := 2*tree.L2BatchSize - 1 + (depCommitIdx % tree.L2BatchSize)
 			nodesToInterpolate = append(nodesToInterpolate, modDepCommitIdx)
 		}
 	}
@@ -524,7 +331,7 @@ func findNodesToInterpolate(commitment RangeCommitment, includeDependentCommitme
 	sb := commitment.BlockRange.Start
 	eb := commitment.BlockRange.End
 
-	l0BatchSize := segmenttree.L1BatchSize * Pow(segmenttree.L2BatchSize, layer-1)
+	l0BatchSize := tree.L1BatchSize * Pow(tree.L2BatchSize, layer-1)
 	l0BatchStartIdx := idx * l0BatchSize
 	l0BatchEndIdx := l0BatchStartIdx + l0BatchSize - 1
 
@@ -535,7 +342,7 @@ func findNodesToInterpolate(commitment RangeCommitment, includeDependentCommitme
 	lXm1EB := eb
 
 	if layer > 1 {
-		denom := segmenttree.L1BatchSize * Pow(segmenttree.L2BatchSize, layer-2)
+		denom := tree.L1BatchSize * Pow(tree.L2BatchSize, layer-2)
 		lXm1BatchSize /= denom // this should match the size of the lXtree
 		lXm1BatchStartIdx /= denom
 		lXm1BatchEndIdx /= denom
@@ -551,8 +358,7 @@ func findNodesToInterpolate(commitment RangeCommitment, includeDependentCommitme
 
 }
 
-// N is number of leaves in the segment tree, L is starting index, R is ending index of the range.
-// returns a list of nodes that covers the range.
+// findCoveringNodes finds the segment tree nodes that cover a range [L, R] in a tree of N leaves.
 func findCoveringNodes(N, L, R int) []int {
 
 	base := N - 1
@@ -576,31 +382,8 @@ func findCoveringNodes(N, L, R int) []int {
 	return out
 }
 
-// func DumpProofsAndBalances(proofs []*RangeProof, balances []*big.Int) {
-// 	// Create the storage/proofs directory if it doesn't exist
-// 	err := os.MkdirAll(fmt.Sprintf("storage/proofs/%d", len(balances)), 0755)
-// 	if err != nil {
-// 		panic(err)
-// 	}
-
-// 	proofFile, err := os.Create(fmt.Sprintf("storage/proofs/%d/proofs.json", len(balances)))
-// 	if err != nil {
-// 		panic(err)
-// 	}
-// 	defer proofFile.Close()
-
-// 	balanceFile, err := os.Create(fmt.Sprintf("storage/proofs/%d/balances.json", len(balances)))
-// 	if err != nil {
-// 		panic(err)
-// 	}
-// 	defer balanceFile.Close()
-
-// 	json.NewEncoder(proofFile).Encode(proofs)
-// 	json.NewEncoder(balanceFile).Encode(balances)
-
-//		fmt.Println("Proofs and balances dumped to storage/proofs/proofs.json and storage/proofs/balances.json", len(balances))
-//	}
-func DumpNewProofsAndBalances(proofs []*RangeProof, balances []*segmenttree.HistoricalBalance) {
+// DumpNewProofsAndBalances writes proofs and historical balances to JSON files.
+func DumpNewProofsAndBalances(proofs []*RangeProof, balances []*tree.HistoricalBalance) {
 	// Create the storage/proofs directory if it doesn't exist
 	err := os.MkdirAll(fmt.Sprintf("storage/proofs/"), 0755)
 	if err != nil {

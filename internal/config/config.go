@@ -4,9 +4,10 @@ import (
 	bls "github.com/consensys/gnark-crypto/ecc/bls12-381"
 	"github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
 	"github.com/nepal80m/samurai/internal/crypto/kzg"
-	"github.com/nepal80m/samurai/internal/math/polynomial"
+	"github.com/nepal80m/samurai/internal/crypto/polynomial"
 )
 
+// Config holds all configuration for the Samurai application.
 type Config struct {
 	Blocks    Blocks
 	Workers   Workers
@@ -14,9 +15,9 @@ type Config struct {
 	Cache     Cache
 	Queue     Queue
 	Benchmark Benchmark
-	// PrecomputedData PrecomputedData
 }
 
+// Benchmark holds configuration for benchmark mode.
 type Benchmark struct {
 	Enabled              bool
 	DurationSecs         int    // How long to run the benchmark (seconds)
@@ -26,17 +27,20 @@ type Benchmark struct {
 	CollectCacheMetrics  bool   // Collect Ristretto cache metrics (hits, misses, size)
 }
 
+// Blocks specifies the block range to process.
 type Blocks struct {
 	StartingBlockNumber uint64
 	EndingBlockNumber   uint64
 }
 
+// Workers configures the worker pool for commit generation.
 type Workers struct {
 	CommitWorkerCount       int
 	CommitWorkerQueueSize   int
 	CommitWorkerChannelSize int
 }
 
+// Database configures the Pebble database settings.
 type Database struct {
 	Shards       int
 	MemTableSize uint64
@@ -45,61 +49,23 @@ type Database struct {
 	StoragePath  string
 }
 
+// Cache configures the Ristretto in-memory cache.
 type Cache struct {
 	NumCounters   uint64
 	MaxCost       uint64
 	EnableMetrics bool // Enable Ristretto metrics collection (has some overhead)
 }
 
+// Queue configures channel buffer sizes for the processing pipeline.
 type Queue struct {
 	BlockInfoChannelSize  int
 	UpdateTaskChannelSize int
 }
 
+// PrecomputedData holds precomputed cryptographic data for polynomial commitments.
 type PrecomputedData struct {
 	V             polynomial.Polynomial
 	Weights       []fr.Element
 	WeightCommits []bls.G1Affine
 	SRS           *kzg.MultiSRS
 }
-
-// func (config *Config) SetTrackedAccounts(count int) []common.Address {
-// 	client := config.Client
-
-// 	accountAddrs := make([]common.Address, 0, count)
-// 	startKey := []byte{}
-// 	for {
-// 		var iteratorDump struct {
-// 			Root     string                 `json:"root"`
-// 			Accounts map[common.Address]any `json:"accounts"`
-// 			Next     []byte                 `json:"next"`
-// 		}
-// 		blockNumber := config.StartingBlockNumber
-// 		const batchSize = 256
-// 		if err := client.Call(
-// 			&iteratorDump,
-// 			"debug_accountRange",
-// 			blockNumber, // numeric block tag
-// 			startKey,    // starting key for pagination
-// 			batchSize,   // how many accounts to fetch per page
-// 			true,        // exclude code info in account?
-// 			true,        // exclude storage info in account?
-// 		); err != nil {
-// 			log.Fatalf("RPC error calling debug_accountRange: %v", err)
-// 		}
-
-// 		for addr := range iteratorDump.Accounts {
-// 			if len(accountAddrs) >= count {
-// 				break
-// 			}
-// 			accountAddrs = append(accountAddrs, addr)
-// 		}
-// 		if len(accountAddrs) >= count || len(iteratorDump.Next) == 0 {
-// 			break
-// 		}
-// 		startKey = iteratorDump.Next
-// 	}
-// 	config.TrackedAccounts = accountAddrs
-// 	return accountAddrs
-
-// }

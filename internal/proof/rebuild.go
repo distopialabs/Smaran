@@ -11,19 +11,19 @@ import (
 	gnark_kzg "github.com/consensys/gnark-crypto/ecc/bls12-381/kzg"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/nepal80m/samurai/internal/crypto/kzg"
-	"github.com/nepal80m/samurai/internal/math/polynomial"
-	"github.com/nepal80m/samurai/internal/segmenttree"
+	"github.com/nepal80m/samurai/internal/crypto/polynomial"
+	"github.com/nepal80m/samurai/internal/tree"
 )
 
 type ProofSegmentTree struct {
 	LXTree       map[int][]common.Hash
 	LXPolynomial map[int]polynomial.Polynomial
 	LXCommitment map[int]gnark_kzg.Digest
-	CachedData   *segmenttree.CachedData
-	Storage      *segmenttree.Storage
+	CachedData   *tree.CachedData
+	Storage      *tree.Storage
 }
 
-func RebuildProofSegmentTree(startingBlock, endingBlock int, storage *segmenttree.Storage, V polynomial.Polynomial, weights []fr.Element, srs *kzg.MultiSRS) {
+func RebuildProofSegmentTree(startingBlock, endingBlock int, storage *tree.Storage, V polynomial.Polynomial, weights []fr.Element, srs *kzg.MultiSRS) {
 	segmentTree := NewProofSegmentTree(V, weights, srs)
 	_ = segmentTree
 
@@ -51,12 +51,12 @@ func NewProofSegmentTree(V polynomial.Polynomial, weights []fr.Element, srs *kzg
 		},
 		LXCommitment: make(map[int]gnark_kzg.Digest),
 
-		CachedData: &segmenttree.CachedData{
+		CachedData: &tree.CachedData{
 			V:       V,
 			Weights: weights,
 			SRS:     srs,
 		},
-		Storage: &segmenttree.Storage{
+		Storage: &tree.Storage{
 			L1Tree: make(map[int][]common.Hash),
 			L2Tree: make(map[int][]common.Hash),
 			L3Tree: make(map[int][]common.Hash),
@@ -142,40 +142,27 @@ func (segmentTree *ProofSegmentTree) UpdateLayerX(idx int, val common.Hash, laye
 		3: segmentTree.LXTree[3],
 		4: segmentTree.LXTree[4],
 	}
-	// Update the tree
 
-	tree := trees[layer]
+	batchTree := trees[layer]
 
 	if (val != common.Hash{}) {
-		// segmentTree.UpdateLayerX(idx, val, segmentTree.Layer2Tree, segmentTree.Layer2Polynomial)
-		//  update value at idx and its ancestors in the tree
-
-		tree[idx] = val
+		batchTree[idx] = val
 
 		updatedIndices := []int{idx}
 		for idx > 0 {
-			parentIdx := segmenttree.GetParent(uint64(idx))
+			parentIdx := tree.GetParent(uint64(idx))
 
-			lChild := tree[2*parentIdx+1]
-			rChild := tree[2*parentIdx+2]
+			lChild := batchTree[2*parentIdx+1]
+			rChild := batchTree[2*parentIdx+2]
 			if (lChild == common.Hash{} || rChild == common.Hash{}) {
 				break
 			}
-			tree[parentIdx] = segmenttree.BytesToPoseidonHash(lChild.Bytes(), rChild.Bytes())
-			// tree[parentIdx] = segmenttree.GetParentHash(lChild, rChild)
-			// tree[parentIdx] = crypto.Keccak256Hash(
-			// 	lChild.Bytes(),
-			// 	rChild.Bytes(),
-			// )
+			batchTree[parentIdx] = tree.BytesToPoseidonHash(lChild.Bytes(), rChild.Bytes())
 
 			updatedIndices = append(updatedIndices, int(parentIdx))
-
 			idx = int(parentIdx)
-
 		}
-
 	}
-
 }
 
 func (segmentTree *ProofSegmentTree) DumpStorage() {

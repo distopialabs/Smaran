@@ -2,7 +2,7 @@ package kzg
 
 import (
 	fr "github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
-	"github.com/nepal80m/samurai/internal/math/polynomial"
+	"github.com/nepal80m/samurai/internal/crypto/polynomial"
 )
 
 // VanishingPolynomial returns Z(X) = ∏(X - xs[i])
