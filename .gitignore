@@ -3,7 +3,6 @@ __pycache__
 data/
 profiles/
 logs/
-storage/
 temp/
 *.db
 *.log
@@ -11,4 +10,4 @@ venv/
 *.csv
 *.png
 benchmark_output/
-requirements.txt
+venv
