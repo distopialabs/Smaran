@@ -12,3 +12,5 @@ venv/
 benchmark_output/
 venv
 data/
+samurai-data
+samurai

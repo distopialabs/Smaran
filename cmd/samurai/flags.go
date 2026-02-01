@@ -1,6 +1,9 @@
 package main
 
-import "flag"
+import (
+	"flag"
+	"path/filepath"
+)
 
 // Flags holds all command-line flags for the samurai application.
 type Flags struct {
@@ -13,6 +16,9 @@ type Flags struct {
 	// Profiling
 	Profile     bool
 	ProfilePath string
+
+	// Data Directory
+	DataDir string
 
 	// Resume
 	Resume bool
@@ -38,18 +44,21 @@ type Flags struct {
 func ParseFlags() *Flags {
 	f := &Flags{}
 
+	// Data Directory
+	flag.StringVar(&f.DataDir, "datadir", "samurai-data", "Directory to store data (db, profiles, benchmarks)")
+
 	// Mode selection
-	flag.StringVar(&f.Mode, "mode", "commit", "Mode to run: commit, proof, verify")
+	flag.StringVar(&f.Mode, "mode", "commit", "Mode to run: commit, proof, verify, serve")
 	flag.IntVar(&f.NumBlocks, "n", 10000, "Number of blocks to process")
 
 	// Profiling flags
-	flag.BoolVar(&f.Profile, "p", true, "Profile the program")
-	flag.StringVar(&f.ProfilePath, "profilePath", "/data/local/samurai/test/profiles", "Path to write profile files")
+	flag.BoolVar(&f.Profile, "p", false, "Profile the program")
+	flag.StringVar(&f.ProfilePath, "profilePath", "", "Path to write profile files (default: <datadir>/profiles)")
 
 	// Benchmark flags
 	flag.BoolVar(&f.Bench, "bench", false, "Enable benchmark mode for commit generation")
 	flag.IntVar(&f.BenchDuration, "benchDuration", 300, "Benchmark duration in seconds (default: 5 minutes)")
-	flag.StringVar(&f.BenchOutputDir, "benchOutputDir", "/data/local/samurai/test/benchmark", "Directory to write benchmark CSV files")
+	flag.StringVar(&f.BenchOutputDir, "benchOutputDir", "", "Directory to write benchmark CSV files (default: <datadir>/benchmarks)")
 	flag.BoolVar(&f.BenchDBMetrics, "benchDBMetrics", false, "Collect Pebble DB metrics (compaction, L0 files, etc.)")
 	flag.BoolVar(&f.BenchPipeline, "benchPipeline", false, "Collect pipeline sizes (queue and channel sizes per shard)")
 	flag.BoolVar(&f.BenchCacheMetrics, "benchCacheMetrics", true, "Collect Ristretto cache metrics (hits, misses, size)")
@@ -66,5 +75,14 @@ func ParseFlags() *Flags {
 	flag.BoolVar(&f.Resume, "resume", false, "Resume from existing database")
 
 	flag.Parse()
+
+	// Set defaults that depend on DataDir
+	if f.ProfilePath == "" {
+		f.ProfilePath = filepath.Join(f.DataDir, "profiles")
+	}
+	if f.BenchOutputDir == "" {
+		f.BenchOutputDir = filepath.Join(f.DataDir, "benchmarks")
+	}
+
 	return f
 }

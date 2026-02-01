@@ -74,7 +74,7 @@ func RunCommit(cfg *config.Config, caches []*storage.Cache) {
 				queueSize := updateTaskQueues[i].Size()
 				if queueSize >= cfg.Workers.CommitWorkerQueueSize {
 					anyQueueAtLimit = true
-					fmt.Printf("⚠️ Queue %d has hit the limit: %d tasks\n", i, queueSize)
+					// fmt.Printf("⚠️ Queue %d has hit the limit: %d tasks\n", i, queueSize)
 					break
 				}
 			}

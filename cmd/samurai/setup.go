@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/cockroachdb/pebble"
 	"github.com/nepal80m/samurai/internal/config"
@@ -45,7 +46,7 @@ func BuildConfig(flags *Flags) *config.Config {
 			MemTableSize: 64 << 20, // 64MB
 			DisableWAL:   true,
 			CacheSize:    80_000_000,
-			StoragePath:  "/data/local/samurai/test/storage",
+			StoragePath:  filepath.Join(flags.DataDir, "db"),
 		},
 		Cache: config.Cache{
 			NumCounters:   2_097_152,

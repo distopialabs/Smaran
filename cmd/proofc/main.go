@@ -24,11 +24,11 @@ const StartBlock = uint64(18908895)
 
 func main() {
 	// Parse command-line flags
-	serverAddr := flag.String("server", "localhost:50051", "gRPC server address")
+	serverAddr := flag.String("server", "10.10.1.1:50051", "gRPC server address")
 	account := flag.String("account", "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", "Account address to query")
 	startBlock := flag.Uint64("startBlock", 20, "Starting block number (relative to data start)")
 	endBlock := flag.Uint64("endBlock", 119, "Ending block number (relative to data start)")
-	paramsDir := flag.String("paramsDir", "/data/local/dataset/polynomial", "Path to crypto params")
+	paramsDir := flag.String("paramsDir", "./data/params", "Path to crypto params")
 	flag.Parse()
 
 	// Initialize precomputed data
