@@ -11,3 +11,4 @@ venv/
 *.png
 benchmark_output/
 venv
+data/

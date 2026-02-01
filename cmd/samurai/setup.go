@@ -28,6 +28,9 @@ func BuildConfig(flags *Flags) *config.Config {
 	}
 
 	return &config.Config{
+		Resume:          flags.Resume,
+		BlocksDataDir:   "./data/blocks",
+		CryptoParamsDir: "./data/params",
 		Blocks: config.Blocks{
 			StartingBlockNumber: startBlock,
 			EndingBlockNumber:   endBlock,
@@ -65,13 +68,13 @@ func BuildConfig(flags *Flags) *config.Config {
 }
 
 // SetupPrecomputedData initializes SRS and precomputed polynomial data.
-func SetupPrecomputedData() (*config.PrecomputedData, error) {
+func SetupPrecomputedData(cfg *config.Config) (*config.PrecomputedData, error) {
 	srs, err := kzg.SetupSRS(tree.SegmentTreeSize)
 	if err != nil {
 		return nil, fmt.Errorf("failed to setup SRS: %w", err)
 	}
 
-	V, weights, weightCommits := kzg.LoadBarycentricData(tree.SegmentTreeSize, srs)
+	V, weights, weightCommits := kzg.LoadBarycentricData(tree.SegmentTreeSize, srs, cfg.CryptoParamsDir)
 	return &config.PrecomputedData{
 		V:             V,
 		Weights:       weights,

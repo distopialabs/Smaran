@@ -14,6 +14,9 @@ type Flags struct {
 	Profile     bool
 	ProfilePath string
 
+	// Resume
+	Resume bool
+
 	// Benchmark mode
 	Bench             bool
 	BenchDuration     int
@@ -58,6 +61,9 @@ func ParseFlags() *Flags {
 
 	// Server flags
 	flag.IntVar(&f.ServerPort, "port", 50051, "gRPC server port")
+
+	// Resume flag
+	flag.BoolVar(&f.Resume, "resume", false, "Resume from existing database")
 
 	flag.Parse()
 	return f

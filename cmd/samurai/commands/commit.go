@@ -38,7 +38,25 @@ func RunCommit(cfg *config.Config, caches []*storage.Cache) {
 
 	totalStart := time.Now()
 
-	SpawnBlockFetcher(cfg.Blocks.StartingBlockNumber, cfg.Blocks.EndingBlockNumber, blockInfoCh)
+	// Resume logic
+	if cfg.Resume {
+		meta, err := storage.LoadMetadata(cfg.Database.StoragePath)
+		if err != nil {
+			fmt.Println("⚠️ Failed to load metadata:", err)
+		} else if meta.LastProcessedBlock > 0 {
+			if meta.LastProcessedBlock > cfg.Blocks.StartingBlockNumber {
+				fmt.Printf("Resume: Fast-forwarding start block from %d to %d\n", cfg.Blocks.StartingBlockNumber, meta.LastProcessedBlock+1)
+				// Maintain the batch size
+				batchSize := cfg.Blocks.EndingBlockNumber - cfg.Blocks.StartingBlockNumber
+				cfg.Blocks.StartingBlockNumber = meta.LastProcessedBlock + 1
+				cfg.Blocks.EndingBlockNumber = cfg.Blocks.StartingBlockNumber + batchSize
+			}
+		} else {
+			fmt.Println("Resume: No previous progress found in metadata")
+		}
+	}
+
+	SpawnBlockFetcher(cfg.Blocks.StartingBlockNumber, cfg.Blocks.EndingBlockNumber, blockInfoCh, cfg.BlocksDataDir)
 
 	// Feed update tasks
 	go func() {
@@ -136,15 +154,24 @@ func RunCommit(cfg *config.Config, caches []*storage.Cache) {
 
 	fmt.Println("Time taken to process", cfg.Blocks.EndingBlockNumber-cfg.Blocks.StartingBlockNumber+1, "blocks", time.Since(totalStart), time.Now())
 	fmt.Println("Total time taken to process all blocks", time.Since(totalStart), time.Now())
+
+	// Save progress
+	if err := storage.SaveMetadata(cfg.Database.StoragePath, storage.Metadata{
+		LastProcessedBlock: cfg.Blocks.EndingBlockNumber,
+	}); err != nil {
+		fmt.Printf("⚠️ Failed to save metadata: %v\n", err)
+	} else {
+		fmt.Printf("Saved progress: LastProcessedBlock = %d\n", cfg.Blocks.EndingBlockNumber)
+	}
 }
 
 // SpawnBlockFetcher spawns a goroutine to fetch blocks from the dataset.
-func SpawnBlockFetcher(startingBlockNumber uint64, endingBlockNumber uint64, blockInfoCh chan BlockInfo) {
+func SpawnBlockFetcher(startingBlockNumber uint64, endingBlockNumber uint64, blockInfoCh chan BlockInfo, dataDir string) {
 	var wg1 sync.WaitGroup
 	wg1.Add(1)
 	go func() {
 		defer wg1.Done()
-		r := dataset.NewDatasetReader(dataset.DATASET_DIR, dataset.SEGMENT_SIZE)
+		r := dataset.NewDatasetReader(dataDir, dataset.SEGMENT_SIZE)
 		defer r.Close()
 		for bn := startingBlockNumber; bn <= endingBlockNumber; bn++ {
 			entries, err := r.GetBlock(uint32(bn))

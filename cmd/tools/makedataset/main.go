@@ -28,6 +28,7 @@ func main() {
 	// endBlock := flag.Int("endBlock", 21525890, "End block")
 	startBlock := flag.Int("startBlock", 20_600_000, "Start block")        //18908895
 	endBlock := flag.Int("endBlock", 20_600_000+(100_000*10), "End block") //100k = 2hr
+	dataDir := flag.String("dataDir", "/data/local/dataset/modified_accounts", "Path to dataset output")
 	testMode := flag.Bool("testMode", false, "Test mode")
 
 	flag.Parse()
@@ -39,14 +40,14 @@ func main() {
 	defer client.Close()
 
 	if *testMode {
-		sanityCheck(uint64(18900001), client)
+		sanityCheck(uint64(18900001), client, *dataDir)
 	} else {
-		fetchAndWriteDataset(uint64(*startBlock), uint64(*endBlock), client)
+		fetchAndWriteDataset(uint64(*startBlock), uint64(*endBlock), client, *dataDir)
 	}
 
 }
 
-func fetchAndWriteDataset(startBlock uint64, endBlock uint64, client *rpc.Client) {
+func fetchAndWriteDataset(startBlock uint64, endBlock uint64, client *rpc.Client, dataDir string) {
 	workers := runtime.NumCPU()
 	fmt.Println("Workers:", workers)
 	blockInfoCh := make(chan blockInfo, 1024)
@@ -58,7 +59,7 @@ func fetchAndWriteDataset(startBlock uint64, endBlock uint64, client *rpc.Client
 	spawnBlockFetcher(fetchWorkerCount, startBlock, endBlock, blockInfoCh, client)
 	spawnBlockOrderer(blockInfoCh, orderedBlockInfoCh, startBlock)
 
-	w := dataset.NewDatasetWriter(dataset.DATASET_DIR, dataset.SEGMENT_SIZE)
+	w := dataset.NewDatasetWriter(dataDir, dataset.SEGMENT_SIZE)
 	defer w.Close()
 
 	for blk := range orderedBlockInfoCh {
@@ -159,7 +160,7 @@ func spawnBlockOrderer(blockInfoCh chan blockInfo, orderedBlockInfoCh chan block
 	}()
 }
 
-func sanityCheck(testBlock uint64, client *rpc.Client) {
+func sanityCheck(testBlock uint64, client *rpc.Client, dataDir string) {
 	actualModifiedAccounts, err := account.GetModifiedAccountsByNumber(testBlock, client)
 	if err != nil {
 		panic(fmt.Errorf("failed to get modified accounts by number %d: %w", testBlock, err))
@@ -177,7 +178,7 @@ func sanityCheck(testBlock uint64, client *rpc.Client) {
 		})
 	}
 
-	r := dataset.NewDatasetReader(dataset.DATASET_DIR, dataset.SEGMENT_SIZE)
+	r := dataset.NewDatasetReader(dataDir, dataset.SEGMENT_SIZE)
 	defer r.Close()
 	fetchedEntries, err := r.GetBlock(uint32(testBlock))
 	if err != nil {

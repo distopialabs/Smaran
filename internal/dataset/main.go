@@ -1,6 +1,6 @@
 package dataset
 
-const DATASET_DIR = "data/modified_accounts"
+
 const SEGMENT_SIZE = 100_000
 
 type Entry struct {

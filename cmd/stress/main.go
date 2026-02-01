@@ -10,10 +10,11 @@ import (
 
 func main() {
 	numBlocks := flag.Int("n", 100, "Number of blocks to fetch")
+	dataDir := flag.String("dataDir", "/data/local/dataset/modified_accounts", "Path to dataset")
 	flag.Parse()
 	startBlock := 18_908_895
 	endBlock := startBlock + *numBlocks - 1
-	r := dataset.NewDatasetReader(dataset.DATASET_DIR, dataset.SEGMENT_SIZE)
+	r := dataset.NewDatasetReader(*dataDir, dataset.SEGMENT_SIZE)
 	start := time.Now()
 	for n := startBlock; n <= endBlock; n++ {
 		_, err := r.GetBlock(uint32(n))

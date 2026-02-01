@@ -28,10 +28,11 @@ func main() {
 	account := flag.String("account", "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", "Account address to query")
 	startBlock := flag.Uint64("startBlock", 20, "Starting block number (relative to data start)")
 	endBlock := flag.Uint64("endBlock", 119, "Ending block number (relative to data start)")
+	paramsDir := flag.String("paramsDir", "/data/local/dataset/polynomial", "Path to crypto params")
 	flag.Parse()
 
 	// Initialize precomputed data
-	precomputedData, err := SetupPrecomputedData()
+	precomputedData, err := SetupPrecomputedData(*paramsDir)
 	if err != nil {
 		log.Fatalf("failed to setup precomputed data: %v", err)
 	}
@@ -117,7 +118,7 @@ func main() {
 }
 
 // SetupPrecomputedData initializes SRS and precomputed polynomial data.
-func SetupPrecomputedData() (*config.PrecomputedData, error) {
+func SetupPrecomputedData(paramsDir string) (*config.PrecomputedData, error) {
 	fmt.Println("Setting up precomputed data...")
 	start := time.Now()
 	srs, err := kzg.SetupSRS(tree.SegmentTreeSize)
@@ -125,7 +126,7 @@ func SetupPrecomputedData() (*config.PrecomputedData, error) {
 		return nil, fmt.Errorf("failed to setup SRS: %w", err)
 	}
 
-	V, weights, weightCommits := kzg.LoadBarycentricData(tree.SegmentTreeSize, srs)
+	V, weights, weightCommits := kzg.LoadBarycentricData(tree.SegmentTreeSize, srs, paramsDir)
 	fmt.Printf("Precomputed data setup took %v\n", time.Since(start))
 	return &config.PrecomputedData{
 		V:             V,

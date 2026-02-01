@@ -51,6 +51,7 @@ func RunCommitBenchmark(cfg *config.Config, caches []*storage.Cache, dbs []*db.P
 		blockInfoCh,
 		&stopFetching,
 		metrics,
+		cfg.BlocksDataDir,
 	)
 
 	// Stop fetcher after benchmark duration
@@ -93,10 +94,11 @@ func spawnBlockFetcherBenchmark(
 	blockInfoCh chan BlockInfo,
 	stopFetching *atomic.Bool,
 	metrics *benchmark.MetricsCollector,
+	dataDir string,
 ) {
 	defer close(blockInfoCh)
 
-	r := dataset.NewDatasetReader(dataset.DATASET_DIR, dataset.SEGMENT_SIZE)
+	r := dataset.NewDatasetReader(dataDir, dataset.SEGMENT_SIZE)
 	defer r.Close()
 
 	blocksSubmitted := 0

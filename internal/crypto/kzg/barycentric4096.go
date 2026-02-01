@@ -16,7 +16,7 @@ const (
 	// domainSize      = 4096
 	// domainSize = 16
 	// DataDir = "polynomial/data"
-	DataDir = "data/polynomial"
+	// DataDir = "/data/local/dataset/polynomial"
 	// weightsFileName = "bary_weights_4096.bin"
 	// vanishFileName  = "vanishing_poly_4096.bin"
 	weightsFileNamePlaceholder       = "bary_weights_%d.bin"
@@ -152,14 +152,14 @@ func PrecomputeBarycentricCommits(domainSize int, wcPath string, srs *MultiSRS) 
 	return nil
 }
 
-func LoadBarycentricData(domainSize int, srs *MultiSRS) (V polynomial.Polynomial, weights []fr.Element, weightCommits []gnark_kzg.Digest) {
+func LoadBarycentricData(domainSize int, srs *MultiSRS, paramsDir string) (V polynomial.Polynomial, weights []fr.Element, weightCommits []gnark_kzg.Digest) {
 	weightsFileName := fmt.Sprintf(weightsFileNamePlaceholder, domainSize)
 	weightCommitsFileName := fmt.Sprintf(weightCommitsFileNamePlaceholder, domainSize)
 	vanishFileName := fmt.Sprintf(vanishFileNamePlaceholder, domainSize)
 
-	wPath := filepath.Join(DataDir, weightsFileName)
-	wcPath := filepath.Join(DataDir, weightCommitsFileName)
-	vPath := filepath.Join(DataDir, vanishFileName)
+	wPath := filepath.Join(paramsDir, weightsFileName)
+	wcPath := filepath.Join(paramsDir, weightCommitsFileName)
+	vPath := filepath.Join(paramsDir, vanishFileName)
 	// Skip if files already exist.
 
 	_, wErr := os.Stat(wPath)

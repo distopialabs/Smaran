@@ -9,7 +9,10 @@ import (
 
 // Config holds all configuration for the Samurai application.
 type Config struct {
-	Blocks    Blocks
+	Resume          bool
+	BlocksDataDir   string
+	CryptoParamsDir string
+	Blocks          Blocks
 	Workers   Workers
 	Database  Database
 	Cache     Cache

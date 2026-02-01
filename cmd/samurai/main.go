@@ -22,17 +22,17 @@ func main() {
 		defer ProfileCPU(flags.ProfilePath)()
 	}
 
+	// Build configuration from flags
+	cfg := BuildConfig(flags)
+
 	// Setup precomputed cryptographic data
-	precomputedData, err := SetupPrecomputedData()
+	precomputedData, err := SetupPrecomputedData(cfg)
 	if err != nil {
 		log.Fatalf("failed to setup precomputed data: %v", err)
 	}
 
-	// Build configuration from flags
-	cfg := BuildConfig(flags)
-
-	// Setup databases (clean on commit mode)
-	cleanOnCommit := flags.Mode == "commit"
+	// Setup databases (clean on commit mode if not resuming)
+	cleanOnCommit := flags.Mode == "commit" && !flags.Resume
 	dbs, pebbleDbs, err := SetupDatabases(cfg, cleanOnCommit)
 	if err != nil {
 		log.Fatalf("failed to setup databases: %v", err)
