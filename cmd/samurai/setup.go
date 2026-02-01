@@ -31,7 +31,7 @@ func BuildConfig(flags *Flags) *config.Config {
 	return &config.Config{
 		Resume:          flags.Resume,
 		BlocksDataDir:   "./data/blocks",
-		CryptoParamsDir: "./data/params",
+		CryptoParamsDir: filepath.Join(flags.DataDir, "params"),
 		Blocks: config.Blocks{
 			StartingBlockNumber: startBlock,
 			EndingBlockNumber:   endBlock,
