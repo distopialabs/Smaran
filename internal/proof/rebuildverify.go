@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"slices"
 	"strconv"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/nepal80m/samurai/internal/config"
@@ -25,8 +26,12 @@ func RebuildSegmentTreeForVerify(account common.Address, lxRequiredBatchIdxs map
 	// requiredTreeBatchesMap := make(map[string][]common.Hash)
 	requiredTreeBatchesMap := make(map[string]*tree.BatchTree)
 
+	start := time.Now()
+
 	for _, hbInfo := range balanceInfos {
+		// innerStart := time.Now()
 		AddLeafNode(accountInfo, hbInfo.Version, hbInfo.Hash())
+		// fmt.Println("Time taken to add leaf node for version", hbInfo.Version, time.Since(innerStart))
 
 		// check if this batch is required; if yes, add to the requiredTreeBatchesMap
 		lxBatchIdx := func(layer uint64) uint64 {
@@ -35,6 +40,7 @@ func RebuildSegmentTreeForVerify(account common.Address, lxRequiredBatchIdxs map
 			}
 			return hbInfo.Version / (L1BatchSize * utils.PowUint64(L2BatchSize, layer-1))
 		}
+		// innerStart = time.Now()
 		for layer := uint64(1); layer <= MaxLayer; layer++ {
 			if slices.Contains(lxRequiredBatchIdxs[layer], lxBatchIdx(layer)) {
 				treeBatch := accountInfo.CurrentLXBatchTree[layer-1]
@@ -42,7 +48,11 @@ func RebuildSegmentTreeForVerify(account common.Address, lxRequiredBatchIdxs map
 				requiredTreeBatchesMap[key] = &treeBatch
 			}
 		}
+		// fmt.Println("Time taken to check if batch is required", time.Since(innerStart))
 	}
+
+	fmt.Println("Time taken to add leaf nodes in segment tree", time.Since(start))
+	start = time.Now()
 	// fill in the commitHash part of the batch trees with commitments provided from prover.
 	for _, commit := range reqCommits {
 		if commit.layer < tree.MaxLayer {
@@ -66,6 +76,7 @@ func RebuildSegmentTreeForVerify(account common.Address, lxRequiredBatchIdxs map
 		}
 
 	}
+	fmt.Println("Time taken to fill in the commitHash part of the batch trees", time.Since(start))
 	return requiredTreeBatchesMap
 
 }

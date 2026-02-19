@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/nepal80m/samurai/internal/benchmark"
 	"github.com/nepal80m/samurai/internal/config"
 	"github.com/nepal80m/samurai/internal/db"
 	"github.com/nepal80m/samurai/internal/server"
@@ -14,15 +13,7 @@ import (
 func RunServe(port int, dbs []*db.SamuraiDB, precomputedData *config.PrecomputedData, cfg *config.Config) {
 	addr := fmt.Sprintf(":%d", port)
 
-	// Initialize metrics collector
-	metricsCollector, err := benchmark.NewMetricsCollector(cfg.Benchmark.OutputDir)
-	if err != nil {
-		log.Printf("Failed to create metrics collector: %v", err)
-	} else {
-		defer metricsCollector.Close()
-	}
-
-	proofServer := server.NewProofServer(dbs, precomputedData, cfg, metricsCollector)
+	proofServer := server.NewProofServer(dbs, precomputedData, cfg)
 
 	log.Printf("Starting Samurai gRPC server on port %d", port)
 	if err := server.ListenAndServe(addr, proofServer); err != nil {

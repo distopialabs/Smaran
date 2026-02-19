@@ -63,3 +63,27 @@ Address,UpdateCount
 0x000F3df6D732807Ef1319fB7B8bB8522d0Beac02,2099305
 0xffffFFFfFFffffffffffffffFfFFFfffFFFfFFfE,2099304
 0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D,2084319
+
+
+
+
+
+Proof Client Usage:
+Normal mode (with verification):
+```
+./bin/proofc --server localhost:50051 --account 0xC02... --start-block 20 --end-block 119
+```
+
+Benchmark Range mode:
+```
+./bin/proofc --server localhost:50051 --benchmark --mode range
+go run ./cmd/proofc/ -benchmark -mode range -range-size 50000 -verify
+go run ./cmd/proofc/ -benchmark -mode range -range-size 200000 -account 0xdAC17F958D2ee523a2206206994597C13D831ec7
+
+```
+
+Benchmark Concurrency mode:
+
+```
+go run ./cmd/proofc --benchmark --mode concurrency --levels 1,5,10,50,100 --accounts-file ./cmd/proofc/top_1k_accounts_200k_blocks.csv
+```

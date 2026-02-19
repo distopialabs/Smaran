@@ -4,10 +4,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"math"
 	"os"
+	"sync"
 	"time"
 
+	// Added safe import
 	fr "github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
 	gnark_kzg "github.com/consensys/gnark-crypto/ecc/bls12-381/kzg"
 	"github.com/ethereum/go-ethereum/common"
@@ -24,6 +27,16 @@ import (
 type BlockRange struct {
 	Start, End int
 }
+
+// Sentinel errors for BlockRangeToVersionRange
+var (
+	// ErrAccountNotFound is returned when the account does not exist in the database.
+	ErrAccountNotFound = errors.New("account not found")
+	// ErrBlockRangeOutOfBounds is returned when the query block range ends before the account's first recorded block.
+	ErrBlockRangeOutOfBounds = errors.New("block range outside account's recorded history")
+	// ErrVersionNotFound is returned when a version cannot be found for the given block number.
+	ErrVersionNotFound = errors.New("version not found for block")
+)
 
 // RangeCommitment represents a commitment required to prove a block range.
 type RangeCommitment struct {
@@ -66,36 +79,50 @@ func BinarySearchVersionByBlockNumber(blockNumber uint64, searchStart uint64, se
 }
 
 // BlockRangeToVersionRange converts a block range to a version range for a given account.
-func BlockRangeToVersionRange(account common.Address, startingBlock uint64, endingBlock uint64, config *config.Config, db *db.SamuraiDB) (uint64, uint64) {
+// It handles edge cases:
+// - If endingBlock < account's first recorded block: returns error (no data available)
+// - If startingBlock < account's first recorded block: clamps to version 0
+func BlockRangeToVersionRange(account common.Address, startingBlock uint64, endingBlock uint64, config *config.Config, db *db.SamuraiDB) (uint64, uint64, error) {
 
 	cbInfo, err := tree.GetCurrentBalanceInfo(account, db.StateDB)
 	if err != nil {
-		fmt.Printf("Error getting current balance info for account %s: %v\n", account.Hex(), err)
-		panic(err)
+		return 0, 0, fmt.Errorf("%w: %v", ErrAccountNotFound, err)
 	}
-	// for ending block
+
+	// Get the first recorded version to check bounds
+	firstHbInfo := tree.GetHistoricalBalance(account, 0, db.HistoryDB)
+
+	// Case 1: Ending block is before account's first recorded block - no data available
+	if endingBlock < firstHbInfo.StartBlock {
+		return 0, 0, fmt.Errorf("%w: query ends at block %d, first recorded block is %d", ErrBlockRangeOutOfBounds, endingBlock, firstHbInfo.StartBlock)
+	}
+
+	// Determine ending version
 	var endingVersion uint64
 	if endingBlock >= cbInfo.StartBlock {
 		endingVersion = cbInfo.Version
 	} else {
 		endingVersion, err = BinarySearchVersionByBlockNumber(endingBlock, 0, cbInfo.Version-1, account, db)
 		if err != nil {
-			panic(err)
+			return 0, 0, fmt.Errorf("%w: ending block %d: %v", ErrVersionNotFound, endingBlock, err)
 		}
 	}
 
-	// for starting block
+	// Determine starting version
 	var startingVersion uint64
-	if endingVersion == cbInfo.Version && startingBlock >= cbInfo.StartBlock {
+	// Case 2: Starting block is before account's first recorded block - clamp to version 0
+	if startingBlock < firstHbInfo.StartBlock {
+		startingVersion = 0
+	} else if endingVersion == cbInfo.Version && startingBlock >= cbInfo.StartBlock {
 		startingVersion = cbInfo.Version
 	} else {
-		startingVersion, err = BinarySearchVersionByBlockNumber(startingBlock, 0, endingVersion, account, db)
+		startingVersion, err = BinarySearchVersionByBlockNumber(startingBlock, 0, min(endingVersion, cbInfo.Version-1), account, db)
 		if err != nil {
-			panic(err)
+			return 0, 0, fmt.Errorf("%w: starting block %d: %v", ErrVersionNotFound, startingBlock, err)
 		}
 	}
-	return startingVersion, endingVersion
 
+	return startingVersion, endingVersion, nil
 }
 
 // GetNewProofRange generates range proofs for a given account and version range.
@@ -106,91 +133,116 @@ func GetNewProofRange(account common.Address, startingVersion, endingVersion uin
 	for i := uint64(1); i <= tree.MaxLayer; i++ {
 		lxRequiredBatchIdxs[i] = make([]uint64, 0)
 	}
-	fmt.Println("Required Commits:")
+	// fmt.Println("Required Commits:")
 	for _, reqCommit := range reqCommits {
 		lxRequiredBatchIdxs[uint64(reqCommit.layer)] = append(lxRequiredBatchIdxs[uint64(reqCommit.layer)], uint64(reqCommit.idx))
-		fmt.Printf("layer: %d, idx: %d\n", reqCommit.layer, reqCommit.idx)
+		// fmt.Printf("layer: %d, idx: %d\n", reqCommit.layer, reqCommit.idx)
 	}
 	start := time.Now()
 	requiredTreeBatchesMap, requiredHBInfos := RebuildSegmentTreeForProof(account, lxRequiredBatchIdxs, startingVersion, endingVersion, db, precomputedData)
-	fmt.Println("Time taken to rebuild segment tree", time.Since(start))
+	log.Printf("Time taken to rebuild segment tree: %dms", time.Since(start).Milliseconds())
 
-	allRangeProofs := make([]*RangeProof, 0)
-	for _, reqCommit := range reqCommits {
-		layer := reqCommit.layer
-		idx := reqCommit.idx
+	allRangeProofs := make([]*RangeProof, len(reqCommits))
+	var wg sync.WaitGroup
 
-		nodesToInterpolate := findNodesToInterpolate(reqCommit, true)
+	for i, reqCommit := range reqCommits {
+		wg.Add(1)
+		go func(i int, reqCommit RangeCommitment) {
+			defer wg.Done()
 
-		fmt.Printf("\n\nlayer: %d, idx: %d, \n", reqCommit.layer, reqCommit.idx)
-		if reqCommit.BlockRange == nil {
-			fmt.Printf("Commitment is not covering any range.\n")
-		} else {
-			fmt.Printf("sb: %d, eb: %d\n", reqCommit.BlockRange.Start, reqCommit.BlockRange.End)
-		}
-		fmt.Printf("dependentCommitments: %v\n", reqCommit.dependentCommitments)
-		fmt.Printf("nodesToInterpolate: %v\n", nodesToInterpolate)
+			layer := reqCommit.layer
+			idx := reqCommit.idx
 
-		treeKey := fmt.Sprintf("%d:%d", layer, idx)
-		batchTree := requiredTreeBatchesMap[treeKey]
+			nodesToInterpolate := findNodesToInterpolate(reqCommit, true)
 
-		xs1 := make([]int, len(batchTree))
-		ys1 := make([]fr.Element, len(batchTree))
-		for i, v := range batchTree {
-			xs1[i] = i
-			ys1[i] = polynomial.HashToFieldElement(v)
-		}
-		start = time.Now()
-		P := polynomial.Interpolate(xs1, ys1, precomputedData.V, precomputedData.Weights)
-		fmt.Println("Time taken to interpolate polynomial", time.Since(start))
+			// fmt.Printf("\n\nlayer: %d, idx: %d, \n", reqCommit.layer, reqCommit.idx)
+			// if reqCommit.BlockRange == nil {
+			// 	fmt.Printf("Commitment is not covering any range.\n")
+			// } else {
+			// 	fmt.Printf("sb: %d, eb: %d\n", reqCommit.BlockRange.Start, reqCommit.BlockRange.End)
+			// }
+			// fmt.Printf("dependentCommitments: %v\n", reqCommit.dependentCommitments)
+			// fmt.Printf("nodesToInterpolate: %v\n", nodesToInterpolate)
 
-		start = time.Now()
-		storedCommitment := tree.GetBatchCommitment(account, uint64(layer), uint64(idx), db.StateDB)
-		fmt.Println("Time taken to get stored commitment", time.Since(start))
+			treeKey := fmt.Sprintf("%d:%d", layer, idx)
+			batchTree := requiredTreeBatchesMap[treeKey]
 
-		Z := polynomial.VanishingPolynomial(nodesToInterpolate)
-		// ZCommit, _ := kzg.CommitG2(Z, precomputedData.SRS.G2Powers)
+			xs1 := make([]int, len(batchTree))
+			ys1 := make([]fr.Element, len(batchTree))
+			for i, v := range batchTree {
+				xs1[i] = i
+				ys1[i] = polynomial.HashToFieldElement(v)
+			}
+			P := polynomial.Interpolate(xs1, ys1, precomputedData.V, precomputedData.Weights)
 
-		xs := make([]fr.Element, len(nodesToInterpolate))
-		ys := make([]fr.Element, len(nodesToInterpolate))
-		for i, v := range nodesToInterpolate {
-			xs[i] = fr.NewElement(uint64(v))
-			ys[i] = polynomial.HashToFieldElement(batchTree[v])
-		}
+			storedCommitment := tree.GetBatchCommitment(account, uint64(layer), uint64(idx), db.StateDB)
 
-		I := kzg.Interpolate(xs, ys)
-		// ICommit, err := gnark_kzg.Commit(I, precomputedData.SRS.Inner.Pk)
-		// if err != nil {
-		// 	panic(err)
-		// }
-		diff := kzg.SubtractPolys(P, I)
-		Q := kzg.PolyDiv(diff, Z)
-		QCommit, err := gnark_kzg.Commit(Q, precomputedData.SRS.Inner.Pk)
-		if err != nil {
-			panic(err)
-		}
+			Z := polynomial.VanishingPolynomial(nodesToInterpolate)
+			// ZCommit, _ := kzg.CommitG2(Z, precomputedData.SRS.G2Powers)
 
-		// ok, err := PairingCheck(storedCommitment, QCommit, ICommit, ZCommit, precomputedData.SRS)
-		// if err != nil {
-		// 	panic(err)
-		// }
-		// if !ok {
-		// 	panic("pairing check failed.")
-		// } else {
-		// 	fmt.Println("Pairing check passed.✅")
-		// }
+			xs := make([]fr.Element, len(nodesToInterpolate))
+			ys := make([]fr.Element, len(nodesToInterpolate))
+			for i, v := range nodesToInterpolate {
+				xs[i] = fr.NewElement(uint64(v))
+				ys[i] = polynomial.HashToFieldElement(batchTree[v])
+			}
 
-		rangeProof := &RangeProof{
-			Idx:                  idx,
-			Layer:                layer,
-			Commitment:           storedCommitment,
-			Proof:                QCommit,
-			BlockRange:           reqCommit.BlockRange,
-			DependentCommitments: reqCommit.dependentCommitments,
-		}
+			I := kzg.Interpolate(xs, ys)
+			// ICommit, err := gnark_kzg.Commit(I, precomputedData.SRS.Inner.Pk)
+			// if err != nil {
+			// 	panic(err)
+			// }
+			diff := kzg.SubtractPolys(P, I)
+			Q := kzg.PolyDiv(diff, Z)
+			QCommit, err := gnark_kzg.Commit(Q, precomputedData.SRS.Inner.Pk)
+			if err != nil {
+				panic(err)
+			}
 
-		allRangeProofs = append(allRangeProofs, rangeProof)
+			// ok, err := PairingCheck(storedCommitment, QCommit, ICommit, ZCommit, precomputedData.SRS)
+			// if err != nil {
+			// 	panic(err)
+			// }
+			// if !ok {
+			// 	// Recompute commitment from P
+			// 	pCommit, _ := gnark_kzg.Commit(P, precomputedData.SRS.Inner.Pk)
+			// 	fmt.Printf("Stored Commitment: %x\n", storedCommitment.Bytes())
+			// 	fmt.Printf("Rebuilt Tree Commitment: %x\n", pCommit.Bytes())
+
+			// 	if !storedCommitment.Equal(&pCommit) {
+			// 		fmt.Printf("MISMATCH: Stored commitment does not match rebuilt tree commitment!\n")
+
+			// 		// Dump non-zero entries of the tree
+			// 		fmt.Println("--- BatchTree Dump (Non-Zero) ---")
+			// 		for i, h := range batchTree {
+			// 			if h != (common.Hash{}) {
+			// 				fmt.Printf("Idx %d: %s\n", i, h.Hex())
+			// 			}
+			// 		}
+			// 		fmt.Println("--- End Dump ---")
+
+			// 	} else {
+			// 		fmt.Printf("MATCH: Stored commitment matches rebuilt tree.\n")
+			// 	}
+
+			// 	panic("pairing check failed.")
+			// } else {
+			// 	fmt.Println("Pairing check passed.✅")
+			// }
+
+			rangeProof := &RangeProof{
+				Idx:                  idx,
+				Layer:                layer,
+				Commitment:           storedCommitment,
+				Proof:                QCommit,
+				BlockRange:           reqCommit.BlockRange,
+				DependentCommitments: reqCommit.dependentCommitments,
+			}
+
+			allRangeProofs[i] = rangeProof
+		}(i, reqCommit)
 	}
+	wg.Wait()
 	return allRangeProofs, requiredHBInfos
 }
 
@@ -405,5 +457,4 @@ func DumpNewProofsAndBalances(proofs []*RangeProof, balances []*tree.HistoricalB
 	json.NewEncoder(proofFile).Encode(proofs)
 	json.NewEncoder(balanceFile).Encode(balances)
 
-	fmt.Println("Proofs and balances dumped to storage/proofs/proofs.json and storage/proofs/historical_balances.json", len(balances))
 }

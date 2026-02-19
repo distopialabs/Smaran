@@ -3,6 +3,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -10,7 +11,6 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	proofpb "github.com/nepal80m/samurai/api/proto/v1"
-	"github.com/nepal80m/samurai/internal/benchmark"
 	"github.com/nepal80m/samurai/internal/config"
 	"github.com/nepal80m/samurai/internal/db"
 	"github.com/nepal80m/samurai/internal/proof"
@@ -23,19 +23,17 @@ import (
 // ProofServer implements the ProofServiceServer gRPC interface.
 type ProofServer struct {
 	proofpb.UnimplementedProofServiceServer
-	dbs              []*db.SamuraiDB
-	precomputedData  *config.PrecomputedData
-	cfg              *config.Config
-	metricsCollector *benchmark.MetricsCollector
+	dbs             []*db.SamuraiDB
+	precomputedData *config.PrecomputedData
+	cfg             *config.Config
 }
 
 // NewProofServer creates a new ProofServer instance.
-func NewProofServer(dbs []*db.SamuraiDB, precomputedData *config.PrecomputedData, cfg *config.Config, metricsCollector *benchmark.MetricsCollector) *ProofServer {
+func NewProofServer(dbs []*db.SamuraiDB, precomputedData *config.PrecomputedData, cfg *config.Config) *ProofServer {
 	return &ProofServer{
-		dbs:              dbs,
-		precomputedData:  precomputedData,
-		cfg:              cfg,
-		metricsCollector: metricsCollector,
+		dbs:             dbs,
+		precomputedData: precomputedData,
+		cfg:             cfg,
 	}
 }
 
@@ -66,7 +64,23 @@ func (s *ProofServer) GetProof(ctx context.Context, req *proofpb.GetProofRequest
 		addr.Hex(), startBlock, endBlock, shardIdx)
 
 	// Convert block range to version range
-	startingVersion, endingVersion := proof.BlockRangeToVersionRange(addr, startBlock, endBlock, s.cfg, sdb)
+	startingVersion, endingVersion, err := proof.BlockRangeToVersionRange(addr, startBlock, endBlock, s.cfg, sdb)
+	if err != nil {
+		log.Printf("Error converting block range [%d, %d] to version range for account %s: %v", startBlock, endBlock, addr.Hex(), err)
+		// Check error type using sentinel errors
+		if errors.Is(err, proof.ErrBlockRangeOutOfBounds) {
+			return nil, status.Errorf(codes.OutOfRange, "block range outside account's recorded history: %v", err)
+		}
+		if errors.Is(err, proof.ErrAccountNotFound) {
+			return nil, status.Errorf(codes.NotFound, "account not found: %v", err)
+		}
+		if errors.Is(err, proof.ErrVersionNotFound) {
+			return nil, status.Errorf(codes.Internal, "failed to find version: %v", err)
+		}
+		return nil, status.Errorf(codes.Internal, "failed to process block range: %v", err)
+	}
+
+	log.Printf("Resolved version range: startVersion=%d, endVersion=%d", startingVersion, endingVersion)
 
 	// Generate proofs
 	start := time.Now()
@@ -89,11 +103,6 @@ func (s *ProofServer) GetProof(ctx context.Context, req *proofpb.GetProofRequest
 
 	for i, bi := range balanceInfos {
 		resp.BalanceInfos[i] = balanceInfoToProto(bi)
-	}
-
-	// Record metrics
-	if s.metricsCollector != nil {
-		s.metricsCollector.RecordProofGeneration(req.Account, startBlock, endBlock, generationTimeMs, len(rangeProofs), len(balanceInfos))
 	}
 
 	return resp, nil

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"slices"
 	"strconv"
+	"time"
 
 	"github.com/nepal80m/samurai/internal/config"
 	"github.com/nepal80m/samurai/internal/db"
@@ -40,10 +41,22 @@ func RebuildSegmentTreeForProof(account common.Address, lxRequiredBatchIdxs map[
 	requiredTreeBatchesMap := make(map[string]tree.BatchTree)
 	requiredHBInfos := make([]*tree.HistoricalBalance, 0)
 
-	for version := uint64(0); version < cbInfo.Version; version++ {
-		hbInfo := tree.GetHistoricalBalance(account, version, db.HistoryDB)
+	start := time.Now()
 
+	dbFetchTime := time.Duration(0)
+	leadAddTime := time.Duration(0)
+	extraTime := time.Duration(0)
+
+	for version := uint64(0); version < cbInfo.Version; version++ {
+		fetchStart := time.Now()
+		hbInfo := tree.GetHistoricalBalance(account, version, db.HistoryDB)
+		dbFetchTime += time.Since(fetchStart)
+
+		leafAddStart := time.Now()
 		AddLeafNode(accountInfo, hbInfo.Version, hbInfo.Hash())
+		leadAddTime += time.Since(leafAddStart)
+
+		extraStart := time.Now()
 
 		// check if this historical balance info is required
 		if hbInfo.Version >= startingVersion && hbInfo.Version <= endingVersion {
@@ -64,18 +77,26 @@ func RebuildSegmentTreeForProof(account common.Address, lxRequiredBatchIdxs map[
 				requiredTreeBatchesMap[key] = treeBatch
 			}
 		}
+		extraTime += time.Since(extraStart)
 	}
+
+	fmt.Printf("Time taken to add leaf nodes to segment tree: %v with %v db fetch time and %v leaf add time and %v extra time\n", time.Since(start), dbFetchTime, leadAddTime, extraTime)
+
+	start = time.Now()
 
 	// fill in the commitHash part of the batch trees with stored commitments
 	for layer := uint64(2); layer <= MaxLayer; layer++ {
 		for _, batchIdx := range lxRequiredBatchIdxs[layer] {
 			key := fmt.Sprintf("%d:%d", layer, batchIdx)
 			treeBatch := requiredTreeBatchesMap[key]
-			fmt.Println("inserting commitment hashes for layer", layer, "batchIdx", batchIdx)
+			// fmt.Println("inserting commitment hashes for layer", layer, "batchIdx", batchIdx)
 			InsertCommitmentHashes(layer, batchIdx, &treeBatch, account, cbInfo.Version, db)
 			requiredTreeBatchesMap[key] = treeBatch
 		}
 	}
+
+	fmt.Println("Time taken to insert commitment hashes into segment tree: ", time.Since(start))
+
 	return requiredTreeBatchesMap, requiredHBInfos
 }
 
@@ -174,7 +195,7 @@ func InsertCommitmentHashes(layer uint64, batchIdx uint64, batchTree *tree.Batch
 	lxm1BatchIdxStart := batchIdx * L2BatchSize
 	lxm1BatchIdxEnd := min(lxm1BatchIdxStart+L2BatchSize-1, latestLxBatchIdx(layer-1))
 	for bIdx := lxm1BatchIdxStart; bIdx <= lxm1BatchIdxEnd; bIdx++ {
-		fmt.Println("fetching commitment for layer", layer-1, "batchIdx", bIdx, "latestLxBatchIdx", latestLxBatchIdx(layer-1))
+		// fmt.Println("fetching commitment for layer", layer-1, "batchIdx", bIdx, "latestLxBatchIdx", latestLxBatchIdx(layer-1))
 		commitment := tree.GetBatchCommitment(account, layer-1, bIdx, sdb.StateDB)
 		commitmentHash := tree.CommitmentToHash(commitment)
 		treeIdx := bIdx - lxm1BatchIdxStart + (2 * L2BatchSize) - 1
