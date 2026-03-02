@@ -6,6 +6,7 @@ import (
 	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/nepal80m/samurai/internal/crypto/hash"
 )
 
 // CurrentBalance represents the current balance state for an account.
@@ -77,12 +78,12 @@ func (hb *HistoricalBalance) Bytes() []byte {
 
 // Hash returns the Poseidon hash of the CurrentBalance.
 func (cb *CurrentBalance) Hash() common.Hash {
-	return BytesToPoseidonHash(cb.Bytes())
+	return hash.BytesToPoseidonHash(cb.Bytes())
 }
 
 // Hash returns the Poseidon hash of the HistoricalBalance.
 func (hb *HistoricalBalance) Hash() common.Hash {
-	return BytesToPoseidonHash(hb.Bytes())
+	return hash.BytesToPoseidonHash(hb.Bytes())
 }
 
 // DeepCopy creates a deep copy of CurrentBalance.

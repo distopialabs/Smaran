@@ -16,6 +16,7 @@ import (
 	gnark_kzg "github.com/consensys/gnark-crypto/ecc/bls12-381/kzg"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/nepal80m/samurai/internal/config"
+	"github.com/nepal80m/samurai/internal/crypto/hash"
 	"github.com/nepal80m/samurai/internal/crypto/kzg"
 	"github.com/nepal80m/samurai/internal/crypto/polynomial"
 	"github.com/nepal80m/samurai/internal/tree"
@@ -361,7 +362,7 @@ func RebuildPartialSegmentTree(startingBlock, endingBlock int, reqCommits []Rang
 		if commit.layer < tree.MaxLayer {
 			proofKey := fmt.Sprintf("%d:%d", commit.layer, commit.idx)
 			commitment := proofHashMap[proofKey].Commitment
-			commitmentHash := tree.CommitmentToHash(commitment)
+			commitmentHash := hash.CommitmentToHash(commitment)
 			// commitmentBytes := commitment.Bytes()
 			// commitmentHash := common.BytesToHash(commitmentBytes[:])
 
@@ -605,7 +606,7 @@ func (segmentTree *RebuiltLayeredSegmentTree) UpdateLayerX(idx int, val common.H
 			if (lChild == common.Hash{} || rChild == common.Hash{}) {
 				break
 			}
-			batchTree[parentIdx] = tree.BytesToPoseidonHash(lChild.Bytes(), rChild.Bytes())
+			batchTree[parentIdx] = hash.BytesToPoseidonHash(lChild.Bytes(), rChild.Bytes())
 
 			updatedIndices = append(updatedIndices, int(parentIdx))
 			idx = int(parentIdx)

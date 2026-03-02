@@ -10,6 +10,7 @@ import (
 	fr "github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
 	gnark_kzg "github.com/consensys/gnark-crypto/ecc/bls12-381/kzg"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/nepal80m/samurai/internal/crypto/hash"
 	"github.com/nepal80m/samurai/internal/crypto/kzg"
 	"github.com/nepal80m/samurai/internal/crypto/polynomial"
 	"github.com/nepal80m/samurai/internal/tree"
@@ -157,7 +158,7 @@ func (segmentTree *ProofSegmentTree) UpdateLayerX(idx int, val common.Hash, laye
 			if (lChild == common.Hash{} || rChild == common.Hash{}) {
 				break
 			}
-			batchTree[parentIdx] = tree.BytesToPoseidonHash(lChild.Bytes(), rChild.Bytes())
+			batchTree[parentIdx] = hash.BytesToPoseidonHash(lChild.Bytes(), rChild.Bytes())
 
 			updatedIndices = append(updatedIndices, int(parentIdx))
 			idx = int(parentIdx)
