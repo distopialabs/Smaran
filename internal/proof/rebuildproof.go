@@ -65,19 +65,20 @@ func RebuildSegmentTreeForProof(account common.Address, lxRequiredBatchIdxs map[
 		}
 
 		// check if this batch is required; if yes, add to the requiredTreeBatchesMap
-		lxBatchIdx := func(layer uint64) uint64 {
-			if layer == 0 || layer > MaxLayer {
-				panic("layer" + strconv.Itoa(int(layer)) + " is not supported")
-			}
-			return hbInfo.Version / (L1BatchSize * utils.PowUint64(L2BatchSize, layer-1))
-		}
+		nextVersion := version + 1
 		for layer := uint64(1); layer <= MaxLayer; layer++ {
-			if slices.Contains(lxRequiredBatchIdxs[layer], lxBatchIdx(layer)) {
-				treeBatch := accountInfo.CurrentLXBatchTree[layer-1]
-				key := fmt.Sprintf("%d:%d", layer, lxBatchIdx(layer))
-				requiredTreeBatchesMap[key] = treeBatch
+			batchSize := L1BatchSize * utils.PowUint64(L2BatchSize, layer-1)
+			currentBatchIdx := version / batchSize
+			nextBatchIdx := nextVersion / batchSize
+			// copy only at the last version of this batch, or if this is the last version of the loop
+			isLastInBatch := nextVersion >= cbInfo.Version || (nextBatchIdx != currentBatchIdx)
+			if isLastInBatch && slices.Contains(lxRequiredBatchIdxs[layer], currentBatchIdx) {
+				key := fmt.Sprintf("%d:%d", layer, currentBatchIdx)
+				requiredTreeBatchesMap[key] = accountInfo.CurrentLXBatchTree[layer-1]
 			}
+
 		}
+
 		extraTime += time.Since(extraStart)
 	}
 
@@ -175,7 +176,8 @@ func UpdateLXTree(accountInfo *tree.AccountInfo, idx uint64, val common.Hash, la
 			if (lChild == common.Hash{} || rChild == common.Hash{}) {
 				break
 			}
-			batchTree[parentIdx] = hash.BytesToPoseidonHash(lChild.Bytes(), rChild.Bytes())
+			// batchTree[parentIdx] = hash.BytesToPoseidonHash(lChild.Bytes(), rChild.Bytes())
+			batchTree[parentIdx] = hash.BytesToSHA256Hash(lChild.Bytes(), rChild.Bytes())
 
 			idx = parentIdx
 		}
@@ -198,7 +200,8 @@ func InsertCommitmentHashes(layer uint64, batchIdx uint64, batchTree *tree.Batch
 	for bIdx := lxm1BatchIdxStart; bIdx <= lxm1BatchIdxEnd; bIdx++ {
 		// fmt.Println("fetching commitment for layer", layer-1, "batchIdx", bIdx, "latestLxBatchIdx", latestLxBatchIdx(layer-1))
 		commitment := tree.GetBatchCommitment(account, layer-1, bIdx, sdb.StateDB)
-		commitmentHash := hash.CommitmentToHash(commitment)
+		// commitmentHash := hash.CommitmentToHash(commitment)
+		commitmentHash := hash.CommitmentToSHA256Hash(commitment)
 		treeIdx := bIdx - lxm1BatchIdxStart + (2 * L2BatchSize) - 1
 		batchTree[treeIdx] = commitmentHash
 	}

@@ -1,8 +1,6 @@
 package polynomial
 
 import (
-	"fmt"
-
 	fr "github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
 	"github.com/consensys/gnark-crypto/ecc/bls12-381/fr/polynomial"
 	"github.com/ethereum/go-ethereum/common"
@@ -17,12 +15,9 @@ func HashToFieldElement(hash common.Hash) fr.Element {
 	// element.SetBytes(hash.Bytes())
 	// return element
 	var e fr.Element
-	err := e.SetBytesCanonical(hash[:])
-	if err != nil {
-		fmt.Println("Error in HashToFr:", err)
-
-		panic(err)
-	}
+	// Using SetBytes instead of SetBytesCanonical to handle SHA256 outputs
+	// that may exceed the Fr modulus (~255 bits). SetBytes auto-reduces mod p.
+	e.SetBytes(hash[:])
 	return e
 }
 
@@ -35,10 +30,8 @@ func FieldElementToHash(element fr.Element) common.Hash {
 
 func HashToFr(h common.Hash) fr.Element {
 	var e fr.Element
-	err := e.SetBytesCanonical(h[:])
-	if err != nil {
-		panic(err)
-	}
+	// Using SetBytes instead of SetBytesCanonical for SHA256 compatibility
+	e.SetBytes(h[:])
 	return e
 }
 

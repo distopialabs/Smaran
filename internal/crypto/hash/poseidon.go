@@ -2,6 +2,7 @@
 package hash
 
 import (
+	"crypto/sha256"
 	"sync"
 
 	"github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
@@ -69,5 +70,23 @@ func BytesToPoseidonHash(b ...[]byte) common.Hash {
 	for _, bytes := range b {
 		h.Write(bytes)
 	}
+	return common.BytesToHash(h.Sum(nil))
+}
+
+// BytesToSHA256Hash computes a SHA256 hash over the concatenation of the given byte slices.
+func BytesToSHA256Hash(b ...[]byte) common.Hash {
+	h := sha256.New()
+	for _, bytes := range b {
+		h.Write(bytes)
+	}
+	return common.BytesToHash(h.Sum(nil))
+}
+
+// CommitmentToSHA256Hash converts a KZG commitment (G1Affine point) to a 32-byte hash
+// using SHA256 over the X and Y coordinates.
+func CommitmentToSHA256Hash(c gnark_kzg.Digest) common.Hash {
+	h := sha256.New()
+	h.Write(c.X.Marshal())
+	h.Write(c.Y.Marshal())
 	return common.BytesToHash(h.Sum(nil))
 }

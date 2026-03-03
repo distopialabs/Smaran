@@ -146,9 +146,11 @@ func (accountInfo *AccountInfo) Update(blockNumber uint64, balance *big.Int, sdb
 
 // CalculateFinalCommitment computes the final commitment hash.
 func (accountInfo *AccountInfo) CalculateFinalCommitment() common.Hash {
-	treeCommitHash := hash.CommitmentToHash(accountInfo.CurrentLXBatchCommitment[MaxLayer-1])
+	// treeCommitHash := hash.CommitmentToHash(accountInfo.CurrentLXBatchCommitment[MaxLayer-1])
+	treeCommitHash := hash.CommitmentToSHA256Hash(accountInfo.CurrentLXBatchCommitment[MaxLayer-1])
 	cbHash := accountInfo.CurrentBalanceInfo.Hash()
-	commitmentHash := hash.BytesToPoseidonHash(cbHash.Bytes(), treeCommitHash.Bytes())
+	// commitmentHash := hash.BytesToPoseidonHash(cbHash.Bytes(), treeCommitHash.Bytes())
+	commitmentHash := hash.BytesToSHA256Hash(cbHash.Bytes(), treeCommitHash.Bytes())
 	return commitmentHash
 }
 
@@ -189,7 +191,8 @@ func (accountInfo *AccountInfo) AddLeafNode(leafNodeIdx uint64, leafNodeHash com
 	lXm1RootHash := leafNodeHash
 	for layer := uint64(1); layer <= MaxLayer; layer++ {
 		lxCommit := accountInfo.UpdateLXTree(lxBatchLeafNodeOffsetIdx(layer), lXm1RootHash, lXm1CommitHash, layer)
-		lxCommitHash := hash.CommitmentToHash(lxCommit)
+		// lxCommitHash := hash.CommitmentToHash(lxCommit)
+		lxCommitHash := hash.CommitmentToSHA256Hash(lxCommit)
 		lxRootHash := accountInfo.CurrentLXBatchTree[layer-1][0]
 		lXm1CommitHash = lxCommitHash
 		lXm1RootHash = lxRootHash
@@ -239,7 +242,8 @@ func (accountInfo *AccountInfo) UpdateLXTree(idx uint64, val common.Hash, lXm1Co
 			if (lChild == common.Hash{} || rChild == common.Hash{}) {
 				break
 			}
-			tree[parentIdx] = hash.BytesToPoseidonHash(lChild.Bytes(), rChild.Bytes())
+			// tree[parentIdx] = hash.BytesToPoseidonHash(lChild.Bytes(), rChild.Bytes())
+			tree[parentIdx] = hash.BytesToSHA256Hash(lChild.Bytes(), rChild.Bytes())
 
 			chunkIdx := int(parentIdx / ChunkSize)
 			accountInfo.DirtyChunks[layer-1][chunkIdx] = true

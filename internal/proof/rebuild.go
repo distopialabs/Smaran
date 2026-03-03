@@ -158,7 +158,8 @@ func (segmentTree *ProofSegmentTree) UpdateLayerX(idx int, val common.Hash, laye
 			if (lChild == common.Hash{} || rChild == common.Hash{}) {
 				break
 			}
-			batchTree[parentIdx] = hash.BytesToPoseidonHash(lChild.Bytes(), rChild.Bytes())
+			// batchTree[parentIdx] = hash.BytesToPoseidonHash(lChild.Bytes(), rChild.Bytes())
+			batchTree[parentIdx] = hash.BytesToSHA256Hash(lChild.Bytes(), rChild.Bytes())
 
 			updatedIndices = append(updatedIndices, int(parentIdx))
 			idx = int(parentIdx)

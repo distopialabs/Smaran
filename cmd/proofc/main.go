@@ -50,7 +50,8 @@ var defaultRanges = []struct {
 
 func main() {
 	// Common flags
-	serverAddr := flag.String("server", "10.10.1.1:50051", "gRPC server address")
+	// serverAddr := flag.String("server", "10.10.1.1:50051", "gRPC server address")
+	serverAddr := flag.String("server", "localhost:50051", "gRPC server address")
 	account := flag.String("account", "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", "Account address to query")
 	startBlock := flag.Uint64("start-block", 20, "Starting block number (relative to data start)")
 	endBlock := flag.Uint64("end-block", 119, "Ending block number (relative to data start)")

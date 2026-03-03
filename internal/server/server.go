@@ -84,7 +84,7 @@ func (s *ProofServer) GetProof(ctx context.Context, req *proofpb.GetProofRequest
 
 	// Generate proofs
 	start := time.Now()
-	rangeProofs, balanceInfos := proof.GetNewProofRange(addr, startingVersion, endingVersion, s.precomputedData, s.cfg.Blocks.StartingBlockNumber, sdb)
+	rangeProofs, balanceInfos := proof.GetNewProofRange(addr, startingVersion, endingVersion, s.precomputedData, sdb)
 	generationTimeMs := time.Since(start).Milliseconds()
 
 	log.Printf("Generated %d range proofs and %d balance infos in %dms",

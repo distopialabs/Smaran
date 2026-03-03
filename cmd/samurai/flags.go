@@ -65,7 +65,7 @@ func ParseFlags() *Flags {
 
 	// Query flags for proof/verify modes
 	flag.IntVar(&f.QueryStartBlock, "queryStartBlock", int(StartBlock)+20, "Start block for query")
-	flag.IntVar(&f.QueryEndBlock, "queryEndBlock", int(StartBlock)+20-1+100, "End block for query")
+	flag.IntVar(&f.QueryEndBlock, "queryEndBlock", int(StartBlock)+20-1+1000, "End block for query")
 	flag.StringVar(&f.QueryAccount, "queryAccount", "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", "Account to query")
 
 	// Server flags

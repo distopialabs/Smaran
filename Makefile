@@ -14,12 +14,18 @@ build:
 clean:
 	rm -rf $(BUILD_DIR)
 
+commit:
+	nohup ./$(BUILD_DIR)/samurai --datadir /data/local/samurai --n 516996 --resume > /data/local/run.log 2>&1 &
+
+serve:
+	./$(BUILD_DIR)/samurai --datadir /data/local/samurai --mode serve
+
 # Proof server benchmark targets
 bench-range: build
-	./$(BUILD_DIR)/proofc --benchmark --mode range --output-dir ./benchmark_output
+	./$(BUILD_DIR)/proofc --benchmark --mode range --output-dir ./benchmark_output --datadir /data/local/samurai
 
 bench-range-verify: build
-	./$(BUILD_DIR)/proofc --benchmark --mode range --verify --params-dir ./data/params --output-dir ./benchmark_output
+	./$(BUILD_DIR)/proofc --benchmark --mode range --verify --params-dir ./data/params --output-dir ./benchmark_output --datadir /data/local/samurai
 
 bench-concurrency: build
 	./$(BUILD_DIR)/proofc --benchmark --mode concurrency --output-dir ./benchmark_output

@@ -29,7 +29,7 @@ func RunProof(addr common.Address, queryStartBlock uint64, queryEndBlock uint64,
 	fmt.Printf("Resolved version range: startVersion=%d, endVersion=%d\n", startingVersion, endingVersion)
 
 	start := time.Now()
-	rangeProofs, balanceInfos := proof.GetNewProofRange(addr, startingVersion, endingVersion, precomputedData, cfg.Blocks.StartingBlockNumber, db)
+	rangeProofs, balanceInfos := proof.GetNewProofRange(addr, startingVersion, endingVersion, precomputedData, db)
 	fmt.Println("Time taken to generate range proofs", time.Since(start))
 
 	fmt.Println("Range proofs", rangeProofs)

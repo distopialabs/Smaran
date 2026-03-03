@@ -62,7 +62,8 @@ func RebuildSegmentTreeForVerify(account common.Address, lxRequiredBatchIdxs map
 				panic(fmt.Sprintf("Required proof for key %s not found in provided proofs", proofKey))
 			}
 			commitment := proofHashMap[proofKey].Commitment
-			commitmentHash := hash.CommitmentToHash(commitment)
+			// commitmentHash := hash.CommitmentToHash(commitment)
+			commitmentHash := hash.CommitmentToSHA256Hash(commitment)
 
 			parentLayer := commit.layer + 1
 			parentBatchIdx := commit.idx / L2BatchSize
