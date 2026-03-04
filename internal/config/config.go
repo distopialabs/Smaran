@@ -52,11 +52,10 @@ type Database struct {
 	StoragePath  string
 }
 
-// Cache configures the Ristretto in-memory cache.
+// Cache configures the LRU in-memory cache.
 type Cache struct {
-	NumCounters   uint64
-	MaxCost       uint64
-	EnableMetrics bool // Enable Ristretto metrics collection (has some overhead)
+	Size          int
+	EnableMetrics bool
 }
 
 // Queue configures channel buffer sizes for the processing pipeline.

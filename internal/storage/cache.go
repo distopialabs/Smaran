@@ -2,18 +2,16 @@
 package storage
 
 import (
-	"log"
-
-	ristretto "github.com/dgraph-io/ristretto/v2"
 	"github.com/ethereum/go-ethereum/common"
+	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/nepal80m/samurai/internal/config"
 	"github.com/nepal80m/samurai/internal/db"
 	"github.com/nepal80m/samurai/internal/tree"
 )
 
-// Cache wraps a Ristretto cache with database persistence.
+// Cache wraps an LRU cache with database persistence.
 type Cache struct {
-	C               *ristretto.Cache[[]byte, *tree.AccountInfo]
+	C               *lru.Cache[common.Address, *tree.AccountInfo]
 	DB              *db.SamuraiDB
 	PrecomputedData *config.PrecomputedData
 }
@@ -25,15 +23,11 @@ func NewCache(sdb *db.SamuraiDB, cfg *config.Cache, precomputedData *config.Prec
 		PrecomputedData: precomputedData,
 	}
 
-	rc, err := ristretto.NewCache(&ristretto.Config[[]byte, *tree.AccountInfo]{
-		NumCounters: int64(cfg.NumCounters),
-		MaxCost:     int64(cfg.MaxCost),
-		BufferItems: 64,
-		Metrics:     cfg.EnableMetrics,
-		OnExit: func(val *tree.AccountInfo) {
-			val.Save(sdb)
-		},
-	})
+	onEvicted := func(k common.Address, v *tree.AccountInfo) {
+		v.Save(sdb)
+	}
+
+	rc, err := lru.NewWithEvict(cfg.Size, onEvicted)
 	if err != nil {
 		return nil, err
 	}
@@ -41,17 +35,12 @@ func NewCache(sdb *db.SamuraiDB, cfg *config.Cache, precomputedData *config.Prec
 	return cache, nil
 }
 
-// Metrics returns the underlying Ristretto cache metrics.
-func (c *Cache) Metrics() *ristretto.Metrics {
-	return c.C.Metrics
-}
-
 // Update retrieves or creates an AccountInfo, applies mutations, and stores in cache.
 func (c *Cache) Update(k common.Address, initFn func(common.Address) *tree.AccountInfo, loadFn func(common.Address, *db.SamuraiDB) *tree.AccountInfo, mutate func(*tree.AccountInfo, *db.SamuraiDB)) (*tree.AccountInfo, error) {
 	var ai *tree.AccountInfo
 	found := false
 
-	if v, ok := c.C.Get(k[:]); ok {
+	if v, ok := c.C.Get(k); ok {
 		ai = v
 		found = true
 	} else {
@@ -63,11 +52,7 @@ func (c *Cache) Update(k common.Address, initFn func(common.Address) *tree.Accou
 
 	mutate(ai, c.DB)
 	if !found {
-		admitted := c.C.Set(k[:], ai, 525312)
-		if !admitted {
-			log.Fatal("❌Cache set rejected")
-		}
-		c.C.Wait() // Ensure the item is actually stored before returning
+		c.C.Add(k, ai)
 	}
 
 	return ai, nil
@@ -75,8 +60,6 @@ func (c *Cache) Update(k common.Address, initFn func(common.Address) *tree.Accou
 
 // Close closes the cache, flushing all items to the database first.
 func (c *Cache) Close() {
-	// Clear() triggers OnExit for all stored items, persisting them to DB.
-	// This is necessary because Close() alone doesn't call OnExit for remaining items.
-	c.C.Clear()
-	c.C.Close()
+	// Purge invokes the registered onEvicted callback synchronously for all items
+	c.C.Purge()
 }

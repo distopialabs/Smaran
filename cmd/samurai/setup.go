@@ -49,8 +49,7 @@ func BuildConfig(flags *Flags) *config.Config {
 			StoragePath:  filepath.Join(flags.DataDir, "db"),
 		},
 		Cache: config.Cache{
-			NumCounters:   2_097_152,
-			MaxCost:       1_073_741_824,
+			Size:          2048,
 			EnableMetrics: flags.BenchCacheMetrics,
 		},
 		Queue: config.Queue{
@@ -104,30 +103,55 @@ func SetupDatabases(cfg *config.Config, cleanOnCommit bool) ([]*db.SamuraiDB, []
 			}
 		}
 
-		pebbleOpts := &pebble.Options{
-			MemTableSize:              268435456, // 256MB
+		sharedCache := pebble.NewCache(int64(cfg.Database.CacheSize))
+
+		// StateDB receives tiny struct updates, limit MemTable to 16MB
+		stateDBOpts := &pebble.Options{
+			MemTableSize:              16 << 20,
 			L0CompactionThreshold:     2,
 			L0CompactionFileThreshold: 2000,
 			LBaseMaxBytes:             2147483648,              // 2GB
 			MaxConcurrentCompactions:  func() int { return 4 }, // 4 threads per DB
 			DisableWAL:                cfg.Database.DisableWAL,
-			Cache:                     pebble.NewCache(int64(cfg.Database.CacheSize)),
+			Cache:                     sharedCache,
+		}
+
+		// TreeDB receives massive 4KB Merkle updates, allocate the configured 64MB MemTable
+		treeDBOpts := &pebble.Options{
+			MemTableSize:              cfg.Database.MemTableSize,
+			L0CompactionThreshold:     2,
+			L0CompactionFileThreshold: 2000,
+			LBaseMaxBytes:             2147483648,              // 2GB
+			MaxConcurrentCompactions:  func() int { return 4 }, // 4 threads per DB
+			DisableWAL:                cfg.Database.DisableWAL,
+			Cache:                     sharedCache,
+		}
+
+		// HistoryDB receives steady append-only updates, limit MemTable to 32MB
+		historyDBOpts := &pebble.Options{
+			MemTableSize:              32 << 20,
+			L0CompactionThreshold:     2,
+			L0CompactionFileThreshold: 2000,
+			LBaseMaxBytes:             2147483648,              // 2GB
+			MaxConcurrentCompactions:  func() int { return 4 }, // 4 threads per DB
+			DisableWAL:                cfg.Database.DisableWAL,
+			Cache:                     sharedCache,
 		}
 
 		// Create StateDB
-		stateDB, err := db.NewPebbleDB(stateDBPath, pebbleOpts)
+		stateDB, err := db.NewPebbleDB(stateDBPath, stateDBOpts)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to create StateDB %s: %w", stateDBPath, err)
 		}
 
 		// Create TreeDB
-		treeDB, err := db.NewPebbleDB(treeDBPath, pebbleOpts)
+		treeDB, err := db.NewPebbleDB(treeDBPath, treeDBOpts)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to create TreeDB %s: %w", treeDBPath, err)
 		}
 
 		// Create HistoryDB
-		historyDB, err := db.NewPebbleDB(historyDBPath, pebbleOpts)
+		historyDB, err := db.NewPebbleDB(historyDBPath, historyDBOpts)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to create HistoryDB %s: %w", historyDBPath, err)
 		}
