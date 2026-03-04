@@ -31,8 +31,8 @@ func main() {
 		log.Fatalf("failed to setup precomputed data: %v", err)
 	}
 
-	// Setup databases (clean on commit mode if not resuming)
-	cleanOnCommit := flags.Mode == "commit" && !flags.Resume
+	// Setup databases (clean only if explicitly requested with --clean)
+	cleanOnCommit := flags.Mode == "commit" && cfg.Clean
 	dbs, pebbleDbs, err := SetupDatabases(cfg, cleanOnCommit)
 	if err != nil {
 		log.Fatalf("failed to setup databases: %v", err)

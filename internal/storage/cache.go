@@ -49,9 +49,11 @@ func (c *Cache) Metrics() *ristretto.Metrics {
 // Update retrieves or creates an AccountInfo, applies mutations, and stores in cache.
 func (c *Cache) Update(k common.Address, initFn func(common.Address) *tree.AccountInfo, loadFn func(common.Address, *db.SamuraiDB) *tree.AccountInfo, mutate func(*tree.AccountInfo, *db.SamuraiDB)) (*tree.AccountInfo, error) {
 	var ai *tree.AccountInfo
+	found := false
 
 	if v, ok := c.C.Get(k[:]); ok {
 		ai = v
+		found = true
 	} else {
 		ai = loadFn(k, c.DB)
 		if ai == nil {
@@ -60,11 +62,13 @@ func (c *Cache) Update(k common.Address, initFn func(common.Address) *tree.Accou
 	}
 
 	mutate(ai, c.DB)
-	admitted := c.C.Set(k[:], ai, 525312)
-	if !admitted {
-		log.Fatal("❌Cache set rejected")
+	if !found {
+		admitted := c.C.Set(k[:], ai, 525312)
+		if !admitted {
+			log.Fatal("❌Cache set rejected")
+		}
+		c.C.Wait() // Ensure the item is actually stored before returning
 	}
-	c.C.Wait() // Ensure the item is actually stored before returning
 
 	return ai, nil
 }

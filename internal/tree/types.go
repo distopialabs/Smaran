@@ -142,6 +142,11 @@ func (accountInfo *AccountInfo) Update(blockNumber uint64, balance *big.Int, sdb
 	// Update historical balance and segment tree
 	hbHash := hb.Hash()
 	accountInfo.AddLeafNode(hb.Version, hbHash)
+
+	if cb.Version > 0 && cb.Version%L1BatchSize == 0 {
+		// explicitly persist the finalized commitment before the *next* batch boundary resets it in memory
+		StoreLXBatchCommitments(accountInfo.Account, accountInfo.CurrentBalanceInfo.Version, accountInfo.CurrentLXBatchCommitment, sdb.StateDB)
+	}
 }
 
 // CalculateFinalCommitment computes the final commitment hash.

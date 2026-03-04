@@ -9,15 +9,15 @@ import (
 
 // Config holds all configuration for the Samurai application.
 type Config struct {
-	Resume          bool
+	Clean           bool
 	BlocksDataDir   string
 	CryptoParamsDir string
 	Blocks          Blocks
-	Workers   Workers
-	Database  Database
-	Cache     Cache
-	Queue     Queue
-	Benchmark Benchmark
+	Workers         Workers
+	Database        Database
+	Cache           Cache
+	Queue           Queue
+	Benchmark       Benchmark
 }
 
 // Benchmark holds configuration for benchmark mode.

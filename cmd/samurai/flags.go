@@ -20,8 +20,8 @@ type Flags struct {
 	// Data Directory
 	DataDir string
 
-	// Resume
-	Resume bool
+	// Clean start (wipe existing DB and start fresh)
+	Clean bool
 
 	// Benchmark mode
 	Bench             bool
@@ -71,8 +71,8 @@ func ParseFlags() *Flags {
 	// Server flags
 	flag.IntVar(&f.ServerPort, "port", 50051, "gRPC server port")
 
-	// Resume flag
-	flag.BoolVar(&f.Resume, "resume", false, "Resume from existing database")
+	// Clean flag (default: false, so resume is the default behavior)
+	flag.BoolVar(&f.Clean, "clean", false, "Wipe existing database and start fresh")
 
 	flag.Parse()
 

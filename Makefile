@@ -15,7 +15,7 @@ clean:
 	rm -rf $(BUILD_DIR)
 
 commit:
-	nohup ./$(BUILD_DIR)/samurai --datadir /data/local/samurai --n 516996 --resume > /data/local/run.log 2>&1 &
+	nohup ./$(BUILD_DIR)/samurai --datadir /data/local/samurai --n 1 > /data/local/run.log 2>&1 &
 
 serve:
 	./$(BUILD_DIR)/samurai --datadir /data/local/samurai --mode serve

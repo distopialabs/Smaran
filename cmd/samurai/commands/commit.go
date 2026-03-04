@@ -39,7 +39,7 @@ func RunCommit(cfg *config.Config, caches []*storage.Cache) {
 	totalStart := time.Now()
 
 	// Resume logic
-	if cfg.Resume {
+	if !cfg.Clean {
 		meta, err := storage.LoadMetadata(cfg.Database.StoragePath)
 		if err != nil {
 			fmt.Println("⚠️ Failed to load metadata:", err)

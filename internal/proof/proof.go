@@ -199,6 +199,13 @@ func GetNewProofRange(account common.Address, startingVersion, endingVersion uin
 			panic(err)
 		}
 		if needVerify {
+			// Always compare stored vs rebuilt commitment
+			pCommit, _ := gnark_kzg.Commit(P, precomputedData.SRS.Inner.Pk)
+			storedBytes := storedCommitment.Bytes()
+			rebuiltBytes := pCommit.Bytes()
+			commitMatch := storedCommitment.Equal(&pCommit)
+			fmt.Printf("DEBUG layer %d idx %d: stored=%x rebuilt=%x match=%v\n", layer, idx, storedBytes[:8], rebuiltBytes[:8], commitMatch)
+
 			ZCommit, _ := kzg.CommitG2(Z, precomputedData.SRS.G2Powers)
 			ICommit, err := gnark_kzg.Commit(I, precomputedData.SRS.Inner.Pk)
 			if err != nil {
@@ -207,7 +214,6 @@ func GetNewProofRange(account common.Address, startingVersion, endingVersion uin
 
 			ok, err := PairingCheck(storedCommitment, QCommit, ICommit, ZCommit, precomputedData.SRS)
 			if err != nil {
-				panic(err)
 			}
 			if !ok {
 				// Recompute commitment from P
@@ -215,21 +221,48 @@ func GetNewProofRange(account common.Address, startingVersion, endingVersion uin
 				fmt.Printf("Stored Commitment: %x\n", storedCommitment.Bytes())
 				fmt.Printf("Rebuilt Tree Commitment: %x\n", pCommit.Bytes())
 
-				// if !storedCommitment.Equal(&pCommit) {
-				// 	fmt.Printf("MISMATCH: Stored commitment does not match rebuilt tree commitment!\n")
+				// Load the stored tree from DB for comparison
+				storedLXTree := tree.GetCurrentLXBatchTree(account, db.TreeDB)
+				storedBatchTree := storedLXTree[layer-1]
 
-				// 	// Dump non-zero entries of the tree
-				// 	fmt.Println("--- BatchTree Dump (Non-Zero) ---")
-				// 	for i, h := range batchTree {
-				// 		if h != (common.Hash{}) {
-				// 			fmt.Printf("Idx %d: %s\n", i, h.Hex())
-				// 		}
-				// 	}
-				// 	fmt.Println("--- End Dump ---")
+				fmt.Println("--- Comparing Rebuilt vs Stored BatchTree ---")
+				diffCount := 0
+				for i := 0; i < len(batchTree); i++ {
+					rebuilt := batchTree[i]
+					stored := storedBatchTree[i]
+					if rebuilt != stored {
+						diffCount++
+						if diffCount <= 50 { // limit output
+							fmt.Printf("DIFF Idx %d: rebuilt=%s stored=%s\n", i, rebuilt.Hex(), stored.Hex())
+						}
+					}
+				}
+				fmt.Printf("Total differing indices: %d\n", diffCount)
 
-				// } else {
-				// 	fmt.Printf("MATCH: Stored commitment matches rebuilt tree.\n")
-				// }
+				// Also dump non-zero entries of rebuilt tree
+				nonZeroCount := 0
+				for i, h := range batchTree {
+					if h != (common.Hash{}) {
+						nonZeroCount++
+						if nonZeroCount <= 30 {
+							fmt.Printf("Rebuilt NonZero Idx %d: %s\n", i, h.Hex())
+						}
+					}
+				}
+				fmt.Printf("Total non-zero entries in rebuilt tree: %d\n", nonZeroCount)
+
+				// Dump non-zero entries of stored tree
+				storedNonZeroCount := 0
+				for i, h := range storedBatchTree {
+					if h != (common.Hash{}) {
+						storedNonZeroCount++
+						if storedNonZeroCount <= 30 {
+							fmt.Printf("Stored NonZero Idx %d: %s\n", i, h.Hex())
+						}
+					}
+				}
+				fmt.Printf("Total non-zero entries in stored tree: %d\n", storedNonZeroCount)
+				fmt.Println("--- End Comparison ---")
 
 				panic("pairing check failed.")
 			} else {
