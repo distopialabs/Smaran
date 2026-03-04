@@ -177,7 +177,7 @@ func UpdateLXTree(accountInfo *tree.AccountInfo, idx uint64, val common.Hash, la
 				break
 			}
 			// batchTree[parentIdx] = hash.BytesToPoseidonHash(lChild.Bytes(), rChild.Bytes())
-			batchTree[parentIdx] = hash.BytesToSHA256Hash(lChild.Bytes(), rChild.Bytes())
+			batchTree[parentIdx] = hash.BytesToHash(lChild.Bytes(), rChild.Bytes())
 
 			idx = parentIdx
 		}
@@ -201,7 +201,7 @@ func InsertCommitmentHashes(layer uint64, batchIdx uint64, batchTree *tree.Batch
 		// fmt.Println("fetching commitment for layer", layer-1, "batchIdx", bIdx, "latestLxBatchIdx", latestLxBatchIdx(layer-1))
 		commitment := tree.GetBatchCommitment(account, layer-1, bIdx, sdb.StateDB)
 		// commitmentHash := hash.CommitmentToHash(commitment)
-		commitmentHash := hash.CommitmentToSHA256Hash(commitment)
+		commitmentHash := hash.CommitmentToHash(commitment)
 		treeIdx := bIdx - lxm1BatchIdxStart + (2 * L2BatchSize) - 1
 		batchTree[treeIdx] = commitmentHash
 	}

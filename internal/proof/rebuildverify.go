@@ -63,7 +63,7 @@ func RebuildSegmentTreeForVerify(account common.Address, lxRequiredBatchIdxs map
 			}
 			commitment := proofHashMap[proofKey].Commitment
 			// commitmentHash := hash.CommitmentToHash(commitment)
-			commitmentHash := hash.CommitmentToSHA256Hash(commitment)
+			commitmentHash := hash.CommitmentToHash(commitment)
 
 			parentLayer := commit.layer + 1
 			parentBatchIdx := commit.idx / L2BatchSize

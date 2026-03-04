@@ -17,6 +17,9 @@ clean:
 commit:
 	nohup ./$(BUILD_DIR)/samurai --datadir /data/local/samurai --n 1 > /data/local/run.log 2>&1 &
 
+commit-clean:
+	nohup ./$(BUILD_DIR)/samurai --datadir /data/local/samurai --n 2616996 --clean > /data/local/run.log 2>&1 &
+
 serve:
 	./$(BUILD_DIR)/samurai --datadir /data/local/samurai --mode serve
 

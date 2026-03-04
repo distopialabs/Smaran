@@ -78,12 +78,12 @@ func (hb *HistoricalBalance) Bytes() []byte {
 
 func (cb *CurrentBalance) Hash() common.Hash {
 	// return hash.BytesToPoseidonHash(cb.Bytes())
-	return hash.BytesToSHA256Hash(cb.Bytes())
+	return hash.BytesToHash(cb.Bytes())
 }
 
 func (hb *HistoricalBalance) Hash() common.Hash {
 	// return hash.BytesToPoseidonHash(hb.Bytes())
-	return hash.BytesToSHA256Hash(hb.Bytes())
+	return hash.BytesToHash(hb.Bytes())
 }
 
 // DeepCopy creates a deep copy of CurrentBalance.

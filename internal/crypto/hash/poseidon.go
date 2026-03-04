@@ -19,9 +19,9 @@ var (
 	bytesPerm          *poseidon2.Permutation
 )
 
-// CommitmentToHash converts a KZG commitment (G1Affine point) to a 32-byte hash
+// CommitmentToPoseidonHash converts a KZG commitment (G1Affine point) to a 32-byte hash
 // using Poseidon2 compression. Thread-safe and uses a singleton permutation.
-func CommitmentToHash(c gnark_kzg.Digest) common.Hash {
+func CommitmentToPoseidonHash(c gnark_kzg.Digest) common.Hash {
 	// Initialize the permutation singleton once (thread-safe)
 	commitmentPermOnce.Do(func() {
 		pr := poseidon2.GetDefaultParameters()

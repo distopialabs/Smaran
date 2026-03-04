@@ -86,6 +86,9 @@ func RunCommit(cfg *config.Config, caches []*storage.Cache) {
 				case blk, ok := <-blockInfoCh:
 					if ok {
 						anyWorkDone = true
+						if blk.Number%10000 == 0 {
+							fmt.Printf("Commit Phase: progressing, currently at block %d\n", blk.Number)
+						}
 						for _, entry := range blk.Entries {
 							chIdx := utils.AddressToShardIndex(entry.Address, cfg.Workers.CommitWorkerCount)
 							updateTaskQueues[chIdx].Enqueue(UpdateTask{
