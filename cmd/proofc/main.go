@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"math"
 	"math/rand"
@@ -157,6 +158,41 @@ func main() {
 	}
 }
 
+// fetchProofStream is a helper to encapsulate streaming retrieval from the server.
+func fetchProofStream(ctx context.Context, client proofpb.ProofServiceClient, req *proofpb.GetProofRequest) (*proofpb.GetProofResponse, error) {
+	stream, err := client.GetProofStream(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+
+	finalResp := &proofpb.GetProofResponse{
+		RangeProofs:  make([]*proofpb.RangeProof, 0),
+		BalanceInfos: make([]*proofpb.BalanceInfo, 0),
+	}
+
+	for {
+		chunk, err := stream.Recv()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+
+		if len(chunk.RangeProofs) > 0 {
+			finalResp.RangeProofs = append(finalResp.RangeProofs, chunk.RangeProofs...)
+		}
+		if chunk.GenerationTimeMs > 0 {
+			finalResp.GenerationTimeMs = chunk.GenerationTimeMs
+		}
+		if len(chunk.BalanceInfos) > 0 {
+			finalResp.BalanceInfos = append(finalResp.BalanceInfos, chunk.BalanceInfos...)
+		}
+	}
+
+	return finalResp, nil
+}
+
 // =============================================================================
 // Options structs
 // =============================================================================
@@ -249,7 +285,7 @@ func runRangeBenchmark(client proofpb.ProofServiceClient, opts RangeOpts) {
 
 	timestampNs := time.Now().UnixNano()
 	start := time.Now()
-	resp, err := client.GetProof(context.Background(), req)
+	resp, err := fetchProofStream(context.Background(), client, req)
 	latency := time.Since(start)
 
 	if err != nil {
@@ -344,7 +380,7 @@ func dumpPayload(client proofpb.ProofServiceClient, opts RangeOpts) {
 		EndBlock:   opts.StartBlock + opts.RangeSize,
 	}
 
-	resp, err := client.GetProof(context.Background(), req)
+	resp, err := fetchProofStream(context.Background(), client, req)
 	if err != nil {
 		log.Fatalf("GetProof failed: %v", err)
 	}
@@ -451,7 +487,7 @@ func runConcurrencyBenchmark(client proofpb.ProofServiceClient, opts Concurrency
 				}
 
 				reqStart := time.Now()
-				_, err := client.GetProof(context.Background(), req)
+				_, err := fetchProofStream(context.Background(), client, req)
 				latency := time.Since(reqStart)
 
 				isClErr := isClientError(err)
@@ -629,7 +665,7 @@ func runStressBenchmark(client proofpb.ProofServiceClient, opts StressOpts) {
 				}
 
 				start := time.Now()
-				_, err := client.GetProof(context.Background(), req)
+				_, err := fetchProofStream(context.Background(), client, req)
 				latency := time.Since(start)
 
 				isClErr := isClientError(err)
@@ -694,7 +730,7 @@ func runSingleProof(client proofpb.ProofServiceClient, account string, startBloc
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	resp, err := client.GetProof(ctx, req)
+	resp, err := fetchProofStream(ctx, client, req)
 	if err != nil {
 		log.Fatalf("GetProof failed: %v", err)
 	}

@@ -8,6 +8,9 @@ option go_package = "github.com/nepal80m/samurai/api/pb/v1;proofpb";
 service ProofService {
   // GetProof generates range proofs for a given account and block range.
   rpc GetProof(GetProofRequest) returns (GetProofResponse);
+  
+  // GetProofStream streams range proofs for a given account and block range.
+  rpc GetProofStream(GetProofRequest) returns (stream GetProofResponse);
 }
 
 // GetProofRequest specifies the account and block range for proof generation.

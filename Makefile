@@ -15,13 +15,13 @@ clean:
 	rm -rf $(BUILD_DIR)
 
 commit:
-	nohup ./$(BUILD_DIR)/samurai --datadir /data/local/samurai --n 1 > /data/local/run.log 2>&1 &
+	nohup ./$(BUILD_DIR)/samurai --datadir /data/local/samurai-keccak --n 1 > /data/local/run.log 2>&1 &
 
 commit-clean:
-	nohup ./$(BUILD_DIR)/samurai --datadir /data/local/samurai --n 2616996 --clean > /data/local/run.log 2>&1 &
+	nohup ./$(BUILD_DIR)/samurai --datadir /data/local/samurai-keccak --n 2616996 --clean > /data/local/run.log 2>&1 &
 
 serve:
-	./$(BUILD_DIR)/samurai --datadir /data/local/samurai --mode serve
+	./$(BUILD_DIR)/samurai --datadir /data/local/samurai-keccak --mode serve
 
 # Proof server benchmark targets
 bench-range: build

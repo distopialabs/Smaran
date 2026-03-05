@@ -145,142 +145,142 @@ func GetNewProofRange(account common.Address, startingVersion, endingVersion uin
 	allRangeProofs := make([]*RangeProof, len(reqCommits))
 	var wg sync.WaitGroup
 
-	needVerify := true
+	needVerify := false
 
 	for i, reqCommit := range reqCommits {
-		// wg.Add(1)
-		// go func(i int, reqCommit RangeCommitment) {
-		// defer wg.Done()
+		wg.Add(1)
+		go func(i int, reqCommit RangeCommitment) {
+			defer wg.Done()
 
-		layer := reqCommit.layer
-		idx := reqCommit.idx
+			layer := reqCommit.layer
+			idx := reqCommit.idx
 
-		nodesToInterpolate := findNodesToInterpolate(reqCommit, true)
+			nodesToInterpolate := findNodesToInterpolate(reqCommit, true)
 
-		fmt.Printf("\n\nlayer: %d, idx: %d, \n", reqCommit.layer, reqCommit.idx)
-		if reqCommit.BlockRange == nil {
-			fmt.Printf("Commitment is not covering any range.\n")
-		} else {
-			fmt.Printf("sb: %d, eb: %d\n", reqCommit.BlockRange.Start, reqCommit.BlockRange.End)
-		}
-		fmt.Printf("dependentCommitments: %v\n", reqCommit.dependentCommitments)
-		fmt.Printf("nodesToInterpolate: %v\n", nodesToInterpolate)
+			fmt.Printf("\n\nlayer: %d, idx: %d, \n", reqCommit.layer, reqCommit.idx)
+			if reqCommit.BlockRange == nil {
+				fmt.Printf("Commitment is not covering any range.\n")
+			} else {
+				fmt.Printf("sb: %d, eb: %d\n", reqCommit.BlockRange.Start, reqCommit.BlockRange.End)
+			}
+			fmt.Printf("dependentCommitments: %v\n", reqCommit.dependentCommitments)
+			fmt.Printf("nodesToInterpolate: %v\n", nodesToInterpolate)
 
-		treeKey := fmt.Sprintf("%d:%d", layer, idx)
-		batchTree := requiredTreeBatchesMap[treeKey]
+			treeKey := fmt.Sprintf("%d:%d", layer, idx)
+			batchTree := requiredTreeBatchesMap[treeKey]
 
-		xs1 := make([]int, len(batchTree))
-		ys1 := make([]fr.Element, len(batchTree))
-		for i, v := range batchTree {
-			xs1[i] = i
-			ys1[i] = polynomial.HashToFieldElement(v)
-			// fmt.Printf("xs1[%d] = %d, ys1[%d] = %s\n", i, i, i, ys1[i].String())
-		}
-		P := polynomial.Interpolate(xs1, ys1, precomputedData.V, precomputedData.Weights)
+			xs1 := make([]int, len(batchTree))
+			ys1 := make([]fr.Element, len(batchTree))
+			for i, v := range batchTree {
+				xs1[i] = i
+				ys1[i] = polynomial.HashToFieldElement(v)
+				// fmt.Printf("xs1[%d] = %d, ys1[%d] = %s\n", i, i, i, ys1[i].String())
+			}
+			P := polynomial.Interpolate(xs1, ys1, precomputedData.V, precomputedData.Weights)
 
-		storedCommitment := tree.GetBatchCommitment(account, uint64(layer), uint64(idx), db.StateDB)
+			storedCommitment := tree.GetBatchCommitment(account, uint64(layer), uint64(idx), db.StateDB)
 
-		Z := polynomial.VanishingPolynomial(nodesToInterpolate)
+			Z := polynomial.VanishingPolynomial(nodesToInterpolate)
 
-		xs := make([]fr.Element, len(nodesToInterpolate))
-		ys := make([]fr.Element, len(nodesToInterpolate))
-		for i, v := range nodesToInterpolate {
-			xs[i] = fr.NewElement(uint64(v))
-			ys[i] = polynomial.HashToFieldElement(batchTree[v])
-			// fmt.Printf("xs[%d] = %d, ys[%d] = %s\n", i, v, i, ys[i].String())
-		}
+			xs := make([]fr.Element, len(nodesToInterpolate))
+			ys := make([]fr.Element, len(nodesToInterpolate))
+			for i, v := range nodesToInterpolate {
+				xs[i] = fr.NewElement(uint64(v))
+				ys[i] = polynomial.HashToFieldElement(batchTree[v])
+				// fmt.Printf("xs[%d] = %d, ys[%d] = %s\n", i, v, i, ys[i].String())
+			}
 
-		I := kzg.Interpolate(xs, ys)
+			I := kzg.Interpolate(xs, ys)
 
-		diff := kzg.SubtractPolys(P, I)
-		Q := kzg.PolyDiv(diff, Z)
-		QCommit, err := gnark_kzg.Commit(Q, precomputedData.SRS.Inner.Pk)
-		if err != nil {
-			panic(err)
-		}
-		if needVerify {
-			// Always compare stored vs rebuilt commitment
-			pCommit, _ := gnark_kzg.Commit(P, precomputedData.SRS.Inner.Pk)
-			storedBytes := storedCommitment.Bytes()
-			rebuiltBytes := pCommit.Bytes()
-			commitMatch := storedCommitment.Equal(&pCommit)
-			fmt.Printf("DEBUG layer %d idx %d: stored=%x rebuilt=%x match=%v\n", layer, idx, storedBytes[:8], rebuiltBytes[:8], commitMatch)
-
-			ZCommit, _ := kzg.CommitG2(Z, precomputedData.SRS.G2Powers)
-			ICommit, err := gnark_kzg.Commit(I, precomputedData.SRS.Inner.Pk)
+			diff := kzg.SubtractPolys(P, I)
+			Q := kzg.PolyDiv(diff, Z)
+			QCommit, err := gnark_kzg.Commit(Q, precomputedData.SRS.Inner.Pk)
 			if err != nil {
 				panic(err)
 			}
-
-			ok, err := PairingCheck(storedCommitment, QCommit, ICommit, ZCommit, precomputedData.SRS)
-			if err != nil {
-			}
-			if !ok {
-				// Recompute commitment from P
+			if needVerify {
+				// Always compare stored vs rebuilt commitment
 				pCommit, _ := gnark_kzg.Commit(P, precomputedData.SRS.Inner.Pk)
-				fmt.Printf("Stored Commitment: %x\n", storedCommitment.Bytes())
-				fmt.Printf("Rebuilt Tree Commitment: %x\n", pCommit.Bytes())
+				storedBytes := storedCommitment.Bytes()
+				rebuiltBytes := pCommit.Bytes()
+				commitMatch := storedCommitment.Equal(&pCommit)
+				fmt.Printf("DEBUG layer %d idx %d: stored=%x rebuilt=%x match=%v\n", layer, idx, storedBytes[:8], rebuiltBytes[:8], commitMatch)
 
-				// Load the stored tree from DB for comparison
-				storedLXTree := tree.GetCurrentLXBatchTree(account, db.TreeDB)
-				storedBatchTree := storedLXTree[layer-1]
+				ZCommit, _ := kzg.CommitG2(Z, precomputedData.SRS.G2Powers)
+				ICommit, err := gnark_kzg.Commit(I, precomputedData.SRS.Inner.Pk)
+				if err != nil {
+					panic(err)
+				}
 
-				fmt.Println("--- Comparing Rebuilt vs Stored BatchTree ---")
-				diffCount := 0
-				for i := 0; i < len(batchTree); i++ {
-					rebuilt := batchTree[i]
-					stored := storedBatchTree[i]
-					if rebuilt != stored {
-						diffCount++
-						if diffCount <= 50 { // limit output
-							fmt.Printf("DIFF Idx %d: rebuilt=%s stored=%s\n", i, rebuilt.Hex(), stored.Hex())
+				ok, err := PairingCheck(storedCommitment, QCommit, ICommit, ZCommit, precomputedData.SRS)
+				if err != nil {
+				}
+				if !ok {
+					// Recompute commitment from P
+					pCommit, _ := gnark_kzg.Commit(P, precomputedData.SRS.Inner.Pk)
+					fmt.Printf("Stored Commitment: %x\n", storedCommitment.Bytes())
+					fmt.Printf("Rebuilt Tree Commitment: %x\n", pCommit.Bytes())
+
+					// Load the stored tree from DB for comparison
+					storedLXTree := tree.GetCurrentLXBatchTree(account, db.TreeDB)
+					storedBatchTree := storedLXTree[layer-1]
+
+					fmt.Println("--- Comparing Rebuilt vs Stored BatchTree ---")
+					diffCount := 0
+					for i := 0; i < len(batchTree); i++ {
+						rebuilt := batchTree[i]
+						stored := storedBatchTree[i]
+						if rebuilt != stored {
+							diffCount++
+							if diffCount <= 50 { // limit output
+								fmt.Printf("DIFF Idx %d: rebuilt=%s stored=%s\n", i, rebuilt.Hex(), stored.Hex())
+							}
 						}
 					}
-				}
-				fmt.Printf("Total differing indices: %d\n", diffCount)
+					fmt.Printf("Total differing indices: %d\n", diffCount)
 
-				// Also dump non-zero entries of rebuilt tree
-				nonZeroCount := 0
-				for i, h := range batchTree {
-					if h != (common.Hash{}) {
-						nonZeroCount++
-						if nonZeroCount <= 30 {
-							fmt.Printf("Rebuilt NonZero Idx %d: %s\n", i, h.Hex())
+					// Also dump non-zero entries of rebuilt tree
+					nonZeroCount := 0
+					for i, h := range batchTree {
+						if h != (common.Hash{}) {
+							nonZeroCount++
+							if nonZeroCount <= 30 {
+								fmt.Printf("Rebuilt NonZero Idx %d: %s\n", i, h.Hex())
+							}
 						}
 					}
-				}
-				fmt.Printf("Total non-zero entries in rebuilt tree: %d\n", nonZeroCount)
+					fmt.Printf("Total non-zero entries in rebuilt tree: %d\n", nonZeroCount)
 
-				// Dump non-zero entries of stored tree
-				storedNonZeroCount := 0
-				for i, h := range storedBatchTree {
-					if h != (common.Hash{}) {
-						storedNonZeroCount++
-						if storedNonZeroCount <= 30 {
-							fmt.Printf("Stored NonZero Idx %d: %s\n", i, h.Hex())
+					// Dump non-zero entries of stored tree
+					storedNonZeroCount := 0
+					for i, h := range storedBatchTree {
+						if h != (common.Hash{}) {
+							storedNonZeroCount++
+							if storedNonZeroCount <= 30 {
+								fmt.Printf("Stored NonZero Idx %d: %s\n", i, h.Hex())
+							}
 						}
 					}
-				}
-				fmt.Printf("Total non-zero entries in stored tree: %d\n", storedNonZeroCount)
-				fmt.Println("--- End Comparison ---")
+					fmt.Printf("Total non-zero entries in stored tree: %d\n", storedNonZeroCount)
+					fmt.Println("--- End Comparison ---")
 
-				panic("pairing check failed.")
-			} else {
-				fmt.Println("Pairing check passed.✅")
+					panic("pairing check failed.")
+				} else {
+					fmt.Println("Pairing check passed.✅")
+				}
 			}
-		}
 
-		rangeProof := &RangeProof{
-			Idx:                  idx,
-			Layer:                layer,
-			Commitment:           storedCommitment,
-			Proof:                QCommit,
-			BlockRange:           reqCommit.BlockRange,
-			DependentCommitments: reqCommit.dependentCommitments,
-		}
+			rangeProof := &RangeProof{
+				Idx:                  idx,
+				Layer:                layer,
+				Commitment:           storedCommitment,
+				Proof:                QCommit,
+				BlockRange:           reqCommit.BlockRange,
+				DependentCommitments: reqCommit.dependentCommitments,
+			}
 
-		allRangeProofs[i] = rangeProof
-		// }(i, reqCommit)
+			allRangeProofs[i] = rangeProof
+		}(i, reqCommit)
 	}
 	wg.Wait()
 	return allRangeProofs, requiredHBInfos
