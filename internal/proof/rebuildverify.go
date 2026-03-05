@@ -3,7 +3,6 @@ package proof
 import (
 	"fmt"
 	"slices"
-	"strconv"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -29,27 +28,24 @@ func RebuildSegmentTreeForVerify(account common.Address, lxRequiredBatchIdxs map
 
 	start := time.Now()
 
-	for _, hbInfo := range balanceInfos {
-		// innerStart := time.Now()
+	for i, hbInfo := range balanceInfos {
 		AddLeafNode(accountInfo, hbInfo.Version, hbInfo.Hash())
-		// fmt.Println("Time taken to add leaf node for version", hbInfo.Version, time.Since(innerStart))
 
 		// check if this batch is required; if yes, add to the requiredTreeBatchesMap
-		lxBatchIdx := func(layer uint64) uint64 {
-			if layer == 0 || layer > MaxLayer {
-				panic("layer" + strconv.Itoa(int(layer)) + " is not supported")
-			}
-			return hbInfo.Version / (L1BatchSize * utils.PowUint64(L2BatchSize, layer-1))
-		}
-		// innerStart = time.Now()
+		// Only save at batch boundaries (or the very last version) to avoid
+		// copying the 128KB BatchTree on every single iteration.
+		nextVersion := hbInfo.Version + 1
 		for layer := uint64(1); layer <= MaxLayer; layer++ {
-			if slices.Contains(lxRequiredBatchIdxs[layer], lxBatchIdx(layer)) {
+			batchSize := L1BatchSize * utils.PowUint64(L2BatchSize, layer-1)
+			currentBatchIdx := hbInfo.Version / batchSize
+			nextBatchIdx := nextVersion / batchSize
+			isLastInBatch := i == len(balanceInfos)-1 || (nextBatchIdx != currentBatchIdx)
+			if isLastInBatch && slices.Contains(lxRequiredBatchIdxs[layer], currentBatchIdx) {
 				treeBatch := accountInfo.CurrentLXBatchTree[layer-1]
-				key := fmt.Sprintf("%d:%d", layer, lxBatchIdx(layer))
+				key := fmt.Sprintf("%d:%d", layer, currentBatchIdx)
 				requiredTreeBatchesMap[key] = &treeBatch
 			}
 		}
-		// fmt.Println("Time taken to check if batch is required", time.Since(innerStart))
 	}
 
 	fmt.Println("Time taken to add leaf nodes in segment tree", time.Since(start))
