@@ -245,7 +245,7 @@ type StressResult struct {
 // =============================================================================
 
 func runRangeBenchmark(client proofpb.ProofServiceClient, opts RangeOpts) {
-	endBlock := opts.StartBlock + opts.RangeSize
+	endBlock := opts.StartBlock + opts.RangeSize - 1
 	fmt.Printf("\n=== Range Benchmark ===\n")
 	fmt.Printf("Account: %s\n", opts.Account)
 	fmt.Printf("Blocks: %d - %d (%d blocks)\n", opts.StartBlock, endBlock, opts.RangeSize)
@@ -382,7 +382,7 @@ func dumpPayload(client proofpb.ProofServiceClient, opts RangeOpts) {
 	req := &proofpb.GetProofRequest{
 		Account:    opts.Account,
 		StartBlock: opts.StartBlock,
-		EndBlock:   opts.StartBlock + opts.RangeSize,
+		EndBlock:   opts.StartBlock + opts.RangeSize - 1,
 	}
 
 	resp, err := fetchProofStream(context.Background(), client, req)
@@ -488,7 +488,7 @@ func runConcurrencyBenchmark(client proofpb.ProofServiceClient, opts Concurrency
 				req := &proofpb.GetProofRequest{
 					Account:    account,
 					StartBlock: opts.StartBlock,
-					EndBlock:   opts.StartBlock + opts.RangeSize,
+					EndBlock:   opts.StartBlock + opts.RangeSize - 1,
 				}
 
 				reqStart := time.Now()
@@ -680,7 +680,7 @@ func runStressBenchmark(opts StressOpts) {
 				req := &proofpb.GetProofRequest{
 					Account:    account,
 					StartBlock: opts.StartBlock,
-					EndBlock:   opts.StartBlock + r.Blocks,
+					EndBlock:   opts.StartBlock + r.Blocks - 1,
 				}
 
 				start := time.Now()
