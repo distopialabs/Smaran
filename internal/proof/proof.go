@@ -89,6 +89,10 @@ func BlockRangeToVersionRange(account common.Address, startingBlock uint64, endi
 		return 0, 0, fmt.Errorf("%w: %v", ErrAccountNotFound, err)
 	}
 
+	if cbInfo.Version == 0 {
+		return 0, 0, fmt.Errorf("no historical balances available to prove for this account")
+	}
+
 	// Get the first recorded version to check bounds
 	firstHbInfo := tree.GetHistoricalBalance(account, 0, db.HistoryDB)
 
@@ -100,7 +104,7 @@ func BlockRangeToVersionRange(account common.Address, startingBlock uint64, endi
 	// Determine ending version
 	var endingVersion uint64
 	if endingBlock >= cbInfo.StartBlock {
-		endingVersion = cbInfo.Version
+		endingVersion = cbInfo.Version - 1
 	} else {
 		endingVersion, err = BinarySearchVersionByBlockNumber(endingBlock, 0, cbInfo.Version-1, account, db)
 		if err != nil {
@@ -113,10 +117,10 @@ func BlockRangeToVersionRange(account common.Address, startingBlock uint64, endi
 	// Case 2: Starting block is before account's first recorded block - clamp to version 0
 	if startingBlock < firstHbInfo.StartBlock {
 		startingVersion = 0
-	} else if endingVersion == cbInfo.Version && startingBlock >= cbInfo.StartBlock {
-		startingVersion = cbInfo.Version
+	} else if startingBlock >= cbInfo.StartBlock {
+		return 0, 0, fmt.Errorf("starting block %d is beyond the latest historical version", startingBlock)
 	} else {
-		startingVersion, err = BinarySearchVersionByBlockNumber(startingBlock, 0, min(endingVersion, cbInfo.Version-1), account, db)
+		startingVersion, err = BinarySearchVersionByBlockNumber(startingBlock, 0, endingVersion, account, db)
 		if err != nil {
 			return 0, 0, fmt.Errorf("%w: starting block %d: %v", ErrVersionNotFound, startingBlock, err)
 		}

@@ -146,8 +146,10 @@ func main() {
 				Accounts:   accounts,
 				CumWeights: cumWeights,
 				OutputDir:  *outputDir,
+				ServerAddr: *serverAddr,
+				MaxMsgSize: maxMsgSize,
 			}
-			runStressBenchmark(client, opts)
+			runStressBenchmark(opts)
 
 		default:
 			log.Fatalf("Unknown benchmark mode: %s", *mode)
@@ -223,16 +225,19 @@ type StressOpts struct {
 	Accounts   []string
 	CumWeights []int
 	OutputDir  string
+	ServerAddr string
+	MaxMsgSize int
 }
 
 type StressResult struct {
-	Timestamp     int64
-	ClientID      int
-	LatencyMs     int64
-	Success       bool
-	IsClientError bool
-	Account       string
-	RangeLabel    string
+	Timestamp       int64
+	ClientID        int
+	LatencyMs       int64
+	ServerGenTimeMs int64
+	Success         bool
+	IsClientError   bool
+	Account         string
+	RangeLabel      string
 }
 
 // =============================================================================
@@ -557,10 +562,10 @@ func runConcurrencyBenchmark(client proofpb.ProofServiceClient, opts Concurrency
 // Stress Benchmark
 // =============================================================================
 
-func runStressBenchmark(client proofpb.ProofServiceClient, opts StressOpts) {
+func runStressBenchmark(opts StressOpts) {
 	fmt.Printf("\n=== Stress Benchmark ===\n")
 	fmt.Printf("Duration: %v\n", opts.Duration)
-	fmt.Printf("Clients: %d\n", opts.NumClients)
+	fmt.Printf("Clients: %d (separate connections)\n", opts.NumClients)
 	rangeLabels := make([]string, len(defaultRanges))
 	for i, r := range defaultRanges {
 		rangeLabels[i] = fmt.Sprintf("%s(%d)", r.Label, r.Blocks)
@@ -580,7 +585,7 @@ func runStressBenchmark(client proofpb.ProofServiceClient, opts StressOpts) {
 	writer := csv.NewWriter(csvFile)
 
 	// Write header
-	header := []string{"timestamp_ns", "client_id", "latency_ms", "success", "is_client_error", "account", "range_label"}
+	header := []string{"timestamp_ns", "client_id", "latency_ms", "server_gen_time_ms", "success", "is_client_error", "account", "range_label"}
 	writer.Write(header)
 
 	resultsCh := make(chan StressResult, 100000)
@@ -600,6 +605,7 @@ func runStressBenchmark(client proofpb.ProofServiceClient, opts StressOpts) {
 				strconv.FormatInt(r.Timestamp, 10),
 				strconv.Itoa(r.ClientID),
 				strconv.FormatInt(r.LatencyMs, 10),
+				strconv.FormatInt(r.ServerGenTimeMs, 10),
 				strconv.FormatBool(r.Success),
 				strconv.FormatBool(r.IsClientError),
 				r.Account,
@@ -644,12 +650,25 @@ func runStressBenchmark(client proofpb.ProofServiceClient, opts StressOpts) {
 		}
 	}()
 
-	// Launch client goroutines
+	// Launch client goroutines — each with its own gRPC connection
 	fmt.Printf("\nStarting stress test...\n")
 	for i := 0; i < opts.NumClients; i++ {
 		wg.Add(1)
 		go func(clientID int) {
 			defer wg.Done()
+
+			// Each client gets its own connection to simulate real separate clients
+			conn, err := grpc.NewClient(opts.ServerAddr,
+				grpc.WithTransportCredentials(insecure.NewCredentials()),
+				grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(opts.MaxMsgSize)),
+			)
+			if err != nil {
+				log.Printf("Client %d: failed to connect: %v", clientID, err)
+				return
+			}
+			defer conn.Close()
+			client := proofpb.NewProofServiceClient(conn)
+
 			totalWeight := opts.CumWeights[len(opts.CumWeights)-1]
 			for time.Now().Before(deadline) {
 				// Weighted account selection
@@ -665,19 +684,25 @@ func runStressBenchmark(client proofpb.ProofServiceClient, opts StressOpts) {
 				}
 
 				start := time.Now()
-				_, err := fetchProofStream(context.Background(), client, req)
+				resp, reqErr := fetchProofStream(context.Background(), client, req)
 				latency := time.Since(start)
 
-				isClErr := isClientError(err)
+				isClErr := isClientError(reqErr)
+
+				var serverGenTime int64
+				if resp != nil {
+					serverGenTime = resp.GenerationTimeMs
+				}
 
 				resultsCh <- StressResult{
-					Timestamp:     timestampNs,
-					ClientID:      clientID,
-					LatencyMs:     latency.Milliseconds(),
-					Success:       err == nil,
-					IsClientError: isClErr,
-					Account:       account,
-					RangeLabel:    r.Label,
+					Timestamp:       timestampNs,
+					ClientID:        clientID,
+					LatencyMs:       latency.Milliseconds(),
+					ServerGenTimeMs: serverGenTime,
+					Success:         reqErr == nil,
+					IsClientError:   isClErr,
+					Account:         account,
+					RangeLabel:      r.Label,
 				}
 			}
 		}(i)
