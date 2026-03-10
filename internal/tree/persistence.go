@@ -1,6 +1,10 @@
 package tree
 
 import (
+	"bytes"
+	"compress/zlib"
+	"encoding/binary"
+	"encoding/gob"
 	"fmt"
 	"strconv"
 	"strings"
@@ -35,6 +39,14 @@ func GenerateBatchTreeChunkKey(account common.Address, layer uint64, chunkIdx in
 
 func GenerateBatchCommitmentsKey(account common.Address, layer, batchIdx uint64) string {
 	return "user:" + account.Hex() + ":batch_commitments:" + strconv.Itoa(int(layer)) + ":" + strconv.Itoa(int(batchIdx))
+}
+
+func GenerateLXLeafNodesKey(account common.Address) string {
+	return "user:" + account.Hex() + ":lx_leaf_nodes"
+}
+
+func GenerateTreeCountsKey(account common.Address) string {
+	return "user:" + account.Hex() + ":tree_counts"
 }
 
 // Store/Get CurrentBalanceInfo
@@ -245,4 +257,57 @@ func GetHistoricalBalance(account common.Address, version uint64, d db.DB) *Hist
 		panic(fmt.Errorf("failed to decode historical balance: %w", err))
 	}
 	return historicalBalanceFromProto(pb)
+}
+
+// Store/Get LXLeafNodes and TreeCounts
+func StoreTreeCounts(account common.Address, treeCounts [MaxLayer]uint64, d db.DB) {
+	serializedTreeCounts := make([]byte, MaxLayer*8)
+	for i := range MaxLayer {
+		binary.BigEndian.PutUint64(serializedTreeCounts[i*8:(i+1)*8], treeCounts[i])
+	}
+	if err := d.Set([]byte(GenerateTreeCountsKey(account)), serializedTreeCounts, false); err != nil {
+		panic(fmt.Errorf("failed to store tree counts: %w", err))
+	}
+}
+
+func GetTreeCounts(account common.Address, d db.DB) [MaxLayer]uint64 {
+	serializedTreeCounts, err := d.Get([]byte(GenerateTreeCountsKey(account)))
+	if err != nil {
+		panic(fmt.Errorf("failed to get tree counts: %w", err))
+	}
+	var out [MaxLayer]uint64
+	for i := range MaxLayer {
+		out[i] = binary.BigEndian.Uint64(serializedTreeCounts[i*8 : (i+1)*8])
+	}
+	return out
+}
+
+func StoreAllLXLeafNodes(account common.Address, lxLeafNodes *[MaxLayer]map[LeafNodeIdx]common.Hash, d db.DB) {
+	var buf bytes.Buffer
+	zw := zlib.NewWriter(&buf)
+	enc := gob.NewEncoder(zw)
+	if err := enc.Encode(lxLeafNodes); err != nil {
+		panic(fmt.Errorf("failed to encode LX leaf nodes: %w", err))
+	}
+	if err := d.Set([]byte(GenerateLXLeafNodesKey(account)), buf.Bytes(), false); err != nil {
+		panic(fmt.Errorf("failed to store LX leaf nodes: %w", err))
+	}
+}
+
+func GetAllLXLeafNodes(account common.Address, d db.DB) [MaxLayer]map[LeafNodeIdx]common.Hash {
+	serializedLXLeafNodes, err := d.Get([]byte(GenerateLXLeafNodesKey(account)))
+	if err != nil {
+		panic(fmt.Errorf("failed to get LX leaf nodes: %w", err))
+	}
+	zr, err := zlib.NewReader(bytes.NewReader(serializedLXLeafNodes))
+	if err != nil {
+		panic(fmt.Errorf("failed to create zlib reader: %w", err))
+	}
+	defer zr.Close()
+	dec := gob.NewDecoder(zr)
+	var out [MaxLayer]map[LeafNodeIdx]common.Hash
+	if err := dec.Decode(&out); err != nil {
+		panic(fmt.Errorf("failed to decode LX leaf nodes: %w", err))
+	}
+	return out
 }

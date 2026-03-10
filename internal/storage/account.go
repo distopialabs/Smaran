@@ -24,6 +24,20 @@ func CreateOrUpdateAccountInfo(account common.Address, balance *big.Int, blockNu
 		}
 		batchTree := tree.GetCurrentLXBatchTree(account, sdb.TreeDB)
 		batchCommitments := tree.GetLXBatchCommitments(account, cbInfo.Version, sdb.StateDB)
+		treeCounts := tree.GetTreeCounts(account, sdb.TreeDB)
+
+		// Fresh LXLeafNodes
+		var lxLeafNodes [tree.MaxLayer]map[tree.LeafNodeIdx]common.Hash
+		for layer := uint64(1); layer <= tree.MaxLayer; layer++ {
+			lxLeafNodes[layer-1] = make(map[tree.LeafNodeIdx]common.Hash)
+		}
+		for layer := uint64(1); layer <= tree.MaxLayer; layer++ {
+			for treeIdx := uint64(0); treeIdx < treeCounts[layer-1]; treeIdx++ {
+				for leafIdx := uint64(0); leafIdx < tree.L1BatchSize; leafIdx++ {
+					lxLeafNodes[layer-1][tree.LeafNodeIdx{TreeIdx: treeIdx, LeafIdx: leafIdx}] = common.Hash{}
+				}
+			}
+		}
 		return &tree.AccountInfo{
 			Account:                  account,
 			CurrentBalanceInfo:       cbInfo,
@@ -31,6 +45,8 @@ func CreateOrUpdateAccountInfo(account common.Address, balance *big.Int, blockNu
 			CurrentLXBatchCommitment: batchCommitments,
 			PrecomputedData:          cache.PrecomputedData,
 			DirtyChunks:              tree.InitDirtyChunks(),
+			CurrentLXTreeCounts:      treeCounts,
+			LXLeafNodes:              lxLeafNodes,
 		}
 	}
 

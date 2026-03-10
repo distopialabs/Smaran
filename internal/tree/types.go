@@ -82,24 +82,41 @@ func InitDirtyChunks() [MaxLayer]map[int]bool {
 	return dirtyChunks
 }
 
+type LeafNodeIdx struct {
+	TreeIdx uint64
+	LeafIdx uint64
+}
+
 // AccountInfo holds all state for a single account.
 type AccountInfo struct {
 	Account                  common.Address
 	CurrentBalanceInfo       *CurrentBalance
 	CurrentLXBatchTree       *LXBatchTree
 	CurrentLXBatchCommitment *LXBatchCommitment
+	LXLeafNodes              [MaxLayer]map[LeafNodeIdx]common.Hash // (tree idx, array idx in flattened representation) => hash
+	CurrentLXTreeCounts      [MaxLayer]uint64                      // number of trees in total up till now
 	DirtyChunks              [MaxLayer]map[int]bool
 	PrecomputedData          *config.PrecomputedData
 }
 
 // NewAccountInfo creates a new AccountInfo with initialized tree structures.
 func NewAccountInfo(account common.Address, precomputedData *config.PrecomputedData) *AccountInfo {
+	var lxLeafNodes [MaxLayer]map[LeafNodeIdx]common.Hash
+	for i := range MaxLayer {
+		lxLeafNodes[i] = make(map[LeafNodeIdx]common.Hash)
+	}
+	var currentLXTreeCounts [MaxLayer]uint64
+	for i := range MaxLayer {
+		currentLXTreeCounts[i] = 0
+	}
 	return &AccountInfo{
 		Account:                  account,
 		CurrentLXBatchTree:       new(LXBatchTree),
 		CurrentLXBatchCommitment: new(LXBatchCommitment),
 		DirtyChunks:              InitDirtyChunks(),
 		PrecomputedData:          precomputedData,
+		LXLeafNodes:              lxLeafNodes,
+		CurrentLXTreeCounts:      currentLXTreeCounts,
 	}
 }
 
@@ -164,6 +181,9 @@ func (accountInfo *AccountInfo) Save(sdb *db.SamuraiDB) {
 	StoreCurrentBalanceInfo(accountInfo.Account, accountInfo.CurrentBalanceInfo, sdb.StateDB)
 	StoreCurrentLXBatchTree(accountInfo.Account, accountInfo.CurrentLXBatchTree, &accountInfo.DirtyChunks, sdb.TreeDB)
 	StoreLXBatchCommitments(accountInfo.Account, accountInfo.CurrentBalanceInfo.Version, accountInfo.CurrentLXBatchCommitment, sdb.StateDB)
+
+	StoreAllLXLeafNodes(accountInfo.Account, &accountInfo.LXLeafNodes, sdb.TreeDB)
+	StoreTreeCounts(accountInfo.Account, accountInfo.CurrentLXTreeCounts, sdb.TreeDB)
 }
 
 // AddLeafNode updates the tree with a new leaf node.
@@ -189,6 +209,7 @@ func (accountInfo *AccountInfo) AddLeafNode(leafNodeIdx uint64, leafNodeHash com
 		if (leafNodeIdx % (L1BatchSize * utils.PowUint64(L2BatchSize, uint64(layer)-1))) == 0 {
 			accountInfo.CurrentLXBatchTree[layer-1] = BatchTree{}
 			accountInfo.CurrentLXBatchCommitment[layer-1] = gnark_kzg.Digest{}
+			accountInfo.CurrentLXTreeCounts[layer-1]++
 		}
 	}
 
@@ -234,6 +255,19 @@ func (accountInfo *AccountInfo) UpdateLXTree(idx uint64, val common.Hash, lXm1Co
 
 	if (val != common.Hash{}) {
 		tree[idx] = val
+		// Invariant: idx refers to a leaf node here.
+		// Invariant: CurrentLXTreeCounts[layer-1] > 0
+		if accountInfo.CurrentLXTreeCounts[layer-1] == 0 {
+			panic("CurrentLXTreeCounts[layer-1] is 0")
+		}
+		// Store the leaf node.
+		if layer > 1 {
+			accountInfo.LXLeafNodes[layer-1][LeafNodeIdx{TreeIdx: accountInfo.CurrentLXTreeCounts[layer-1], LeafIdx: idx}] = val
+			// log.Infof("Storing leaf node for layer %d, tree idx: %d, leaf idx: %d", layer, accountInfo.CurrentLXTreeCounts[layer-1], idx)
+		}
+
+		// The leaf nodes for the lowest layer is the actual data. So it is stored by default. No need to store it here.
+
 		chunkIdx := int(idx / ChunkSize)
 		accountInfo.DirtyChunks[layer-1][chunkIdx] = true
 

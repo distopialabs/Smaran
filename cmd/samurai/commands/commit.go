@@ -149,12 +149,12 @@ func RunCommit(cfg *config.Config, caches []*storage.Cache) {
 	wg := sync.WaitGroup{}
 	for i := range cfg.Workers.CommitWorkerCount {
 		wg.Add(1)
-		go func() {
+		go func(i int) {
 			defer wg.Done()
 			for task := range updateTaskChs[i] {
 				storage.CreateOrUpdateAccountInfo(task.Account, task.Balance, task.BlockNumber, caches[i])
 			}
-		}()
+		}(i)
 	}
 	wg.Wait()
 
