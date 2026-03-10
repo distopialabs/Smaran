@@ -2,14 +2,22 @@ package main
 
 import (
 	_ "net/http/pprof"
+	"os"
 	"runtime"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/nepal80m/samurai/cmd/samurai/commands"
+	"github.com/nepal80m/samurai/internal/logging"
 )
 
 func main() {
+	if lvl := os.Getenv("LOG_LEVEL"); lvl != "" {
+		if err := logging.SetLevel(lvl); err != nil {
+			log.Fatalf("Invalid LOG_LEVEL %q: %v", lvl, err)
+		}
+	}
+
 	flags := ParseFlags()
 
 	log.Infof("Starting Samurai %v", time.Now())

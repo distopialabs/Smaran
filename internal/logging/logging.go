@@ -20,3 +20,14 @@ func init() {
 func GetLogger(module string) *logging.Logger {
 	return logging.MustGetLogger(module)
 }
+
+// SetLevel parses a level string (e.g. "DEBUG", "INFO", "WARNING", "ERROR",
+// "CRITICAL") and applies it globally to all modules.
+func SetLevel(level string) error {
+	lvl, err := logging.LogLevel(level)
+	if err != nil {
+		return err
+	}
+	logging.SetLevel(lvl, "")
+	return nil
+}

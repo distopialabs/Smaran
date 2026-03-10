@@ -77,6 +77,13 @@ func main() {
 	accountsFile := flag.String("accounts-file", "cmd/proofc/top_1k_accounts_all_blocks.csv", "Path to accounts CSV file")
 	outputDir := flag.String("output-dir", "./benchmark_output", "Output directory for benchmark results")
 
+	numAccounts := flag.Int("num-accounts", ALL_ACCOUNTS, "Number of accounts to load")
+	if *numAccounts == ALL_ACCOUNTS {
+		log.Printf("Loading all accounts from %s", *accountsFile)
+	} else {
+		log.Printf("Loading %d accounts from %s", *numAccounts, *accountsFile)
+	}
+
 	// Legacy dump flags
 	dumpJson := flag.String("dump-json", "", "Path to dump response as JSON (optional)")
 	dumpBin := flag.String("dump-bin", "", "Path to dump response as Binary Protobuf (optional)")
@@ -102,7 +109,7 @@ func main() {
 		fmt.Printf("Mode: %s\n", *mode)
 
 		// Ensure output directory exists
-		if err := os.MkdirAll(*outputDir, 0755); err != nil {
+		if err := os.MkdirAll(*outputDir, 0o755); err != nil {
 			log.Fatalf("failed to create output directory: %v", err)
 		}
 
@@ -135,7 +142,7 @@ func main() {
 			runConcurrencyBenchmark(client, opts)
 
 		case "stress":
-			accounts, cumWeights, err := loadWeightedAccounts(*accountsFile)
+			accounts, cumWeights, err := loadWeightedAccounts(*accountsFile, *numAccounts)
 			if err != nil {
 				log.Fatalf("failed to load accounts: %v", err)
 			}
@@ -410,7 +417,7 @@ func dumpPayload(client proofpb.ProofServiceClient, opts RangeOpts) {
 		if err != nil {
 			log.Fatalf("Failed to marshal response: %v", err)
 		}
-		if err := os.WriteFile(opts.DumpBin, data, 0644); err != nil {
+		if err := os.WriteFile(opts.DumpBin, data, 0o644); err != nil {
 			log.Fatalf("Failed to write file: %v", err)
 		}
 		fmt.Printf("Binary dumped to %s\n", opts.DumpBin)
@@ -818,7 +825,11 @@ func loadAccounts(filename string) ([]string, error) {
 	return accounts, nil
 }
 
-func loadWeightedAccounts(filename string) ([]string, []int, error) {
+const ALL_ACCOUNTS = -1
+
+// Set numAccounts to ALL_ACCOUNTS to load all accounts
+// Otherwise, load the first numAccounts accounts
+func loadWeightedAccounts(filename string, numAccounts int) ([]string, []int, error) {
 	f, err := os.Open(filename)
 	if err != nil {
 		return nil, nil, err
@@ -835,6 +846,8 @@ func loadWeightedAccounts(filename string) ([]string, []int, error) {
 		// Skip header line
 	}
 
+	accountsCount := 0
+
 	for scanner.Scan() {
 		line := scanner.Text()
 		parts := strings.Split(line, ",")
@@ -846,6 +859,10 @@ func loadWeightedAccounts(filename string) ([]string, []int, error) {
 			}
 			cumSum += weight
 			cumWeights = append(cumWeights, cumSum)
+		}
+		accountsCount++
+		if numAccounts != ALL_ACCOUNTS && accountsCount >= numAccounts {
+			break
 		}
 	}
 
