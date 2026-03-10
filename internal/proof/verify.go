@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"math/big"
 	"os"
 	"slices"
@@ -76,7 +75,7 @@ func VerifyNewRangeProofs(account common.Address, startingVersion, endingVersion
 	// TODO: Rebuild partial tree
 	start := time.Now()
 	requiredTreeBatchesMap := RebuildSegmentTreeForVerify(account, lxRequiredBatchIdxs, startingVersion, endingVersion, balanceInfos, proofHashMap, reqCommits, precomputedData)
-	fmt.Println("Time taken to rebuild segment tree", time.Since(start))
+	log.Infof("Time taken to rebuild segment tree: %v", time.Since(start))
 
 	slices.SortFunc(reqCommits, func(a, b RangeCommitment) int {
 		if a.layer != b.layer {
@@ -193,7 +192,7 @@ func VerifyNewRangeProofs(account common.Address, startingVersion, endingVersion
 
 		// fmt.Printf("Time taken to verify range proof %d:%d: %v\n", reqCommit.layer, reqCommit.idx, time.Since(innerVerifyStart))
 	}
-	fmt.Println("Time taken to verify range proofs", time.Since(verifyStart))
+	log.Infof("Time taken to verify range proofs: %v", time.Since(verifyStart))
 }
 
 func VerifyRangeProofs(startingBlock, endingBlock int, rangeProofs []*RangeProof, balances []*big.Int, V polynomial.Polynomial, weights []fr.Element, srs *kzg.MultiSRS) {
@@ -238,23 +237,23 @@ func VerifyRangeProofs(startingBlock, endingBlock int, rangeProofs []*RangeProof
 		nodesToInterpolate := findNodesToInterpolate(reqCommit, true)
 		rangeProof := proofHashMap[reqCommitKey]
 
-		fmt.Printf("\n\nlayer: %d, idx: %d, \n", reqCommit.layer, reqCommit.idx)
+		log.Debugf("layer: %d, idx: %d", reqCommit.layer, reqCommit.idx)
 		if reqCommit.BlockRange == nil {
-			fmt.Printf("Commitment is not covering any range.\n")
+			log.Debugf("Commitment is not covering any range.")
 		} else {
-			fmt.Printf("sb: %d, eb: %d\n", reqCommit.BlockRange.Start, reqCommit.BlockRange.End)
+			log.Debugf("sb: %d, eb: %d", reqCommit.BlockRange.Start, reqCommit.BlockRange.End)
 		}
-		fmt.Printf("dependentCommitments: %v\n", reqCommit.dependentCommitments)
-		fmt.Printf("nodesToInterpolate: %v\n", nodesToInterpolate)
+		log.Debugf("dependentCommitments: %v", reqCommit.dependentCommitments)
+		log.Debugf("nodesToInterpolate: %v", nodesToInterpolate)
 		for i, nodeIdx := range nodesToInterpolate {
 			nodeKey := fmt.Sprintf("%d:%d:%d", reqCommit.layer, reqCommit.idx, nodeIdx)
-			fmt.Printf("ys[%d]: %v\n", i, nodesValuesHashMap[nodeKey])
+			log.Debugf("ys[%d]: %v", i, nodesValuesHashMap[nodeKey])
 		}
 		Commitment := rangeProof.Commitment
 
 		pCommitBytes := Commitment.Bytes()
 		pCommitHash := common.BytesToHash(pCommitBytes[:])
-		fmt.Printf("pCommitmentHash: %s\n", pCommitHash)
+		log.Debugf("pCommitmentHash: %s", pCommitHash)
 
 		// TODO: reconstruct tree using given balance values
 		// tree := lxTrees[reqCommit.layer][reqCommit.idx]
@@ -265,7 +264,7 @@ func VerifyRangeProofs(startingBlock, endingBlock int, rangeProofs []*RangeProof
 
 		zCommitBytes := ZCommit.Bytes()
 		zCommitHash := common.BytesToHash(zCommitBytes[:])
-		fmt.Printf("zCommitmentHash: %s\n", zCommitHash)
+		log.Debugf("zCommitmentHash: %s", zCommitHash)
 
 		// _ = ZCommit
 		// if err != nil {
@@ -289,12 +288,12 @@ func VerifyRangeProofs(startingBlock, endingBlock int, rangeProofs []*RangeProof
 
 		iCommitBytes := ICommit.Bytes()
 		iCommitHash := common.BytesToHash(iCommitBytes[:])
-		fmt.Printf("iCommitmentHash: %s\n", iCommitHash)
+		log.Debugf("iCommitmentHash: %s", iCommitHash)
 
 		QCommit := rangeProof.Proof
 		qCommitBytes := QCommit.Bytes()
 		qCommitHash := common.BytesToHash(qCommitBytes[:])
-		fmt.Printf("qCommitmentHash: %s\n", qCommitHash)
+		log.Debugf("qCommitmentHash: %s", qCommitHash)
 
 		// fmt.Printf("Commitment: %v\n", Commitment)
 		// fmt.Printf("Proof: %v\n", QCommit)
@@ -310,7 +309,7 @@ func VerifyRangeProofs(startingBlock, endingBlock int, rangeProofs []*RangeProof
 			// fmt.Printf("pairing check failed: invalid proof\n")
 			// panic("pairing check failed: invalid proof")
 		} else {
-			fmt.Println("pairing check passed✅")
+			log.Infof("pairing check passed")
 			for _, depCommitIdx := range reqCommit.dependentCommitments {
 				depCommitKey := fmt.Sprintf("%d:%d", reqCommit.layer-1, depCommitIdx)
 				isVerified[depCommitKey] = true
@@ -324,7 +323,7 @@ func VerifyRangeProofs(startingBlock, endingBlock int, rangeProofs []*RangeProof
 		// Z := polynomial.VanishingPolynomial(nodesToInterpolate)
 
 	}
-	fmt.Printf("Time taken to rebuild partial segment tree: %v\n", treeRebuildTime)
+	log.Infof("Time taken to rebuild partial segment tree: %v", treeRebuildTime)
 
 }
 
@@ -683,7 +682,7 @@ func (segmentTree *RebuiltLayeredSegmentTree) DumpTrees() {
 		log.Fatalf("failed to write l4Tree to file: %v", err)
 	}
 
-	fmt.Println("Dumped trees to json files")
+	log.Infof("Dumped trees to json files")
 
 }
 

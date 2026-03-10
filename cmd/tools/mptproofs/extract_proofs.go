@@ -6,7 +6,6 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -27,7 +26,7 @@ type fileShape struct {
 
 func extractProofs() {
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
-		fmt.Println("mkdir out:", err)
+		log.Errorf("mkdir out: %v", err)
 		return
 	}
 	var ok, fail int
@@ -40,14 +39,14 @@ func extractProofs() {
 		b, err := os.ReadFile(path)
 		if err != nil {
 			fail++
-			fmt.Println("read:", path, err)
+			log.Errorf("read: %s %v", path, err)
 			return nil
 		}
 
 		var f fileShape
 		if err := json.Unmarshal(b, &f); err != nil {
 			fail++
-			fmt.Println("json:", path, err)
+			log.Errorf("json: %s %v", path, err)
 			return nil
 		}
 
@@ -57,7 +56,7 @@ func extractProofs() {
 		}
 		if len(nodes) == 0 {
 			fail++
-			fmt.Println("no accountProof:", path)
+			log.Errorf("no accountProof: %s", path)
 			return nil
 		}
 
@@ -66,7 +65,7 @@ func extractProofs() {
 		out, err := os.Create(outPath)
 		if err != nil {
 			fail++
-			fmt.Println("create:", outPath, err)
+			log.Errorf("create: %s %v", outPath, err)
 			return nil
 		}
 		defer out.Close()
@@ -78,7 +77,7 @@ func extractProofs() {
 			nb, err := hex.DecodeString(s)
 			if err != nil {
 				fail++
-				fmt.Println("hex:", path, err)
+				log.Errorf("hex: %s %v", path, err)
 				out.Close()
 				os.Remove(outPath)
 				return nil
@@ -86,14 +85,14 @@ func extractProofs() {
 			// 4-byte big-endian length, then bytes
 			if err := binary.Write(out, binary.BigEndian, uint32(len(nb))); err != nil {
 				fail++
-				fmt.Println("write len:", outPath, err)
+				log.Errorf("write len: %s %v", outPath, err)
 				out.Close()
 				os.Remove(outPath)
 				return nil
 			}
 			if _, err := out.Write(nb); err != nil {
 				fail++
-				fmt.Println("write bytes:", outPath, err)
+				log.Errorf("write bytes: %s %v", outPath, err)
 				out.Close()
 				os.Remove(outPath)
 				return nil
@@ -102,13 +101,13 @@ func extractProofs() {
 
 		ok++
 		if ok%2000 == 0 {
-			fmt.Printf("processed %d files (failed %d)\n", ok, fail)
+			log.Infof("processed %d files (failed %d)", ok, fail)
 		}
 		return nil
 	})
 
 	if err != nil {
-		fmt.Println("walk:", err)
+		log.Errorf("walk: %v", err)
 	}
-	fmt.Printf("DONE. success=%d failed=%d\n", ok, fail)
+	log.Infof("DONE. success=%d failed=%d", ok, fail)
 }

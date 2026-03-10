@@ -5,14 +5,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"path/filepath"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/nepal80m/samurai/internal/logging"
 )
+
+var log = logging.GetLogger("fetcher")
 
 type jsonRPCRequest struct {
 	JSONRPC string        `json:"jsonrpc"`
@@ -142,14 +144,14 @@ func RunProofFetcher(alchemyURL string, address common.Address, startBlock, endB
 		}
 
 		if lastErr != nil {
-			log.Printf("failed to fetch proof for block %d: %v", bn, lastErr)
+			log.Warningf("failed to fetch proof for block %d: %v", bn, lastErr)
 		}
 
 		if bn%1000 == 0 {
-			log.Printf("progress: fetched up to block %d", bn)
+			log.Infof("progress: fetched up to block %d", bn)
 		}
 	}
 
-	log.Printf("completed fetching proofs for %s from %d to %d into %s", addrHex, startBlock, endBlock, outDir)
+	log.Infof("completed fetching proofs for %s from %d to %d into %s", addrHex, startBlock, endBlock, outDir)
 	return nil
 }

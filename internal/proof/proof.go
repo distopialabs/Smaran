@@ -4,13 +4,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"math"
 	"os"
 	"sync"
 	"time"
 
-	// Added safe import
 	fr "github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
 	gnark_kzg "github.com/consensys/gnark-crypto/ecc/bls12-381/kzg"
 	"github.com/ethereum/go-ethereum/common"
@@ -18,10 +16,13 @@ import (
 	"github.com/nepal80m/samurai/internal/crypto/kzg"
 	"github.com/nepal80m/samurai/internal/crypto/polynomial"
 	"github.com/nepal80m/samurai/internal/db"
+	"github.com/nepal80m/samurai/internal/logging"
 	"github.com/nepal80m/samurai/internal/tree"
 
 	bls "github.com/consensys/gnark-crypto/ecc/bls12-381"
 )
+
+var log = logging.GetLogger("proof")
 
 // BlockRange represents a contiguous range of blocks.
 type BlockRange struct {
@@ -144,7 +145,7 @@ func GetNewProofRange(account common.Address, startingVersion, endingVersion uin
 	}
 	start := time.Now()
 	requiredTreeBatchesMap, requiredHBInfos := RebuildSegmentTreeForProof(account, lxRequiredBatchIdxs, startingVersion, endingVersion, db, precomputedData)
-	log.Printf("Time taken to rebuild segment tree: %dms", time.Since(start).Milliseconds())
+	log.Infof("Time taken to rebuild segment tree: %dms", time.Since(start).Milliseconds())
 
 	allRangeProofs := make([]*RangeProof, len(reqCommits))
 	var wg sync.WaitGroup
@@ -161,14 +162,14 @@ func GetNewProofRange(account common.Address, startingVersion, endingVersion uin
 
 			nodesToInterpolate := findNodesToInterpolate(reqCommit, true)
 
-			fmt.Printf("\n\nlayer: %d, idx: %d, \n", reqCommit.layer, reqCommit.idx)
-			if reqCommit.BlockRange == nil {
-				fmt.Printf("Commitment is not covering any range.\n")
-			} else {
-				fmt.Printf("sb: %d, eb: %d\n", reqCommit.BlockRange.Start, reqCommit.BlockRange.End)
-			}
-			fmt.Printf("dependentCommitments: %v\n", reqCommit.dependentCommitments)
-			fmt.Printf("nodesToInterpolate: %v\n", nodesToInterpolate)
+		log.Debugf("layer: %d, idx: %d", reqCommit.layer, reqCommit.idx)
+		if reqCommit.BlockRange == nil {
+			log.Debugf("Commitment is not covering any range.")
+		} else {
+			log.Debugf("sb: %d, eb: %d", reqCommit.BlockRange.Start, reqCommit.BlockRange.End)
+		}
+		log.Debugf("dependentCommitments: %v", reqCommit.dependentCommitments)
+		log.Debugf("nodesToInterpolate: %v", nodesToInterpolate)
 
 			treeKey := fmt.Sprintf("%d:%d", layer, idx)
 			batchTree := requiredTreeBatchesMap[treeKey]
@@ -208,7 +209,7 @@ func GetNewProofRange(account common.Address, startingVersion, endingVersion uin
 				storedBytes := storedCommitment.Bytes()
 				rebuiltBytes := pCommit.Bytes()
 				commitMatch := storedCommitment.Equal(&pCommit)
-				fmt.Printf("DEBUG layer %d idx %d: stored=%x rebuilt=%x match=%v\n", layer, idx, storedBytes[:8], rebuiltBytes[:8], commitMatch)
+				log.Debugf("DEBUG layer %d idx %d: stored=%x rebuilt=%x match=%v", layer, idx, storedBytes[:8], rebuiltBytes[:8], commitMatch)
 
 				ZCommit, _ := kzg.CommitG2(Z, precomputedData.SRS.G2Powers)
 				ICommit, err := gnark_kzg.Commit(I, precomputedData.SRS.Inner.Pk)
@@ -222,55 +223,55 @@ func GetNewProofRange(account common.Address, startingVersion, endingVersion uin
 				if !ok {
 					// Recompute commitment from P
 					pCommit, _ := gnark_kzg.Commit(P, precomputedData.SRS.Inner.Pk)
-					fmt.Printf("Stored Commitment: %x\n", storedCommitment.Bytes())
-					fmt.Printf("Rebuilt Tree Commitment: %x\n", pCommit.Bytes())
+				log.Debugf("Stored Commitment: %x", storedCommitment.Bytes())
+				log.Debugf("Rebuilt Tree Commitment: %x", pCommit.Bytes())
 
-					// Load the stored tree from DB for comparison
-					storedLXTree := tree.GetCurrentLXBatchTree(account, db.TreeDB)
-					storedBatchTree := storedLXTree[layer-1]
+				// Load the stored tree from DB for comparison
+				storedLXTree := tree.GetCurrentLXBatchTree(account, db.TreeDB)
+				storedBatchTree := storedLXTree[layer-1]
 
-					fmt.Println("--- Comparing Rebuilt vs Stored BatchTree ---")
-					diffCount := 0
-					for i := 0; i < len(batchTree); i++ {
-						rebuilt := batchTree[i]
-						stored := storedBatchTree[i]
-						if rebuilt != stored {
-							diffCount++
-							if diffCount <= 50 { // limit output
-								fmt.Printf("DIFF Idx %d: rebuilt=%s stored=%s\n", i, rebuilt.Hex(), stored.Hex())
-							}
+				log.Debugf("--- Comparing Rebuilt vs Stored BatchTree ---")
+				diffCount := 0
+				for i := 0; i < len(batchTree); i++ {
+					rebuilt := batchTree[i]
+					stored := storedBatchTree[i]
+					if rebuilt != stored {
+						diffCount++
+						if diffCount <= 50 { // limit output
+							log.Debugf("DIFF Idx %d: rebuilt=%s stored=%s", i, rebuilt.Hex(), stored.Hex())
 						}
 					}
-					fmt.Printf("Total differing indices: %d\n", diffCount)
+				}
+				log.Debugf("Total differing indices: %d", diffCount)
 
-					// Also dump non-zero entries of rebuilt tree
-					nonZeroCount := 0
-					for i, h := range batchTree {
-						if h != (common.Hash{}) {
-							nonZeroCount++
-							if nonZeroCount <= 30 {
-								fmt.Printf("Rebuilt NonZero Idx %d: %s\n", i, h.Hex())
-							}
+				// Also dump non-zero entries of rebuilt tree
+				nonZeroCount := 0
+				for i, h := range batchTree {
+					if h != (common.Hash{}) {
+						nonZeroCount++
+						if nonZeroCount <= 30 {
+							log.Debugf("Rebuilt NonZero Idx %d: %s", i, h.Hex())
 						}
 					}
-					fmt.Printf("Total non-zero entries in rebuilt tree: %d\n", nonZeroCount)
+				}
+				log.Debugf("Total non-zero entries in rebuilt tree: %d", nonZeroCount)
 
-					// Dump non-zero entries of stored tree
-					storedNonZeroCount := 0
-					for i, h := range storedBatchTree {
-						if h != (common.Hash{}) {
-							storedNonZeroCount++
-							if storedNonZeroCount <= 30 {
-								fmt.Printf("Stored NonZero Idx %d: %s\n", i, h.Hex())
-							}
+				// Dump non-zero entries of stored tree
+				storedNonZeroCount := 0
+				for i, h := range storedBatchTree {
+					if h != (common.Hash{}) {
+						storedNonZeroCount++
+						if storedNonZeroCount <= 30 {
+							log.Debugf("Stored NonZero Idx %d: %s", i, h.Hex())
 						}
 					}
-					fmt.Printf("Total non-zero entries in stored tree: %d\n", storedNonZeroCount)
-					fmt.Println("--- End Comparison ---")
+				}
+				log.Debugf("Total non-zero entries in stored tree: %d", storedNonZeroCount)
+				log.Debugf("--- End Comparison ---")
 
 					panic("pairing check failed.")
 				} else {
-					fmt.Println("Pairing check passed.✅")
+					log.Infof("Pairing check passed.")
 				}
 			}
 

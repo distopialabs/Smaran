@@ -10,7 +10,10 @@ import (
 	fr "github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
 	"github.com/consensys/gnark-crypto/ecc/bls12-381/fr/polynomial"
 	gnark_kzg "github.com/consensys/gnark-crypto/ecc/bls12-381/kzg"
+	"github.com/nepal80m/samurai/internal/logging"
 )
+
+var log = logging.GetLogger("kzg")
 
 const (
 	// domainSize      = 4096
@@ -29,7 +32,7 @@ const (
 // Computes the vanishing polynomial and the barycentric weights
 // and stores them as raw binary files (32 bytes per field element).
 func PrecomputeBarycentricData(domainSize int, wPath string, vPath string) error {
-	fmt.Println("[barycentric] precomputing vanishing polynomial and weights …")
+	log.Infof("[barycentric] precomputing vanishing polynomial and weights …")
 
 	// Build vanishing polynomial V(x) incrementally.
 	V := make(polynomial.Polynomial, 1)
@@ -81,13 +84,13 @@ func PrecomputeBarycentricData(domainSize int, wPath string, vPath string) error
 	if err := dumpFieldSlice(vPath, V); err != nil {
 		return err
 	}
-	fmt.Println("[barycentric] precomputation done, data saved to", wPath, vPath)
+	log.Infof("[barycentric] precomputation done, data saved to %s %s", wPath, vPath)
 	return nil
 }
 
 func PrecomputeBarycentricCommits(domainSize int, wcPath string, srs *MultiSRS) error {
 
-	fmt.Println("[barycentric] precomputing vanishing polynomial and weights …")
+	log.Infof("[barycentric] precomputing vanishing polynomial and weights …")
 
 	// Build vanishing polynomial V(x) incrementally.
 	V := make(polynomial.Polynomial, 1)
@@ -148,7 +151,7 @@ func PrecomputeBarycentricCommits(domainSize int, wcPath string, srs *MultiSRS) 
 	if err := dumpDigestSlice(wcPath, weightCommits); err != nil {
 		return err
 	}
-	fmt.Println("[barycentric] precomputation done, data saved to", wcPath)
+	log.Infof("[barycentric] precomputation done, data saved to %s", wcPath)
 	return nil
 }
 
@@ -181,7 +184,7 @@ func LoadBarycentricData(domainSize int, srs *MultiSRS, paramsDir string) (V pol
 	V = readFieldSlice(vPath, domainSize+1)
 
 	elapsed := time.Since(start)
-	fmt.Println("Barycentric data loading time:", elapsed)
+	log.Infof("Barycentric data loading time: %v", elapsed)
 	return
 }
 

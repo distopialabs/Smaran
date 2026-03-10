@@ -65,7 +65,7 @@ func verifyProofs() {
 	flag.Parse()
 
 	if accountArg == "" || endBlockArg < startBlockArg {
-		fmt.Fprintln(os.Stderr, "usage: verify-proofs -account <addr> -start <n> -end <n> [-dir <proofDir>] [-rpc <endpoint>] [-concurrency <n>]")
+		log.Errorf("usage: verify-proofs -account <addr> -start <n> -end <n> [-dir <proofDir>] [-rpc <endpoint>] [-concurrency <n>]")
 		os.Exit(2)
 	}
 	if concurrency <= 0 {
@@ -77,7 +77,7 @@ func verifyProofs() {
 
 	cl, err := rpc.DialContext(ctx, rpcArg)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "dial RPC:", err)
+		log.Errorf("dial RPC: %v", err)
 		os.Exit(1)
 	}
 	defer cl.Close()
@@ -147,10 +147,10 @@ func verifyProofs() {
 			}
 		} else {
 			failCount++
-			fmt.Fprintf(os.Stderr, "block %d: %v\n", res.block, res.err)
+			log.Errorf("block %d: %v", res.block, res.err)
 		}
 		if processed%progressEvery == 0 {
-			fmt.Printf("progress: %d/%d verified (ok=%d fail=%d)\n", processed, totalJobs, okCount, failCount)
+			log.Infof("progress: %d/%d verified (ok=%d fail=%d)", processed, totalJobs, okCount, failCount)
 		}
 	}
 
@@ -162,15 +162,15 @@ func verifyProofs() {
 		avgE2E = time.Duration(int64(sumE2E) / int64(okCount))
 	}
 
-	fmt.Println("================ Summary ================")
-	fmt.Printf("Account:      %s\n", account.Hex())
-	fmt.Printf("Blocks:       %d - %d (%d total)\n", startBlockArg, endBlockArg, totalJobs)
-	fmt.Printf("Concurrency:  %d (CPUs: %d)\n", concurrency, runtime.NumCPU())
-	fmt.Printf("Verified OK:  %d\n", okCount)
-	fmt.Printf("Failed:       %d\n", failCount)
-	fmt.Printf("Total time:   %s (%.2f proofs/sec)\n", totalWall, float64(okCount)/totalWall.Seconds())
-	fmt.Printf("Verify time:  min=%s max=%s avg=%s\n", minVerify, maxVerify, avgVerify)
-	fmt.Printf("End-to-end:   min=%s max=%s avg=%s\n", minE2E, maxE2E, avgE2E)
+	log.Infof("================ Summary ================")
+	log.Infof("Account:      %s", account.Hex())
+	log.Infof("Blocks:       %d - %d (%d total)", startBlockArg, endBlockArg, totalJobs)
+	log.Infof("Concurrency:  %d (CPUs: %d)", concurrency, runtime.NumCPU())
+	log.Infof("Verified OK:  %d", okCount)
+	log.Infof("Failed:       %d", failCount)
+	log.Infof("Total time:   %s (%.2f proofs/sec)", totalWall, float64(okCount)/totalWall.Seconds())
+	log.Infof("Verify time:  min=%s max=%s avg=%s", minVerify, maxVerify, avgVerify)
+	log.Infof("End-to-end:   min=%s max=%s avg=%s", minE2E, maxE2E, avgE2E)
 }
 
 func verifyOne(ctx context.Context, cl *rpc.Client, account common.Address, proofDir string, block uint64) result {

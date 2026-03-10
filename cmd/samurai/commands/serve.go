@@ -2,7 +2,6 @@ package commands
 
 import (
 	"fmt"
-	"log"
 
 	"github.com/nepal80m/samurai/internal/config"
 	"github.com/nepal80m/samurai/internal/db"
@@ -15,8 +14,8 @@ func RunServe(port int, dbs []*db.SamuraiDB, precomputedData *config.Precomputed
 
 	proofServer := server.NewProofServer(dbs, precomputedData, cfg)
 
-	log.Printf("Starting Samurai gRPC server on port %d", port)
+	log.Infof("Starting Samurai gRPC server on port %d", port)
 	if err := server.ListenAndServe(addr, proofServer); err != nil {
-		log.Fatalf("failed to serve: %v", err)
+		log.Fatalf("Failed to serve: %v", err)
 	}
 }

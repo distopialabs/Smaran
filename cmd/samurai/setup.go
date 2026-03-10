@@ -4,14 +4,18 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 
 	"github.com/cockroachdb/pebble"
 	"github.com/nepal80m/samurai/internal/config"
 	"github.com/nepal80m/samurai/internal/crypto/kzg"
 	"github.com/nepal80m/samurai/internal/db"
+	"github.com/nepal80m/samurai/internal/logging"
 	"github.com/nepal80m/samurai/internal/storage"
 	"github.com/nepal80m/samurai/internal/tree"
 )
+
+var log = logging.GetLogger("samurai")
 
 // StartBlock is the first block of 2024 (Ethereum mainnet).
 const StartBlock = uint64(18908895)
@@ -28,6 +32,8 @@ func BuildConfig(flags *Flags) *config.Config {
 		endBlock = startBlock + uint64(flags.NumBlocks-1)
 	}
 
+	numCPU := runtime.GOMAXPROCS(0)
+
 	return &config.Config{
 		Clean:           flags.Clean,
 		BlocksDataDir:   "./data/blocks",
@@ -37,12 +43,12 @@ func BuildConfig(flags *Flags) *config.Config {
 			EndingBlockNumber:   endBlock,
 		},
 		Workers: config.Workers{
-			CommitWorkerCount:       32,
+			CommitWorkerCount:       numCPU,
 			CommitWorkerQueueSize:   1_000_000,
 			CommitWorkerChannelSize: 5_000,
 		},
 		Database: config.Database{
-			Shards:       32,
+			Shards:       numCPU,
 			MemTableSize: 64 << 20, // 64MB
 			DisableWAL:   true,
 			CacheSize:    80_000_000,
@@ -96,7 +102,7 @@ func SetupDatabases(cfg *config.Config, cleanOnCommit bool) ([]*db.SamuraiDB, []
 		if cleanOnCommit {
 			dirsToRemove := []string{stateDBPath, treeDBPath, historyDBPath}
 			for _, dir := range dirsToRemove {
-				fmt.Println("Removing database directory", dir)
+				log.Infof("Removing database directory %s", dir)
 				if err := os.RemoveAll(dir); err != nil {
 					return nil, nil, fmt.Errorf("failed to remove database directory %s: %w", dir, err)
 				}
@@ -187,13 +193,13 @@ func Cleanup(caches []*storage.Cache, dbs []*db.SamuraiDB) {
 	for i := range caches {
 		if caches[i] != nil {
 			caches[i].Close()
-			fmt.Println("Cache", i, "closed")
+			log.Infof("Cache %d closed", i)
 		}
 	}
 	for i := range dbs {
 		if dbs[i] != nil {
 			dbs[i].Close()
-			fmt.Println("Database", i, "closed")
+			log.Infof("Database %d closed", i)
 		}
 	}
 }

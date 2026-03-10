@@ -9,6 +9,7 @@ require (
 	github.com/ethereum/go-ethereum v1.16.0
 	github.com/gogo/protobuf v1.3.2
 	github.com/hashicorp/golang-lru/v2 v2.0.7
+	github.com/op/go-logging v0.0.0-20160315200505-970db520ece7
 	google.golang.org/grpc v1.78.0
 	google.golang.org/protobuf v1.36.11
 )

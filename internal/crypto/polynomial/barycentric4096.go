@@ -9,7 +9,10 @@ import (
 
 	fr "github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
 	"github.com/consensys/gnark-crypto/ecc/bls12-381/fr/polynomial"
+	"github.com/nepal80m/samurai/internal/logging"
 )
+
+var log = logging.GetLogger("polynomial")
 
 const (
 	// domainSize      = 4096
@@ -37,7 +40,7 @@ func PrecomputeBarycentricData(domainSize int, wPath string, vPath string) error
 	// 	}
 	// }
 
-	fmt.Println("[barycentric] precomputing vanishing polynomial and weights …")
+	log.Infof("[barycentric] precomputing vanishing polynomial and weights …")
 
 	// Build vanishing polynomial V(x) incrementally.
 	V := make(polynomial.Polynomial, 1)
@@ -89,7 +92,7 @@ func PrecomputeBarycentricData(domainSize int, wPath string, vPath string) error
 	if err := dumpFieldSlice(vPath, V); err != nil {
 		return err
 	}
-	fmt.Println("[barycentric] precomputation done, data saved to", wPath, vPath)
+	log.Infof("[barycentric] precomputation done, data saved to %s %s", wPath, vPath)
 	return nil
 }
 
@@ -118,7 +121,7 @@ func LoadBarycentricData(domainSize int, dataDir string) (V polynomial.Polynomia
 	V = readFieldSlice(vPath, domainSize+1)
 
 	elapsed := time.Since(start)
-	fmt.Println("Barycentric data loading time:", elapsed)
+	log.Infof("Barycentric data loading time: %v", elapsed)
 	return
 }
 

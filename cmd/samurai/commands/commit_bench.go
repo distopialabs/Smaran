@@ -19,9 +19,9 @@ import (
 // RunCommitBenchmark runs the commit generation in benchmark mode.
 // It runs for a fixed duration, collecting per-worker latency and throughput.
 func RunCommitBenchmark(cfg *config.Config, caches []*storage.Cache, dbs []*db.PebbleDB) {
-	fmt.Printf("\n🚀 Starting Benchmark Mode\n")
-	fmt.Printf("   Duration: %d seconds\n", cfg.Benchmark.DurationSecs)
-	fmt.Printf("   Workers: %d\n", cfg.Workers.CommitWorkerCount)
+	log.Infof("Starting Benchmark Mode")
+	log.Infof("   Duration: %d seconds", cfg.Benchmark.DurationSecs)
+	log.Infof("   Workers: %d", cfg.Workers.CommitWorkerCount)
 
 	// Initialize metrics collector (per-worker latency and throughput)
 	metrics, err := benchmark.NewMetricsCollector(cfg.Benchmark.OutputDir)
@@ -57,7 +57,7 @@ func RunCommitBenchmark(cfg *config.Config, caches []*storage.Cache, dbs []*db.P
 	// Stop fetcher after benchmark duration
 	go func() {
 		time.Sleep(benchDuration)
-		fmt.Printf("\n⏱️  Benchmark duration reached (%v), stopping block fetcher...\n", benchDuration)
+		log.Infof("Benchmark duration reached (%v), stopping block fetcher...", benchDuration)
 		stopFetching.Store(true)
 	}()
 
@@ -85,7 +85,7 @@ func RunCommitBenchmark(cfg *config.Config, caches []*storage.Cache, dbs []*db.P
 	wg.Wait()
 
 	totalDuration := time.Since(benchStart)
-	fmt.Printf("\n✅ Benchmark completed in %v\n", totalDuration.Round(time.Millisecond))
+	log.Infof("Benchmark completed in %v", totalDuration.Round(time.Millisecond))
 }
 
 func spawnBlockFetcherBenchmark(
@@ -104,13 +104,13 @@ func spawnBlockFetcherBenchmark(
 	blocksSubmitted := 0
 	for bn := startingBlockNumber; bn <= endingBlockNumber; bn++ {
 		if stopFetching.Load() {
-			fmt.Printf("⏱️ Block fetcher stopped by timer after %d blocks\n", blocksSubmitted)
+			log.Infof("Block fetcher stopped by timer after %d blocks", blocksSubmitted)
 			return
 		}
 
 		entries, err := r.GetBlock(uint32(bn))
 		if err != nil {
-			fmt.Printf("⚠️Block fetcher stopped: dataset exhausted at block %d (%d blocks submitted): %v\n", bn, blocksSubmitted, err)
+			log.Warningf("Block fetcher stopped: dataset exhausted at block %d (%d blocks submitted): %v", bn, blocksSubmitted, err)
 			return
 		}
 
@@ -122,11 +122,11 @@ func spawnBlockFetcherBenchmark(
 		blocksSubmitted++
 
 		if blocksSubmitted%10000 == 0 {
-			fmt.Printf("📦 Submitted %d blocks to pipeline\n", blocksSubmitted)
+			log.Infof("Submitted %d blocks to pipeline", blocksSubmitted)
 		}
 	}
 
-	fmt.Printf("📦 Block fetcher completed full range (%d blocks)\n", blocksSubmitted)
+	log.Infof("Block fetcher completed full range (%d blocks)", blocksSubmitted)
 }
 
 func feedUpdateTasksBenchmark(
@@ -148,7 +148,7 @@ func feedUpdateTasksBenchmark(
 			for i := range cfg.Workers.CommitWorkerCount {
 				totalDropped += updateTaskQueues[i].Size()
 			}
-			fmt.Printf("⏱️ Update feeder stopped by timer. Dropped %d queued updates.\n", totalDropped)
+			log.Infof("Update feeder stopped by timer. Dropped %d queued updates.", totalDropped)
 			break
 		}
 
@@ -227,9 +227,9 @@ func feedUpdateTasksBenchmark(
 		}
 	}
 
-	fmt.Println("📤 Closing worker channels, letting in-flight updates complete...")
+	log.Infof("Closing worker channels, letting in-flight updates complete...")
 	for i := range cfg.Workers.CommitWorkerCount {
 		close(updateTaskChs[i])
 	}
-	fmt.Println("📤 All worker channels closed")
+	log.Infof("All worker channels closed")
 }

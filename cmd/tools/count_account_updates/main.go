@@ -3,8 +3,6 @@ package main
 import (
 	"encoding/csv"
 	"flag"
-	"fmt"
-	"log"
 	"os"
 	"sort"
 	"strconv"
@@ -12,7 +10,10 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/nepal80m/samurai/internal/dataset"
+	"github.com/nepal80m/samurai/internal/logging"
 )
+
+var log = logging.GetLogger("count_updates")
 
 func main() {
 	var (
@@ -23,11 +24,11 @@ func main() {
 	)
 	flag.Parse()
 
-	log.Printf("Starting account update analysis...")
-	log.Printf("Dataset: %s", *datasetDir)
-	log.Printf("Start Block: %d", *startBlock)
-	log.Printf("Blocks: %d", *numBlocks)
-	log.Printf("Output: %s", *toolsOutputPath)
+	log.Infof("Starting account update analysis...")
+	log.Infof("Dataset: %s", *datasetDir)
+	log.Infof("Start Block: %d", *startBlock)
+	log.Infof("Blocks: %d", *numBlocks)
+	log.Infof("Output: %s", *toolsOutputPath)
 
 	ds := dataset.NewDatasetReader(*datasetDir, dataset.SEGMENT_SIZE)
 	defer ds.Close()
@@ -46,7 +47,7 @@ func main() {
 			totalUpdates++
 		}
 		if n%1000 == 0 {
-			fmt.Printf("\rProcessed block %d... (Total updates: %d, Unique accounts: %d)", n, totalUpdates, len(updateCounts))
+			log.Infof("Processed block %d... (Total updates: %d, Unique accounts: %d)", n, totalUpdates, len(updateCounts))
 		}
 		return nil
 	}
@@ -54,12 +55,11 @@ func main() {
 	// Iterate
 	err := ds.IterateRange(uint32(*startBlock), uint32(*startBlock+*numBlocks-1), processBlock)
 	if err != nil {
-		log.Fatalf("\nError iterating dataset: %v", err)
+		log.Fatalf("Error iterating dataset: %v", err)
 	}
-	fmt.Println()
 
-	log.Printf("Analysis complete in %v", time.Since(startTime))
-	log.Printf("Total unique accounts: %d", len(updateCounts))
+	log.Infof("Analysis complete in %v", time.Since(startTime))
+	log.Infof("Total unique accounts: %d", len(updateCounts))
 
 	// Sort by count descending
 	type accountStat struct {
@@ -96,5 +96,5 @@ func main() {
 		}
 	}
 
-	log.Printf("Results written to %s", *toolsOutputPath)
+	log.Infof("Results written to %s", *toolsOutputPath)
 }

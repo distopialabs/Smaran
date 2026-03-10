@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"net"
 	"time"
 
@@ -13,12 +12,15 @@ import (
 	proofpb "github.com/nepal80m/samurai/api/proto/v1"
 	"github.com/nepal80m/samurai/internal/config"
 	"github.com/nepal80m/samurai/internal/db"
+	"github.com/nepal80m/samurai/internal/logging"
 	"github.com/nepal80m/samurai/internal/proof"
 	"github.com/nepal80m/samurai/internal/utils"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
+
+var log = logging.GetLogger("server")
 
 // ProofServer implements the ProofServiceServer gRPC interface.
 type ProofServer struct {
@@ -60,13 +62,13 @@ func (s *ProofServer) GetProof(ctx context.Context, req *proofpb.GetProofRequest
 	shardIdx := utils.AddressToShardIndex(addr, s.cfg.Database.Shards)
 	sdb := s.dbs[shardIdx]
 
-	log.Printf("GetProof request: account=%s, startBlock=%d, endBlock=%d, shard=%d",
+	log.Infof("GetProof request: account=%s, startBlock=%d, endBlock=%d, shard=%d",
 		addr.Hex(), startBlock, endBlock, shardIdx)
 
 	// Convert block range to version range
 	startingVersion, endingVersion, err := proof.BlockRangeToVersionRange(addr, startBlock, endBlock, s.cfg, sdb)
 	if err != nil {
-		log.Printf("Error converting block range [%d, %d] to version range for account %s: %v", startBlock, endBlock, addr.Hex(), err)
+		log.Errorf("Error converting block range [%d, %d] to version range for account %s: %v", startBlock, endBlock, addr.Hex(), err)
 		// Check error type using sentinel errors
 		if errors.Is(err, proof.ErrBlockRangeOutOfBounds) {
 			return nil, status.Errorf(codes.OutOfRange, "block range outside account's recorded history: %v", err)
@@ -80,14 +82,14 @@ func (s *ProofServer) GetProof(ctx context.Context, req *proofpb.GetProofRequest
 		return nil, status.Errorf(codes.Internal, "failed to process block range: %v", err)
 	}
 
-	log.Printf("Resolved version range: startVersion=%d, endVersion=%d", startingVersion, endingVersion)
+	log.Infof("Resolved version range: startVersion=%d, endVersion=%d", startingVersion, endingVersion)
 
 	// Generate proofs
 	start := time.Now()
 	rangeProofs, balanceInfos := proof.GetNewProofRange(addr, startingVersion, endingVersion, s.precomputedData, sdb)
 	generationTimeMs := time.Since(start).Milliseconds()
 
-	log.Printf("Generated %d range proofs and %d balance infos in %dms",
+	log.Infof("Generated %d range proofs and %d balance infos in %dms",
 		len(rangeProofs), len(balanceInfos), generationTimeMs)
 
 	// Convert to protobuf response
@@ -128,13 +130,13 @@ func (s *ProofServer) GetProofStream(req *proofpb.GetProofRequest, stream proofp
 	shardIdx := utils.AddressToShardIndex(addr, s.cfg.Database.Shards)
 	sdb := s.dbs[shardIdx]
 
-	log.Printf("GetProofStream request: account=%s, startBlock=%d, endBlock=%d, shard=%d",
+	log.Infof("GetProofStream request: account=%s, startBlock=%d, endBlock=%d, shard=%d",
 		addr.Hex(), startBlock, endBlock, shardIdx)
 
 	// Convert block range to version range
 	startingVersion, endingVersion, err := proof.BlockRangeToVersionRange(addr, startBlock, endBlock, s.cfg, sdb)
 	if err != nil {
-		log.Printf("Error converting block range [%d, %d] to version range for account %s: %v", startBlock, endBlock, addr.Hex(), err)
+		log.Errorf("Error converting block range [%d, %d] to version range for account %s: %v", startBlock, endBlock, addr.Hex(), err)
 		if errors.Is(err, proof.ErrBlockRangeOutOfBounds) {
 			return status.Errorf(codes.OutOfRange, "block range outside account's recorded history: %v", err)
 		}
@@ -147,14 +149,14 @@ func (s *ProofServer) GetProofStream(req *proofpb.GetProofRequest, stream proofp
 		return status.Errorf(codes.Internal, "failed to process block range: %v", err)
 	}
 
-	log.Printf("Resolved version range: startVersion=%d, endVersion=%d", startingVersion, endingVersion)
+	log.Infof("Resolved version range: startVersion=%d, endVersion=%d", startingVersion, endingVersion)
 
 	// Generate proofs
 	start := time.Now()
 	rangeProofs, balanceInfos := proof.GetNewProofRange(addr, startingVersion, endingVersion, s.precomputedData, sdb)
 	generationTimeMs := time.Since(start).Milliseconds()
 
-	log.Printf("Generated %d range proofs and %d balance infos in %dms. Streaming...",
+	log.Infof("Generated %d range proofs and %d balance infos in %dms. Streaming...",
 		len(rangeProofs), len(balanceInfos), generationTimeMs)
 
 	// Range proofs are small (max 7), we can send them all in the first message
@@ -214,6 +216,6 @@ func ListenAndServe(addr string, server *ProofServer) error {
 	grpcServer := grpc.NewServer()
 	proofpb.RegisterProofServiceServer(grpcServer, server)
 
-	log.Printf("Starting gRPC server on %s", addr)
+	log.Infof("Starting gRPC server on %s", addr)
 	return grpcServer.Serve(lis)
 }

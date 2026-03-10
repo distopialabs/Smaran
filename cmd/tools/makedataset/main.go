@@ -3,7 +3,6 @@ package main
 import (
 	"flag"
 	"fmt"
-	"log"
 	"math/big"
 	"runtime"
 	"sync"
@@ -13,9 +12,12 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/rpc"
 
-	"github.com/nepal80m/samurai/internal/dataset"
 	"github.com/nepal80m/samurai/internal/account"
+	"github.com/nepal80m/samurai/internal/dataset"
+	"github.com/nepal80m/samurai/internal/logging"
 )
+
+var log = logging.GetLogger("makedataset")
 
 type blockInfo struct {
 	Number           uint64
@@ -37,6 +39,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to connect to Erigon IPC: %v", err)
 	}
+
 	defer client.Close()
 
 	if *testMode {
@@ -49,7 +52,7 @@ func main() {
 
 func fetchAndWriteDataset(startBlock uint64, endBlock uint64, client *rpc.Client, dataDir string) {
 	workers := runtime.NumCPU()
-	fmt.Println("Workers:", workers)
+	log.Infof("Workers: %d", workers)
 	blockInfoCh := make(chan blockInfo, 1024)
 	orderedBlockInfoCh := make(chan blockInfo, 1024)
 	fetchWorkerCount := workers
@@ -74,7 +77,7 @@ func fetchAndWriteDataset(startBlock uint64, endBlock uint64, client *rpc.Client
 		if err != nil {
 			panic(fmt.Errorf("failed to append block %d: %w", blk.Number, err))
 		}
-		fmt.Println("Block", blk.Number, "with", len(blk.ModifiedAccounts), "accounts added to the dataset")
+		log.Infof("Block %d with %d accounts added to the dataset", blk.Number, len(blk.ModifiedAccounts))
 	}
 
 }
@@ -112,13 +115,13 @@ func spawnBlockFetcher(fetchWorkerCount int, startBlock uint64, endBlock uint64,
 					ModifiedAccounts: modifiedAccounts,
 					Balances:         balances,
 				}
-				fmt.Println("Block", bn, "fetched and sent to the blockInfoCh")
+				log.Infof("Block %d fetched and sent to the blockInfoCh", bn)
 			}
 		}()
 	}
 	go func() {
 		wg.Wait()
-		fmt.Println("All blocks fetched and sent to the blockInfoCh, closing the channel")
+		log.Infof("All blocks fetched and sent to the blockInfoCh, closing the channel")
 		close(blockInfoCh)
 	}()
 
@@ -133,12 +136,12 @@ func spawnBlockOrderer(blockInfoCh chan blockInfo, orderedBlockInfoCh chan block
 		for blkInfo := range blockInfoCh {
 			if blkInfo.Number == nextBlockToProcess {
 				orderedBlockInfoCh <- blkInfo
-				fmt.Println("Block", blkInfo.Number, "ordered and sent to the orderedBlockInfoCh")
+				log.Infof("Block %d ordered and sent to the orderedBlockInfoCh", blkInfo.Number)
 				nextBlockToProcess++
 				for {
 					if blk, ok := pendingBlocks[nextBlockToProcess]; ok {
 						orderedBlockInfoCh <- blk
-						fmt.Println("Block", blk.Number, "ordered and sent to the orderedBlockInfoCh")
+						log.Infof("Block %d ordered and sent to the orderedBlockInfoCh", blk.Number)
 						delete(pendingBlocks, nextBlockToProcess)
 						nextBlockToProcess++
 					} else {
@@ -149,10 +152,10 @@ func spawnBlockOrderer(blockInfoCh chan blockInfo, orderedBlockInfoCh chan block
 				pendingBlocks[blkInfo.Number] = blkInfo
 			}
 			if len(pendingBlocks) > 1000 {
-				fmt.Println("🚨💾💣 Pending blocks:", len(pendingBlocks))
+				log.Criticalf("Pending blocks: %d", len(pendingBlocks))
 				panic(fmt.Sprintf("Pending blocks exceeded safe limit: %d", len(pendingBlocks)))
 			} else if len(pendingBlocks) > 50 {
-				fmt.Println("⚠️💾💣 Pending blocks:", len(pendingBlocks))
+				log.Warningf("Pending blocks: %d", len(pendingBlocks))
 				// }
 			}
 		}
@@ -169,7 +172,7 @@ func sanityCheck(testBlock uint64, client *rpc.Client, dataDir string) {
 	if err != nil {
 		panic(fmt.Errorf("failed to get balances for block %d: %w", testBlock, err))
 	}
-	fmt.Println("Test block", testBlock, "with", len(actualModifiedAccounts), "accounts and", len(actualBalances), "balances")
+	log.Infof("Test block %d with %d accounts and %d balances", testBlock, len(actualModifiedAccounts), len(actualBalances))
 	actualEntries := make([]dataset.Entry, 0, len(actualModifiedAccounts))
 	for i, addr := range actualModifiedAccounts {
 		actualEntries = append(actualEntries, dataset.Entry{
@@ -189,9 +192,9 @@ func sanityCheck(testBlock uint64, client *rpc.Client, dataDir string) {
 		panic(fmt.Errorf("actual entries and fetched entries have different lengths"))
 	}
 	for i := range actualEntries {
-		fmt.Println("Account:", common.BytesToAddress(actualEntries[i].Address[:]), "Balance:", actualEntries[i].Balance)
-		fmt.Println("Account:", common.BytesToAddress(fetchedEntries[i].Address[:]), "Balance:", fetchedEntries[i].Balance)
-		fmt.Println("--------------------------------")
+		log.Infof("Account: %s Balance: %v", common.BytesToAddress(actualEntries[i].Address[:]).Hex(), actualEntries[i].Balance)
+		log.Infof("Account: %s Balance: %v", common.BytesToAddress(fetchedEntries[i].Address[:]).Hex(), fetchedEntries[i].Balance)
+		log.Infof("--------------------------------")
 		if actualEntries[i].Address != fetchedEntries[i].Address {
 			panic(fmt.Errorf("actual entries and fetched entries have different addresses"))
 		}
@@ -200,7 +203,7 @@ func sanityCheck(testBlock uint64, client *rpc.Client, dataDir string) {
 		}
 	}
 
-	fmt.Println("Test block", testBlock, "with", len(actualModifiedAccounts), "accounts and", len(actualBalances), "balances passed")
+	log.Infof("Test block %d with %d accounts and %d balances passed", testBlock, len(actualModifiedAccounts), len(actualBalances))
 
 }
 
@@ -211,24 +214,24 @@ func logChannelSize(blockInfoCh chan blockInfo, orderedBlockInfoCh chan blockInf
 			time.Sleep(1 * time.Second)
 			remaining := cap(blockInfoCh) - len(blockInfoCh)
 			if remaining > 5 {
-				fmt.Printf("BlockInfoCh: %d/%d\n", len(blockInfoCh), cap(blockInfoCh))
+				log.Infof("BlockInfoCh: %d/%d", len(blockInfoCh), cap(blockInfoCh))
 			}
 			if remaining > 0 && remaining < 5 {
-				fmt.Printf("⚠️ BlockInfoCh is almost full: %d/%d\n", len(blockInfoCh), cap(blockInfoCh))
+				log.Warningf("BlockInfoCh is almost full: %d/%d", len(blockInfoCh), cap(blockInfoCh))
 			}
 			if remaining <= 0 {
-				fmt.Printf("🚨 BlockInfoCh is full: %d/%d\n", len(blockInfoCh), cap(blockInfoCh))
+				log.Errorf("BlockInfoCh is full: %d/%d", len(blockInfoCh), cap(blockInfoCh))
 			}
 
 			remaining = cap(orderedBlockInfoCh) - len(orderedBlockInfoCh)
 			if remaining > 5 {
-				fmt.Printf("OrderedBlockInfoCh: %d/%d\n", len(orderedBlockInfoCh), cap(orderedBlockInfoCh))
+				log.Infof("OrderedBlockInfoCh: %d/%d", len(orderedBlockInfoCh), cap(orderedBlockInfoCh))
 			}
 			if remaining > 0 && remaining < 5 {
-				fmt.Printf("⚠️ OrderedBlockInfoCh is almost full, %d/%d\n", len(orderedBlockInfoCh), cap(orderedBlockInfoCh))
+				log.Warningf("OrderedBlockInfoCh is almost full, %d/%d", len(orderedBlockInfoCh), cap(orderedBlockInfoCh))
 			}
 			if remaining <= 0 {
-				fmt.Printf("🚨 OrderedBlockInfoCh is full: %d/%d\n", len(orderedBlockInfoCh), cap(orderedBlockInfoCh))
+				log.Errorf("OrderedBlockInfoCh is full: %d/%d", len(orderedBlockInfoCh), cap(orderedBlockInfoCh))
 			}
 
 		}

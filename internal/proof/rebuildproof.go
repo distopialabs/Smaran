@@ -82,7 +82,7 @@ func RebuildSegmentTreeForProof(account common.Address, lxRequiredBatchIdxs map[
 		extraTime += time.Since(extraStart)
 	}
 
-	fmt.Printf("Time taken to add leaf nodes to segment tree: %v with %v db fetch time and %v leaf add time and %v extra time\n", time.Since(start), dbFetchTime, leadAddTime, extraTime)
+	log.Infof("Time taken to add leaf nodes to segment tree: %v with %v db fetch time and %v leaf add time and %v extra time", time.Since(start), dbFetchTime, leadAddTime, extraTime)
 
 	start = time.Now()
 
@@ -97,7 +97,7 @@ func RebuildSegmentTreeForProof(account common.Address, lxRequiredBatchIdxs map[
 		}
 	}
 
-	fmt.Println("Time taken to insert commitment hashes into segment tree: ", time.Since(start))
+	log.Infof("Time taken to insert commitment hashes into segment tree: %v", time.Since(start))
 
 	return requiredTreeBatchesMap, requiredHBInfos
 }

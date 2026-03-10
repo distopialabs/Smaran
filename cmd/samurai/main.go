@@ -1,8 +1,6 @@
 package main
 
 import (
-	"fmt"
-	"log"
 	_ "net/http/pprof"
 	"runtime"
 	"time"
@@ -14,9 +12,9 @@ import (
 func main() {
 	flags := ParseFlags()
 
-	fmt.Println("Starting Samurai", time.Now())
-	fmt.Println("NumCPU:", runtime.NumCPU())
-	fmt.Println("Mode:", flags.Mode)
+	log.Infof("Starting Samurai %v", time.Now())
+	log.Infof("NumCPU: %d", runtime.NumCPU())
+	log.Infof("Mode: %s", flags.Mode)
 
 	if flags.Profile {
 		defer ProfileCPU(flags.ProfilePath)()
@@ -28,20 +26,20 @@ func main() {
 	// Setup precomputed cryptographic data
 	precomputedData, err := SetupPrecomputedData(cfg)
 	if err != nil {
-		log.Fatalf("failed to setup precomputed data: %v", err)
+		log.Fatalf("Failed to setup precomputed data: %v", err)
 	}
 
 	// Setup databases (clean only if explicitly requested with --clean)
 	cleanOnCommit := flags.Mode == "commit" && cfg.Clean
 	dbs, pebbleDbs, err := SetupDatabases(cfg, cleanOnCommit)
 	if err != nil {
-		log.Fatalf("failed to setup databases: %v", err)
+		log.Fatalf("Failed to setup databases: %v", err)
 	}
 
 	// Setup caches
 	caches, err := SetupCaches(dbs, cfg, precomputedData)
 	if err != nil {
-		log.Fatalf("failed to setup caches: %v", err)
+		log.Fatalf("Failed to setup caches: %v", err)
 	}
 
 	// Cleanup on exit
@@ -65,6 +63,6 @@ func main() {
 	case "verify":
 		commands.RunVerify(flags.QueryStartBlock, flags.QueryEndBlock, precomputedData.V, precomputedData.Weights, precomputedData.SRS)
 	default:
-		log.Fatalf("unknown mode: %s", flags.Mode)
+		log.Fatalf("Unknown mode: %s", flags.Mode)
 	}
 }

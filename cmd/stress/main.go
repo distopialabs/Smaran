@@ -6,7 +6,10 @@ import (
 	"time"
 
 	"github.com/nepal80m/samurai/internal/dataset"
+	"github.com/nepal80m/samurai/internal/logging"
 )
+
+var log = logging.GetLogger("stress")
 
 func main() {
 	numBlocks := flag.Int("n", 100, "Number of blocks to fetch")
@@ -23,6 +26,6 @@ func main() {
 		}
 		// fmt.Println("Block", n, "with", len(entries), "accounts")
 	}
-	fmt.Println("Time taken to fetch", *numBlocks, "blocks:", time.Since(start))
+	log.Infof("Time taken to fetch %d blocks: %v", *numBlocks, time.Since(start))
 	r.Close()
 }

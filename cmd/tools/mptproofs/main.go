@@ -1,6 +1,12 @@
 package main
 
-import "flag"
+import (
+	"flag"
+
+	"github.com/nepal80m/samurai/internal/logging"
+)
+
+var log = logging.GetLogger("mptproofs")
 
 func main() {
 	// read mode and call respective functions

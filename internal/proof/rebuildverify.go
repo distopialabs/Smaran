@@ -48,7 +48,7 @@ func RebuildSegmentTreeForVerify(account common.Address, lxRequiredBatchIdxs map
 		}
 	}
 
-	fmt.Println("Time taken to add leaf nodes in segment tree", time.Since(start))
+	log.Infof("Time taken to add leaf nodes in segment tree: %v", time.Since(start))
 	start = time.Now()
 	// fill in the commitHash part of the batch trees with commitments provided from prover.
 	for _, commit := range reqCommits {
@@ -74,7 +74,7 @@ func RebuildSegmentTreeForVerify(account common.Address, lxRequiredBatchIdxs map
 		}
 
 	}
-	fmt.Println("Time taken to fill in the commitHash part of the batch trees", time.Since(start))
+	log.Infof("Time taken to fill in the commitHash part of the batch trees: %v", time.Since(start))
 	return requiredTreeBatchesMap
 
 }

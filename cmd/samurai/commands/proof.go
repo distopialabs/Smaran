@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"fmt"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -16,23 +15,23 @@ func RunProof(addr common.Address, queryStartBlock uint64, queryEndBlock uint64,
 	shardIdx := utils.AddressToShardIndex(addr, cfg.Database.Shards)
 	db := dbs[shardIdx]
 
-	fmt.Println("Generating range proofs for account", addr.Hex())
-	fmt.Println("Query start block", queryStartBlock, "Query end block", queryEndBlock)
+	log.Infof("Generating range proofs for account %s", addr.Hex())
+	log.Infof("Query start block %d Query end block %d", queryStartBlock, queryEndBlock)
 
 	startingVersion, endingVersion, err := proof.BlockRangeToVersionRange(addr, queryStartBlock, queryEndBlock, cfg, db)
 	if err != nil {
-		fmt.Printf("Error: Failed to convert block range [%d, %d] to version range for account %s\n", queryStartBlock, queryEndBlock, addr.Hex())
-		fmt.Printf("Reason: %v\n", err)
-		fmt.Println("Hint: Ensure the query block range overlaps with the account's recorded history.")
+		log.Errorf("Failed to convert block range [%d, %d] to version range for account %s", queryStartBlock, queryEndBlock, addr.Hex())
+		log.Errorf("Reason: %v", err)
+		log.Infof("Hint: Ensure the query block range overlaps with the account's recorded history.")
 		return
 	}
-	fmt.Printf("Resolved version range: startVersion=%d, endVersion=%d\n", startingVersion, endingVersion)
+	log.Infof("Resolved version range: startVersion=%d, endVersion=%d", startingVersion, endingVersion)
 
 	start := time.Now()
 	rangeProofs, balanceInfos := proof.GetNewProofRange(addr, startingVersion, endingVersion, precomputedData, db)
-	fmt.Println("Time taken to generate range proofs", time.Since(start))
+	log.Infof("Time taken to generate range proofs: %v", time.Since(start))
 
-	fmt.Println("Range proofs", rangeProofs)
+	log.Infof("Range proofs: %v", rangeProofs)
 	// for _, b := range balanceInfos {
 	// 	fmt.Println("Balance info", b.Version, b.StartBlock, b.EndBlock, b.Balance)
 	// 	// fmt.Println("Balance info", b.Version, hexutil.EncodeUint64(b.StartBlock), hexutil.EncodeUint64(b.EndBlock), hexutil.EncodeBig(b.Balance))
@@ -57,5 +56,5 @@ func RunProof(addr common.Address, queryStartBlock uint64, queryEndBlock uint64,
 	proof.VerifyNewRangeProofs(addr, startingVersion, endingVersion, rangeProofs, balanceInfos, precomputedData)
 
 	start = time.Now()
-	fmt.Println("Time taken to verify range proofs", time.Since(start))
+	log.Infof("Time taken to verify range proofs: %v", time.Since(start))
 }

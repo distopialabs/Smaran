@@ -2,7 +2,6 @@ package main
 
 import (
 	"flag"
-	"log"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/nepal80m/samurai/internal/fetcher"
@@ -21,4 +20,5 @@ func fetchProofs() {
 	if err := fetcher.RunProofFetcher(*alchemyURL, common.HexToAddress(*addrFlag), *startBlock, *endBlock, *outDir, *rps); err != nil {
 		log.Fatalf("proof fetcher failed: %v", err)
 	}
+
 }

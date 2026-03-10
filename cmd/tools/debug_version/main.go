@@ -3,15 +3,17 @@ package main
 import (
 	"flag"
 	"fmt"
-	"log"
 	"os"
 
 	"github.com/cockroachdb/pebble"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/nepal80m/samurai/internal/db"
+	"github.com/nepal80m/samurai/internal/logging"
 	"github.com/nepal80m/samurai/internal/tree"
 	"github.com/nepal80m/samurai/internal/utils"
 )
+
+var log = logging.GetLogger("debug_version")
 
 func main() {
 	var datadir string
@@ -24,15 +26,15 @@ func main() {
 	flag.Parse()
 
 	if accountHex == "" {
-		fmt.Println("Usage: go run . -account 0x... [-datadir /path/to/data] [-shards 32]")
+		log.Infof("Usage: go run . -account 0x... [-datadir /path/to/data] [-shards 32]")
 		os.Exit(1)
 	}
 
 	account := common.HexToAddress(accountHex)
 	shardIdx := utils.AddressToShardIndex(account, numShards)
 
-	fmt.Printf("Debugging account: %s\n", account.Hex())
-	fmt.Printf("Shard index: %d\n\n", shardIdx)
+	log.Infof("Debugging account: %s", account.Hex())
+	log.Infof("Shard index: %d", shardIdx)
 
 	// Open shard databases (read-only)
 	stateDBPath := fmt.Sprintf("%ssamurai-shard-%d-state.db", datadir, shardIdx)
@@ -48,44 +50,45 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to open historyDB at %s: %v", historyDBPath, err)
 	}
+
 	defer historyDB.Close()
 
 	// 1. Get Current Balance Info
-	fmt.Println("=== Current Version (CurrentBalance) ===")
+	log.Infof("=== Current Version (CurrentBalance) ===")
 	cbInfo, err := tree.GetCurrentBalanceInfo(account, stateDB)
 	if err != nil {
-		fmt.Printf("Error: Account not found in stateDB: %v\n", err)
+		log.Errorf("Account not found in stateDB: %v", err)
 		os.Exit(1)
 	}
-	fmt.Printf("Version:    %d\n", cbInfo.Version)
-	fmt.Printf("Balance:    %s\n", cbInfo.Balance.String())
-	fmt.Printf("StartBlock: %d\n", cbInfo.StartBlock)
+	log.Infof("Version:    %d", cbInfo.Version)
+	log.Infof("Balance:    %s", cbInfo.Balance.String())
+	log.Infof("StartBlock: %d", cbInfo.StartBlock)
 
 	// 2. Get First Historical Balance (version 0)
-	fmt.Println("\n=== First Historical Balance (version 0) ===")
+	log.Infof("=== First Historical Balance (version 0) ===")
 	firstHb := tree.GetHistoricalBalance(account, 0, historyDB)
-	fmt.Printf("Version:    %d\n", firstHb.Version)
-	fmt.Printf("Balance:    %s\n", firstHb.Balance.String())
-	fmt.Printf("StartBlock: %d\n", firstHb.StartBlock)
-	fmt.Printf("EndBlock:   %d\n", firstHb.EndBlock)
+	log.Infof("Version:    %d", firstHb.Version)
+	log.Infof("Balance:    %s", firstHb.Balance.String())
+	log.Infof("StartBlock: %d", firstHb.StartBlock)
+	log.Infof("EndBlock:   %d", firstHb.EndBlock)
 
 	// 3. Check if query range [18908915, 19108915] overlaps
 	queryStart := uint64(18908915)
 	queryEnd := uint64(19108915)
 
-	fmt.Println("\n=== Query Range Check ===")
-	fmt.Printf("Query range: [%d, %d]\n", queryStart, queryEnd)
-	fmt.Printf("First recorded block: %d\n", firstHb.StartBlock)
-	fmt.Printf("Current version starts at block: %d\n", cbInfo.StartBlock)
+	log.Infof("=== Query Range Check ===")
+	log.Infof("Query range: [%d, %d]", queryStart, queryEnd)
+	log.Infof("First recorded block: %d", firstHb.StartBlock)
+	log.Infof("Current version starts at block: %d", cbInfo.StartBlock)
 
 	if queryEnd < firstHb.StartBlock {
-		fmt.Printf("\n❌ Query ENDS BEFORE first recorded block!\n")
-		fmt.Printf("   Query ends at:     %d\n", queryEnd)
-		fmt.Printf("   First block is:    %d\n", firstHb.StartBlock)
-		fmt.Printf("   Gap: %d blocks\n", firstHb.StartBlock-queryEnd)
+		log.Warningf("Query ENDS BEFORE first recorded block!")
+		log.Warningf("   Query ends at:     %d", queryEnd)
+		log.Warningf("   First block is:    %d", firstHb.StartBlock)
+		log.Warningf("   Gap: %d blocks", firstHb.StartBlock-queryEnd)
 	} else if queryStart > cbInfo.StartBlock {
-		fmt.Printf("\n❌ Query STARTS AFTER current version!\n")
+		log.Warningf("Query STARTS AFTER current version!")
 	} else {
-		fmt.Printf("\n✅ Query range overlaps with recorded history\n")
+		log.Infof("Query range overlaps with recorded history")
 	}
 }

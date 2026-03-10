@@ -8,7 +8,11 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/nepal80m/samurai/internal/logging"
 )
+
+var log = logging.GetLogger("benchmark")
 
 // UpdateMetric records timing data for a single update operation
 type UpdateMetric struct {
@@ -112,10 +116,10 @@ func NewMetricsCollector(outputDir string) (*MetricsCollector, error) {
 	go mc.blockWriter()
 	go mc.proofWriter()
 
-	fmt.Printf("📊 Benchmark metrics will be written to:\n")
-	fmt.Printf("   Updates: %s\n", updatePath)
-	fmt.Printf("   Blocks:  %s\n", blockPath)
-	fmt.Printf("   Proofs:  %s\n", proofPath)
+	log.Infof("Benchmark metrics will be written to:")
+	log.Infof("   Updates: %s", updatePath)
+	log.Infof("   Blocks:  %s", blockPath)
+	log.Infof("   Proofs:  %s", proofPath)
 
 	return mc, nil
 }
@@ -219,10 +223,10 @@ func (mc *MetricsCollector) Close() error {
 	totalUpdates := mc.totalUpdates.Load()
 	totalBlocks := mc.totalBlocks.Load()
 
-	fmt.Printf("\n📊 Benchmark Summary:\n")
-	fmt.Printf("   Duration: %v\n", duration.Round(time.Millisecond))
-	fmt.Printf("   Total Updates: %d (%.2f updates/sec)\n", totalUpdates, float64(totalUpdates)/duration.Seconds())
-	fmt.Printf("   Total Blocks: %d (%.2f blocks/sec)\n", totalBlocks, float64(totalBlocks)/duration.Seconds())
+	log.Infof("Benchmark Summary:")
+	log.Infof("   Duration: %v", duration.Round(time.Millisecond))
+	log.Infof("   Total Updates: %d (%.2f updates/sec)", totalUpdates, float64(totalUpdates)/duration.Seconds())
+	log.Infof("   Total Blocks: %d (%.2f blocks/sec)", totalBlocks, float64(totalBlocks)/duration.Seconds())
 
 	return nil
 }

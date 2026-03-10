@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"fmt"
 	"time"
 
 	"github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
@@ -19,9 +18,9 @@ func RunVerify(queryStartBlock int, queryEndBlock int, V polynomial.Polynomial, 
 	if err != nil {
 		panic(err)
 	}
-	fmt.Printf("Time taken to read proofs and balances: %v\n", time.Since(start))
+	log.Infof("Time taken to read proofs and balances: %v", time.Since(start))
 
 	start = time.Now()
 	proof.VerifyRangeProofs(queryStartBlock, queryEndBlock, proofs, balances, V, weights, srs)
-	fmt.Println("Time taken to verify range proofs", time.Since(start))
+	log.Infof("Time taken to verify range proofs: %v", time.Since(start))
 }

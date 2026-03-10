@@ -2,11 +2,13 @@ package tree
 
 import (
 	"encoding/json"
-	"fmt"
 	"time"
 
 	bls "github.com/consensys/gnark-crypto/ecc/bls12-381"
+	"github.com/nepal80m/samurai/internal/logging"
 )
+
+var log = logging.GetLogger("tree")
 
 // logBlockedTime logs a warning if a named operation is blocked for longer than d.
 func logBlockedTime(name string, d time.Duration) chan struct{} {
@@ -17,7 +19,7 @@ func logBlockedTime(name string, d time.Duration) chan struct{} {
 		for {
 			select {
 			case <-ticker.C:
-				fmt.Println("🚨", name, "blocked for", time.Since(start))
+				log.Warningf("%s blocked for %v", name, time.Since(start))
 			case <-quit:
 				ticker.Stop()
 				return

@@ -2,8 +2,6 @@ package proof
 
 import (
 	"encoding/json"
-	"fmt"
-	"log"
 	"math/big"
 	"os"
 
@@ -215,6 +213,6 @@ func (segmentTree *ProofSegmentTree) DumpTrees() {
 		log.Fatalf("failed to write l4Tree to file: %v", err)
 	}
 
-	fmt.Println("Dumped trees to json files")
+	log.Infof("Dumped trees to json files")
 
 }
