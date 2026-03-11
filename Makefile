@@ -9,6 +9,7 @@ build:
 	go build -o $(BUILD_DIR)/samurai ./cmd/samurai
 	go build -o $(BUILD_DIR)/proofc ./cmd/proofc
 	go build -o $(BUILD_DIR)/makedataset ./cmd/tools/makedataset
+	go build -o $(BUILD_DIR)/ktserver ./cmd/ktserver
 	@echo "Build artifacts in $(BUILD_DIR)/"
 
 clean:
