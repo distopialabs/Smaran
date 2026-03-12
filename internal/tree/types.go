@@ -144,8 +144,9 @@ func (accountInfo *AccountInfo) Update(blockNumber uint64, balance *big.Int, sdb
 	accountInfo.AddLeafNode(hb.Version, hbHash)
 
 	if cb.Version > 0 && cb.Version%L1BatchSize == 0 {
-		// explicitly persist the finalized commitment before the *next* batch boundary resets it in memory
+		// explicitly persist the finalized commitment and root before the *next* batch boundary resets them in memory
 		StoreLXBatchCommitments(accountInfo.Account, accountInfo.CurrentBalanceInfo.Version, accountInfo.CurrentLXBatchCommitment, sdb.StateDB)
+		StoreLXBatchRoots(accountInfo.Account, accountInfo.CurrentBalanceInfo.Version, accountInfo.CurrentLXBatchTree, sdb.StateDB)
 	}
 }
 
@@ -164,6 +165,7 @@ func (accountInfo *AccountInfo) Save(sdb *db.SamuraiDB) {
 	StoreCurrentBalanceInfo(accountInfo.Account, accountInfo.CurrentBalanceInfo, sdb.StateDB)
 	StoreCurrentLXBatchTree(accountInfo.Account, accountInfo.CurrentLXBatchTree, &accountInfo.DirtyChunks, sdb.TreeDB)
 	StoreLXBatchCommitments(accountInfo.Account, accountInfo.CurrentBalanceInfo.Version, accountInfo.CurrentLXBatchCommitment, sdb.StateDB)
+	StoreLXBatchRoots(accountInfo.Account, accountInfo.CurrentBalanceInfo.Version, accountInfo.CurrentLXBatchTree, sdb.StateDB)
 }
 
 // AddLeafNode updates the tree with a new leaf node.
