@@ -143,7 +143,7 @@ func GetNewProofRange(account common.Address, startingVersion, endingVersion uin
 		// fmt.Printf("layer: %d, idx: %d\n", reqCommit.layer, reqCommit.idx)
 	}
 	start := time.Now()
-	requiredTreeBatchesMap, requiredHBInfos := RebuildSegmentTreeForProof(account, lxRequiredBatchIdxs, startingVersion, endingVersion, db, precomputedData)
+	requiredTreeBatchesMap, requiredHBInfos, cachedCommitments := RebuildSegmentTreeForProof(account, lxRequiredBatchIdxs, startingVersion, endingVersion, db, precomputedData)
 	log.Printf("Time taken to rebuild segment tree: %dms", time.Since(start).Milliseconds())
 
 	allRangeProofs := make([]*RangeProof, len(reqCommits))
@@ -161,28 +161,39 @@ func GetNewProofRange(account common.Address, startingVersion, endingVersion uin
 
 			nodesToInterpolate := findNodesToInterpolate(reqCommit, true)
 
-			fmt.Printf("\n\nlayer: %d, idx: %d, \n", reqCommit.layer, reqCommit.idx)
-			if reqCommit.BlockRange == nil {
-				fmt.Printf("Commitment is not covering any range.\n")
-			} else {
-				fmt.Printf("sb: %d, eb: %d\n", reqCommit.BlockRange.Start, reqCommit.BlockRange.End)
-			}
-			fmt.Printf("dependentCommitments: %v\n", reqCommit.dependentCommitments)
-			fmt.Printf("nodesToInterpolate: %v\n", nodesToInterpolate)
+			// fmt.Printf("\n\nlayer: %d, idx: %d, \n", reqCommit.layer, reqCommit.idx)
+			// if reqCommit.BlockRange == nil {
+			// 	fmt.Printf("Commitment is not covering any range.\n")
+			// } else {
+			// 	fmt.Printf("sb: %d, eb: %d\n", reqCommit.BlockRange.Start, reqCommit.BlockRange.End)
+			// }
+			// fmt.Printf("dependentCommitments: %v\n", reqCommit.dependentCommitments)
+			// fmt.Printf("nodesToInterpolate: %v\n", nodesToInterpolate)
 
 			treeKey := fmt.Sprintf("%d:%d", layer, idx)
 			batchTree := requiredTreeBatchesMap[treeKey]
 
 			xs1 := make([]int, len(batchTree))
 			ys1 := make([]fr.Element, len(batchTree))
+			var zeroHash common.Hash
 			for i, v := range batchTree {
 				xs1[i] = i
+				if v == zeroHash {
+					// Skip HashToFieldElement for zero hashes — result is zero element
+					continue
+				}
 				ys1[i] = polynomial.HashToFieldElement(v)
 				// fmt.Printf("xs1[%d] = %d, ys1[%d] = %s\n", i, i, i, ys1[i].String())
 			}
 			P := polynomial.Interpolate(xs1, ys1, precomputedData.V, precomputedData.Weights)
 
-			storedCommitment := tree.GetBatchCommitment(account, uint64(layer), uint64(idx), db.StateDB)
+			// Use cached commitment from tree rebuild instead of re-fetching from DB
+			commitKey := fmt.Sprintf("%d:%d", layer, idx)
+			storedCommitment, ok := cachedCommitments[commitKey]
+			if !ok {
+				// Fallback to DB fetch if not cached (e.g., L1 commitments)
+				storedCommitment = tree.GetBatchCommitment(account, uint64(layer), uint64(idx), db.StateDB)
+			}
 
 			Z := polynomial.VanishingPolynomial(nodesToInterpolate)
 

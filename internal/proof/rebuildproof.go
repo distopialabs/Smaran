@@ -5,13 +5,13 @@ import (
 	"strconv"
 	"time"
 
+	gnark_kzg "github.com/consensys/gnark-crypto/ecc/bls12-381/kzg"
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/nepal80m/samurai/internal/config"
 	"github.com/nepal80m/samurai/internal/crypto/hash"
 	"github.com/nepal80m/samurai/internal/db"
 	"github.com/nepal80m/samurai/internal/tree"
 	"github.com/nepal80m/samurai/internal/utils"
-
-	"github.com/ethereum/go-ethereum/common"
 )
 
 // RebuildSegmentTreeForProof builds only the required batch trees from stored data.
@@ -23,7 +23,10 @@ import (
 // Layer 2+: fetches stored batch roots from DB as leaf values,
 //
 //	computes intermediary nodes, and fills commitment hashes from stored commitments.
-func RebuildSegmentTreeForProof(account common.Address, lxRequiredBatchIdxs map[uint64][]uint64, startingVersion uint64, endingVersion uint64, sdb *db.SamuraiDB, precomputedData *config.PrecomputedData) (map[string]tree.BatchTree, []*tree.HistoricalBalance) {
+//
+// Returns the tree batches map, all required historical balances, and a map of cached
+// commitments keyed by "layer:batchIdx" to avoid redundant DB fetches downstream.
+func RebuildSegmentTreeForProof(account common.Address, lxRequiredBatchIdxs map[uint64][]uint64, startingVersion uint64, endingVersion uint64, sdb *db.SamuraiDB, precomputedData *config.PrecomputedData) (map[string]tree.BatchTree, []*tree.HistoricalBalance, map[string]gnark_kzg.Digest) {
 
 	cbInfo, err := tree.GetCurrentBalanceInfo(account, sdb.StateDB)
 	if err != nil {
@@ -31,13 +34,12 @@ func RebuildSegmentTreeForProof(account common.Address, lxRequiredBatchIdxs map[
 	}
 
 	requiredTreeBatchesMap := make(map[string]tree.BatchTree)
+	cachedCommitments := make(map[string]gnark_kzg.Digest)
 
 	start := time.Now()
 
-	// --- Collect ALL historical balances in [startingVersion, endingVersion] for the verify path ---
-	// This must be independent of which L1 batches are required for tree building,
-	// because some L1 batches are fully covered by upper-layer commitments and won't
-	// be in lxRequiredBatchIdxs[1], but the verify path still needs their balance data.
+	// --- Fetch ALL historical balances in [startingVersion, endingVersion] once ---
+	// Used for both the return value (verify path) and L1 tree building (dedup).
 	requiredHBInfos := make([]*tree.HistoricalBalance, 0, endingVersion-startingVersion+1)
 	for version := startingVersion; version <= endingVersion; version++ {
 		hbInfo := tree.GetHistoricalBalance(account, version, sdb.HistoryDB)
@@ -59,7 +61,14 @@ func RebuildSegmentTreeForProof(account common.Address, lxRequiredBatchIdxs map[
 		}
 
 		for version := versionStart; version <= versionEnd; version++ {
-			hbInfo := tree.GetHistoricalBalance(account, version, sdb.HistoryDB)
+			// Reuse already-fetched HB if version falls in [startingVersion, endingVersion],
+			// otherwise fetch individually (for versions outside the requested range).
+			var hbInfo *tree.HistoricalBalance
+			if version >= startingVersion && version <= endingVersion {
+				hbInfo = requiredHBInfos[version-startingVersion]
+			} else {
+				hbInfo = tree.GetHistoricalBalance(account, version, sdb.HistoryDB)
+			}
 
 			// Insert leaf at the correct offset position
 			leafIdx := L1BatchSize - 1 + int(version%L1BatchSize)
@@ -97,8 +106,8 @@ func RebuildSegmentTreeForProof(account common.Address, lxRequiredBatchIdxs map[
 				updateBatchTree(&batchTree, uint64(leafIdx), root)
 			}
 
-			// Fill commitment hash positions
-			InsertCommitmentHashes(layer, batchIdx, &batchTree, account, cbInfo.Version, sdb)
+			// Fill commitment hash positions and cache the commitments
+			InsertCommitmentHashes(layer, batchIdx, &batchTree, account, cbInfo.Version, sdb, cachedCommitments)
 
 			key := fmt.Sprintf("%d:%d", layer, batchIdx)
 			requiredTreeBatchesMap[key] = batchTree
@@ -107,7 +116,7 @@ func RebuildSegmentTreeForProof(account common.Address, lxRequiredBatchIdxs map[
 
 	fmt.Printf("Time taken to build upper layer batch trees: %v\n", time.Since(start))
 
-	return requiredTreeBatchesMap, requiredHBInfos
+	return requiredTreeBatchesMap, requiredHBInfos, cachedCommitments
 }
 
 // updateBatchTree inserts a value at the given leaf index and propagates parent hashes upward.
@@ -128,7 +137,7 @@ func updateBatchTree(batchTree *tree.BatchTree, idx uint64, val common.Hash) {
 	}
 }
 
-func InsertCommitmentHashes(layer uint64, batchIdx uint64, batchTree *tree.BatchTree, account common.Address, latestVersion uint64, sdb *db.SamuraiDB) {
+func InsertCommitmentHashes(layer uint64, batchIdx uint64, batchTree *tree.BatchTree, account common.Address, latestVersion uint64, sdb *db.SamuraiDB, cachedCommitments map[string]gnark_kzg.Digest) {
 	if layer <= 1 || layer > MaxLayer {
 		panic("layer" + fmt.Sprintf("%d", layer) + " is invalid")
 	}
@@ -143,6 +152,9 @@ func InsertCommitmentHashes(layer uint64, batchIdx uint64, batchTree *tree.Batch
 	lxm1BatchIdxEnd := min(lxm1BatchIdxStart+L2BatchSize-1, latestLxBatchIdx(layer-1))
 	for bIdx := lxm1BatchIdxStart; bIdx <= lxm1BatchIdxEnd; bIdx++ {
 		commitment := tree.GetBatchCommitment(account, layer-1, bIdx, sdb.StateDB)
+		// Cache the commitment so GetNewProofRange can reuse it
+		cacheKey := fmt.Sprintf("%d:%d", layer-1, bIdx)
+		cachedCommitments[cacheKey] = commitment
 		commitmentHash := hash.CommitmentToHash(commitment)
 		treeIdx := bIdx - lxm1BatchIdxStart + (2 * L2BatchSize) - 1
 		batchTree[treeIdx] = commitmentHash
