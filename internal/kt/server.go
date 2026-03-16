@@ -14,7 +14,8 @@ type PutRequest struct {
 
 // GetRequest is the JSON body for POST /get.
 type GetRequest struct {
-	User []byte `json:"user"`
+	User       []byte `json:"user"`
+	UseCaching bool   `json:"use_caching"`
 }
 
 // GetCommitmentResponse is the JSON body returned by POST /get_commitment.
@@ -39,10 +40,10 @@ type KTHandler struct {
 }
 
 // NewKTHandler creates an HTTP handler for the given protocol.
-func NewKTHandler(protocol Protocol) *KTHandler {
+func NewKTHandler(protocol Protocol, batchSize uint64) *KTHandler {
 	h := &KTHandler{protocol: protocol}
 	if protocol == ProtocolOptiks {
-		h.optiks = NewOptiksServer()
+		h.optiks = NewOptiksServer(batchSize)
 	}
 	return h
 }
@@ -97,7 +98,7 @@ func (h *KTHandler) handleGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := h.optiks.Get(req.User)
+	result, err := h.optiks.Get(req.User, req.UseCaching)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("internal error: %v", err), http.StatusInternalServerError)
 		return

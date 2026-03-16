@@ -2,6 +2,8 @@ package kt
 
 import (
 	"bytes"
+	"fmt"
+	"sync"
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -15,7 +17,7 @@ import (
 // destroy it — subsequent Updates, Gets, and Hash calls still work.
 // See KT.md § "Code structure": "Add a test to check if the Mpt is reusable."
 func TestMPTReusableAfterHash(t *testing.T) {
-	s := NewOptiksServer()
+	s := NewOptiksServer(1)
 
 	// Insert first entry and flush.
 	s.Put([]byte("alice"), []byte("key-v1"))
@@ -43,13 +45,13 @@ func TestMPTReusableAfterHash(t *testing.T) {
 // TestMPTReusableAfterProve verifies that calling Prove (via Get) does not
 // destroy the trie — subsequent updates and proofs still succeed.
 func TestMPTReusableAfterProve(t *testing.T) {
-	s := NewOptiksServer()
+	s := NewOptiksServer(1)
 
 	s.Put([]byte("bob"), []byte("pk-1"))
 	_ = s.GetCommitment()
 
 	// Get generates proofs internally via Prove.
-	result, err := s.Get([]byte("bob"))
+	result, err := s.Get([]byte("bob"), false)
 	if err != nil {
 		t.Fatalf("Get after first put: %v", err)
 	}
@@ -64,7 +66,7 @@ func TestMPTReusableAfterProve(t *testing.T) {
 		t.Fatal("commitment should not be empty")
 	}
 
-	result2, err := s.Get([]byte("bob"))
+	result2, err := s.Get([]byte("bob"), false)
 	if err != nil {
 		t.Fatalf("Get after second put: %v", err)
 	}
@@ -79,13 +81,13 @@ func TestMPTReusableAfterProve(t *testing.T) {
 // TestNonMembershipProofVerifies checks that the non-membership proof for
 // version (n+1) can be verified using trie.VerifyProof.
 func TestNonMembershipProofVerifies(t *testing.T) {
-	s := NewOptiksServer()
+	s := NewOptiksServer(1)
 
 	s.Put([]byte("carol"), []byte("first-key"))
 	commitment := s.GetCommitment()
 	rootHash := common.BytesToHash(commitment)
 
-	result, err := s.Get([]byte("carol"))
+	result, err := s.Get([]byte("carol"), false)
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -115,7 +117,7 @@ func TestNonMembershipProofVerifies(t *testing.T) {
 // TestMembershipProofVerifies checks that each version's membership proof can
 // be verified using trie.VerifyProof.
 func TestMembershipProofVerifies(t *testing.T) {
-	s := NewOptiksServer()
+	s := NewOptiksServer(1)
 
 	s.Put([]byte("dave"), []byte("v1-data"))
 	s.Put([]byte("dave"), []byte("v2-data"))
@@ -124,7 +126,7 @@ func TestMembershipProofVerifies(t *testing.T) {
 	commitment := s.GetCommitment()
 	rootHash := common.BytesToHash(commitment)
 
-	result, err := s.Get([]byte("dave"))
+	result, err := s.Get([]byte("dave"), false)
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -160,13 +162,13 @@ func TestMembershipProofVerifies(t *testing.T) {
 // TestGetUnknownUser verifies that querying a non-existent user returns
 // version 0, nil value, and a valid non-membership proof.
 func TestGetUnknownUser(t *testing.T) {
-	s := NewOptiksServer()
+	s := NewOptiksServer(1)
 
 	// Insert something so the trie is non-empty.
 	s.Put([]byte("existing"), []byte("data"))
 	_ = s.GetCommitment()
 
-	result, err := s.Get([]byte("unknown"))
+	result, err := s.Get([]byte("unknown"), false)
 	if err != nil {
 		t.Fatalf("Get unknown user: %v", err)
 	}
@@ -186,7 +188,7 @@ func TestGetUnknownUser(t *testing.T) {
 
 // TestMultipleUsersIndependent verifies that version tracking is per-user.
 func TestMultipleUsersIndependent(t *testing.T) {
-	s := NewOptiksServer()
+	s := NewOptiksServer(1)
 
 	s.Put([]byte("alice"), []byte("a1"))
 	s.Put([]byte("bob"), []byte("b1"))
@@ -194,7 +196,7 @@ func TestMultipleUsersIndependent(t *testing.T) {
 
 	_ = s.GetCommitment()
 
-	rAlice, err := s.Get([]byte("alice"))
+	rAlice, err := s.Get([]byte("alice"), false)
 	if err != nil {
 		t.Fatalf("Get alice: %v", err)
 	}
@@ -202,11 +204,157 @@ func TestMultipleUsersIndependent(t *testing.T) {
 		t.Fatalf("alice: expected version 2, got %d", rAlice.CurrentVersion)
 	}
 
-	rBob, err := s.Get([]byte("bob"))
+	rBob, err := s.Get([]byte("bob"), false)
 	if err != nil {
 		t.Fatalf("Get bob: %v", err)
 	}
 	if rBob.CurrentVersion != 1 {
 		t.Fatalf("bob: expected version 1, got %d", rBob.CurrentVersion)
+	}
+}
+
+// TestConcurrentPutGetCommitment exercises the RWMutex under high concurrency.
+// Multiple writers call Put for distinct users while many readers call Get and
+// GetCommitment in parallel. The test checks structural invariants on every
+// read result and should be run with -race.
+func TestConcurrentPutGetCommitment(t *testing.T) {
+	const (
+		numWriters       = 8
+		numReaders       = 16
+		putsPerWriter    = 200
+		readsPerReader   = 300
+		usersPerWriter   = 5
+	)
+
+	s := NewOptiksServer(0)
+
+	var wg sync.WaitGroup
+
+	// Writers: each goroutine owns a disjoint set of users and puts
+	// multiple versions for each.
+	for w := 0; w < numWriters; w++ {
+		wg.Add(1)
+		go func(writerID int) {
+			defer wg.Done()
+			for i := 0; i < putsPerWriter; i++ {
+				userIdx := i % usersPerWriter
+				user := fmt.Sprintf("w%d-user%d", writerID, userIdx)
+				key := fmt.Sprintf("key-w%d-u%d-v%d", writerID, userIdx, i)
+				s.Put([]byte(user), []byte(key))
+			}
+		}(w)
+	}
+
+	// Readers: each goroutine reads random users and checks invariants.
+	for r := 0; r < numReaders; r++ {
+		wg.Add(1)
+		go func(readerID int) {
+			defer wg.Done()
+			for i := 0; i < readsPerReader; i++ {
+				writerID := i % numWriters
+				userIdx := i % usersPerWriter
+				user := fmt.Sprintf("w%d-user%d", writerID, userIdx)
+
+				if i%3 == 0 {
+					commitment := s.GetCommitment()
+					if len(commitment) == 0 {
+						t.Error("GetCommitment returned empty slice")
+					}
+					continue
+				}
+
+				useCaching := i%2 == 0
+				result, err := s.Get([]byte(user), useCaching)
+				if err != nil {
+					t.Errorf("reader %d: Get(%s): %v", readerID, user, err)
+					continue
+				}
+
+				n := result.CurrentVersion
+
+				if n > 0 && result.Value == nil {
+					t.Errorf("reader %d: user %s version %d but Value is nil", readerID, user, n)
+				}
+
+				if uint64(len(result.VersionProofs)) != n {
+					t.Errorf("reader %d: user %s expected %d VersionProofs, got %d",
+						readerID, user, n, len(result.VersionProofs))
+				}
+
+				if n > 0 && len(result.NextVersionNonMembershipProof) == 0 {
+					t.Errorf("reader %d: user %s version %d has empty non-membership proof",
+						readerID, user, n)
+				}
+
+				if n > 0 && result.CurrentVersionEpoch == 0 {
+					t.Errorf("reader %d: user %s version %d but CurrentVersionEpoch is 0",
+						readerID, user, n)
+				}
+
+				if useCaching {
+					if len(result.OldVersions) != 0 {
+						t.Errorf("reader %d: useCaching=true but OldVersions has %d entries",
+							readerID, len(result.OldVersions))
+					}
+					if len(result.OldVersionEpochs) != 0 {
+						t.Errorf("reader %d: useCaching=true but OldVersionEpochs has %d entries",
+							readerID, len(result.OldVersionEpochs))
+					}
+				} else {
+					if len(result.OldVersions) != len(result.OldVersionEpochs) {
+						t.Errorf("reader %d: user %s OldVersions len %d != OldVersionEpochs len %d",
+							readerID, user, len(result.OldVersions), len(result.OldVersionEpochs))
+					}
+					if n > 0 && uint64(len(result.OldVersions)) != n-1 {
+						t.Errorf("reader %d: user %s version %d expected %d old versions, got %d",
+							readerID, user, n, n-1, len(result.OldVersions))
+					}
+				}
+			}
+		}(r)
+	}
+
+	wg.Wait()
+
+	// After all writers finish, flush and verify final state is consistent.
+	commitment := s.GetCommitment()
+	if bytes.Equal(commitment, types.EmptyRootHash.Bytes()) {
+		t.Fatal("final commitment should differ from empty trie")
+	}
+
+	// Every user that was written should have the expected version count.
+	for w := 0; w < numWriters; w++ {
+		for u := 0; u < usersPerWriter; u++ {
+			user := fmt.Sprintf("w%d-user%d", w, u)
+			result, err := s.Get([]byte(user), false)
+			if err != nil {
+				t.Fatalf("final Get(%s): %v", user, err)
+			}
+
+			expectedVersions := uint64(putsPerWriter / usersPerWriter)
+			if result.CurrentVersion != expectedVersions {
+				t.Errorf("user %s: expected %d versions, got %d", user, expectedVersions, result.CurrentVersion)
+			}
+
+			if uint64(len(result.OldVersions)) != expectedVersions-1 {
+				t.Errorf("user %s: expected %d old versions, got %d",
+					user, expectedVersions-1, len(result.OldVersions))
+			}
+
+			// Epochs must be monotonically non-decreasing across old → current.
+			for j := 1; j < len(result.OldVersionEpochs); j++ {
+				if result.OldVersionEpochs[j] < result.OldVersionEpochs[j-1] {
+					t.Errorf("user %s: old epoch[%d]=%d < epoch[%d]=%d",
+						user, j, result.OldVersionEpochs[j], j-1, result.OldVersionEpochs[j-1])
+				}
+			}
+			if len(result.OldVersionEpochs) > 0 {
+				lastOld := result.OldVersionEpochs[len(result.OldVersionEpochs)-1]
+				if result.CurrentVersionEpoch < lastOld {
+					t.Errorf("user %s: current epoch %d < last old epoch %d",
+						user, result.CurrentVersionEpoch, lastOld)
+				}
+			}
+		}
 	}
 }

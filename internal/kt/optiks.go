@@ -12,6 +12,8 @@ import (
 	"encoding/hex"
 	"fmt"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/rawdb"
@@ -45,6 +47,12 @@ type OptiksQueryResult struct {
 	NextVersionNonMembershipProof [][]byte `json:"next_version_non_membership_proof"`
 	// VersionProofs[j] stores the MPT proof for version (j+1).
 	VersionProofs [][][]byte `json:"version_proofs"`
+	// CurrentVersionEpoch is the epoch at which the current key was written.
+	CurrentVersionEpoch uint64 `json:"current_version_epoch"`
+	// OldVersions holds all previous key values (versions 1..n-1).
+	OldVersions [][]byte `json:"old_versions"`
+	// OldVersionEpochs holds the epoch for each old key value.
+	OldVersionEpochs []uint64 `json:"old_version_epochs"`
 }
 
 // proofCollector implements ethdb.KeyValueWriter to capture the trie proof
@@ -69,7 +77,7 @@ var _ ethdb.KeyValueWriter = (*proofCollector)(nil)
 // OptiksServer holds all state for the OPTIKS Key Transparency protocol.
 // See KT.md § "OPTIKS protocol" for the struct definition.
 type OptiksServer struct {
-	mu sync.Mutex
+	mu sync.RWMutex
 
 	// updateBuffer accumulates Put calls until the next read forces applyUpdates.
 	// See KT.md § "Handling Put(user, key)".
@@ -96,22 +104,61 @@ type OptiksServer struct {
 
 	// currentKey maps users to their current key value.
 	currentKey map[string][]byte
+
+	// currentEpoch maps users to the epoch at which their current key was written.
+	currentEpoch map[string]uint64
+
+	// oldKeys maps users to all their previous key values (versions 1..n-1).
+	oldKeys map[string][][]byte
+
+	// oldEpochs maps users to the epochs corresponding to each old key.
+	oldEpochs map[string][]uint64
+
+	// batchSize triggers applyUpdates when the updateBuffer reaches this size.
+	// A value of 0 disables batch-triggered flushing.
+	batchSize uint64
+
+	// keysUpdated counts total keys applied, reset every logging interval.
+	keysUpdated atomic.Uint64
+
+	// epoch is incremented (fetch-add) on every applyUpdates call.
+	// It is appended to each key value stored in the trie.
+	epoch atomic.Uint64
 }
 
 // NewOptiksServer initialises an OptiksServer with a blank in-memory MPT.
 // See KT.md: "During gRPC server initialization, initialize OptiksServer
 // with a blank MPT."
-func NewOptiksServer() *OptiksServer {
+func NewOptiksServer(batchSize uint64) *OptiksServer {
 	db := triedb.NewDatabase(rawdb.NewMemoryDatabase(), nil)
 	mpt := trie.NewEmpty(db)
-	return &OptiksServer{
+	s := &OptiksServer{
+		updateBuffer:          make([]OptiksKVPair, 0),
 		rootCommitment:        types.EmptyRootHash,
 		rootCommitmentIsDirty: false,
 		mpt:                   mpt,
 		trieDB:                db,
 		currentVersions:       make(map[string]uint64),
 		currentKey:            make(map[string][]byte),
+		currentEpoch:          make(map[string]uint64),
+		oldKeys:               make(map[string][][]byte),
+		oldEpochs:             make(map[string][]uint64),
+		batchSize:             batchSize,
+		keysUpdated:           atomic.Uint64{},
 	}
+	s.keysUpdated.Store(0)
+	s.epoch.Store(0)
+
+	go func() {
+		ticker := time.NewTicker(1 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			count := s.keysUpdated.Load()
+			log.Infof("keys updated: %d", count)
+		}
+	}()
+
+	return s
 }
 
 // Put buffers a user→key update.
@@ -125,15 +172,26 @@ func (s *OptiksServer) Put(user, key []byte) {
 		Key:  common.CopyBytes(key),
 	})
 	s.rootCommitmentIsDirty = true
+
+	if s.batchSize > 0 && uint64(len(s.updateBuffer)) >= s.batchSize {
+		s.applyUpdates()
+	}
 }
 
 // GetCommitment returns the current MPT root hash, applying pending
 // updates first if needed.
 // See KT.md § "Handling GetCommitment".
 func (s *OptiksServer) GetCommitment() []byte {
+	s.mu.RLock()
+	if !s.rootCommitmentIsDirty {
+		commitment := s.rootCommitment.Bytes()
+		s.mu.RUnlock()
+		return commitment
+	}
+	s.mu.RUnlock()
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
 	if s.rootCommitmentIsDirty {
 		s.applyUpdates()
 	}
@@ -141,16 +199,29 @@ func (s *OptiksServer) GetCommitment() []byte {
 }
 
 // Get returns the current key value and all version proofs for a user.
+// When useCaching is true, OldVersions and OldVersionEpochs are returned
+// as empty slices. When false, all previous keys and their epochs are included.
 // See KT.md § "Handling Get(user)".
-func (s *OptiksServer) Get(user []byte) (*OptiksQueryResult, error) {
+func (s *OptiksServer) Get(user []byte, useCaching bool) (*OptiksQueryResult, error) {
+	s.mu.RLock()
+	if !s.rootCommitmentIsDirty {
+		result, err := s.getResult(user, useCaching)
+		s.mu.RUnlock()
+		return result, err
+	}
+	s.mu.RUnlock()
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
-	// Apply pending updates so the trie is consistent.
 	if s.rootCommitmentIsDirty {
 		s.applyUpdates()
 	}
+	return s.getResult(user, useCaching)
+}
 
+// getResult builds the OptiksQueryResult for a user.
+// Must be called with s.mu held (read or write).
+func (s *OptiksServer) getResult(user []byte, useCaching bool) (*OptiksQueryResult, error) {
 	userKey := string(user)
 	n := s.currentVersions[userKey] // 0 if not present
 
@@ -176,11 +247,27 @@ func (s *OptiksServer) Get(user []byte) (*OptiksQueryResult, error) {
 		}
 	}
 
+	var oldVersions [][]byte
+	var oldVersionEpochs []uint64
+	if !useCaching {
+		oldVersions = s.oldKeys[userKey]
+		oldVersionEpochs = s.oldEpochs[userKey]
+	}
+	if oldVersions == nil {
+		oldVersions = [][]byte{}
+	}
+	if oldVersionEpochs == nil {
+		oldVersionEpochs = []uint64{}
+	}
+
 	return &OptiksQueryResult{
 		Value:                         s.currentKey[userKey],
 		CurrentVersion:                n,
 		NextVersionNonMembershipProof: nonMembershipProof,
 		VersionProofs:                 versionProofs,
+		CurrentVersionEpoch:           s.currentEpoch[userKey],
+		OldVersions:                   oldVersions,
+		OldVersionEpochs:              oldVersionEpochs,
 	}, nil
 }
 
@@ -191,9 +278,12 @@ func (s *OptiksServer) applyUpdates() {
 	// Step 1: clear the dirty flag immediately.
 	s.rootCommitmentIsDirty = false
 
+	// Advance the epoch (fetch-add).
+	epoch := s.epoch.Add(1)
+
 	type trieUpdate struct {
 		account []byte // trie key (Keccak256 of user||version)
-		value   []byte // RLP-encoded key bytes
+		value   []byte // RLP-encoded (epoch || key) bytes
 	}
 
 	// Step 2: iterate through each buffered pair.
@@ -201,8 +291,15 @@ func (s *OptiksServer) applyUpdates() {
 	for _, pair := range s.updateBuffer {
 		userKey := string(pair.User)
 
-		// Insert user→key into CurrentKey.
+		// Archive the previous key+epoch before overwriting (version >= 2).
+		if oldKey, ok := s.currentKey[userKey]; ok {
+			s.oldKeys[userKey] = append(s.oldKeys[userKey], common.CopyBytes(oldKey))
+			s.oldEpochs[userKey] = append(s.oldEpochs[userKey], s.currentEpoch[userKey])
+		}
+
+		// Insert user→key into CurrentKey and record the epoch.
 		s.currentKey[userKey] = common.CopyBytes(pair.Key)
+		s.currentEpoch[userKey] = epoch
 
 		// Increment (or initialise) CurrentVersions[user].
 		if _, ok := s.currentVersions[userKey]; !ok {
@@ -217,8 +314,13 @@ func (s *OptiksServer) applyUpdates() {
 		// Ethereum account identifier in the MPT.
 		_account := makeTrieKey(pair.User, ver)
 
-		// RLP-encode the key value for Ethereum-compatible leaf encoding.
-		_value, err := rlp.EncodeToBytes(pair.Key)
+		// Build the leaf value: pair.Key || bigEndian(epoch).
+		leafValue := make([]byte, 8+len(pair.Key))
+		binary.BigEndian.PutUint64(leafValue[:8], epoch) // Order is important here.
+		copy(leafValue[8:], pair.Key)
+
+		// RLP-encode the leaf value for Ethereum-compatible leaf encoding.
+		_value, err := rlp.EncodeToBytes(leafValue)
 		if err != nil {
 			log.Errorf("RLP encode failed for user %s version %d: %v",
 				hex.EncodeToString(pair.User), ver, err)
@@ -241,6 +343,8 @@ func (s *OptiksServer) applyUpdates() {
 	// Step 5: recompute and store the root commitment.
 	// Hash() does NOT commit the trie, so the trie stays usable.
 	s.rootCommitment = s.mpt.Hash()
+
+	s.keysUpdated.Add(uint64(len(updates)))
 }
 
 // proveKey generates an MPT proof for the given trie key and returns the
