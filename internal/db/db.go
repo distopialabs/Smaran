@@ -19,6 +19,9 @@ type DB interface {
 	// Set stores a key-value pair.
 	Set(key []byte, value []byte, sync bool) error
 
+	// Delete removes a key from the database.
+	Delete(key []byte, sync bool) error
+
 	// Close closes the database.
 	Close() error
 
@@ -30,6 +33,9 @@ type DB interface {
 type Batch interface {
 	// Set adds a key-value pair to the batch.
 	Set(key []byte, value []byte, sync bool)
+
+	// Delete removes a key in the batch.
+	Delete(key []byte, sync bool)
 
 	// Commit writes all batched operations.
 	Commit(sync bool) error

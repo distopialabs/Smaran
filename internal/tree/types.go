@@ -189,6 +189,11 @@ func (accountInfo *AccountInfo) AddLeafNode(leafNodeIdx uint64, leafNodeHash com
 		if (leafNodeIdx % (L1BatchSize * utils.PowUint64(L2BatchSize, uint64(layer)-1))) == 0 {
 			accountInfo.CurrentLXBatchTree[layer-1] = BatchTree{}
 			accountInfo.CurrentLXBatchCommitment[layer-1] = gnark_kzg.Digest{}
+			// Mark all chunks dirty so Save() will delete stale chunks from DB
+			totalChunks := SegmentTreeSize / ChunkSize
+			for chunkIdx := 0; chunkIdx < totalChunks; chunkIdx++ {
+				accountInfo.DirtyChunks[layer-1][chunkIdx] = true
+			}
 		}
 	}
 

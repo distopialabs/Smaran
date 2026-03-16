@@ -93,12 +93,29 @@ func StoreCurrentLXBatchTree(account common.Address, batchTree *LXBatchTree, dir
 				if endIdx > SegmentTreeSize {
 					endIdx = SegmentTreeSize
 				}
-				chunkData := make([]byte, (endIdx-startIdx)*common.HashLength)
+
+				// Check if the chunk is entirely empty (all zero hashes)
+				isEmpty := true
 				for i := startIdx; i < endIdx; i++ {
-					copy(chunkData[(i-startIdx)*common.HashLength:], batchTree[layer-1][i][:])
+					if (batchTree[layer-1][i] != common.Hash{}) {
+						isEmpty = false
+						break
+					}
 				}
-				if err := d.Set([]byte(key), chunkData, false); err != nil {
-					panic(fmt.Errorf("failed to store batch tree chunk: %w", err))
+
+				if isEmpty {
+					// Delete stale chunk from DB to reclaim space
+					if err := d.Delete([]byte(key), false); err != nil {
+						panic(fmt.Errorf("failed to delete empty batch tree chunk: %w", err))
+					}
+				} else {
+					chunkData := make([]byte, (endIdx-startIdx)*common.HashLength)
+					for i := startIdx; i < endIdx; i++ {
+						copy(chunkData[(i-startIdx)*common.HashLength:], batchTree[layer-1][i][:])
+					}
+					if err := d.Set([]byte(key), chunkData, false); err != nil {
+						panic(fmt.Errorf("failed to store batch tree chunk: %w", err))
+					}
 				}
 			}
 		}
