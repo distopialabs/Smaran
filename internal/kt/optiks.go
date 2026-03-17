@@ -8,6 +8,7 @@
 package kt
 
 import (
+	"bytes"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
@@ -18,7 +19,6 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/trie"
@@ -53,6 +53,10 @@ type OptiksQueryResult struct {
 	OldVersions [][]byte `json:"old_versions"`
 	// OldVersionEpochs holds the epoch for each old key value.
 	OldVersionEpochs []uint64 `json:"old_version_epochs"`
+	// CommonProofPrefix holds the shared leading proof nodes across all
+	// membership and non-membership proofs. Individual proof fields store
+	// only the suffix after this prefix, reducing payload size.
+	CommonProofPrefix [][]byte `json:"common_proof_prefix"`
 }
 
 // proofCollector implements ethdb.KeyValueWriter to capture the trie proof
@@ -247,6 +251,20 @@ func (s *OptiksServer) getResult(user []byte, useCaching bool) (*OptiksQueryResu
 		}
 	}
 
+	// Compute the common prefix of all proof node lists (non-membership + membership).
+	allProofs := make([][][]byte, 0, 1+len(versionProofs))
+	allProofs = append(allProofs, nonMembershipProof)
+	allProofs = append(allProofs, versionProofs...)
+
+	commonPrefix := computeCommonProofPrefix(allProofs)
+	prefixLen := len(commonPrefix)
+
+	// Strip the common prefix from each proof.
+	nonMembershipProof = nonMembershipProof[prefixLen:]
+	for i := range versionProofs {
+		versionProofs[i] = versionProofs[i][prefixLen:]
+	}
+
 	var oldVersions [][]byte
 	var oldVersionEpochs []uint64
 	if !useCaching {
@@ -268,7 +286,50 @@ func (s *OptiksServer) getResult(user []byte, useCaching bool) (*OptiksQueryResu
 		CurrentVersionEpoch:           s.currentEpoch[userKey],
 		OldVersions:                   oldVersions,
 		OldVersionEpochs:              oldVersionEpochs,
+		CommonProofPrefix:             commonPrefix,
 	}, nil
+}
+
+// computeCommonProofPrefix returns the longest leading sequence of proof nodes
+// that is identical across every proof in the slice. Each proof is a [][]byte
+// where elements are RLP-encoded trie nodes ordered root-to-leaf; since proofs
+// for keys sharing a trie path share the same leading nodes, factoring them out
+// reduces the per-proof payload.
+func computeCommonProofPrefix(proofs [][][]byte) [][]byte {
+	if len(proofs) == 0 {
+		return nil
+	}
+
+	minLen := len(proofs[0])
+	for _, p := range proofs[1:] {
+		if len(p) < minLen {
+			minLen = len(p)
+		}
+	}
+
+	prefixLen := 0
+	for i := 0; i < minLen; i++ {
+		ref := proofs[0][i]
+		allEqual := true
+		for _, p := range proofs[1:] {
+			if !bytes.Equal(ref, p[i]) {
+				allEqual = false
+				break
+			}
+		}
+		if !allEqual {
+			break
+		}
+		prefixLen++
+	}
+
+	if prefixLen == 0 {
+		return nil
+	}
+
+	prefix := make([][]byte, prefixLen)
+	copy(prefix, proofs[0][:prefixLen])
+	return prefix
 }
 
 // applyUpdates flushes the updateBuffer into the MPT.
@@ -356,6 +417,10 @@ func (s *OptiksServer) proveKey(trieKey []byte) ([][]byte, error) {
 		return nil, err
 	}
 	// log.Debugf("MPT proof succeeded for key %s %v", hex.EncodeToString(trieKey), pc.nodes)
+
+	// Mess up the proofs so it fails verification.
+	// Change the last byte of the last proof to 0x00.
+	// pc.nodes[len(pc.nodes)-1][len(pc.nodes[len(pc.nodes)-1])-1] = 0x00
 	return pc.nodes, nil
 }
 
@@ -364,8 +429,12 @@ func (s *OptiksServer) proveKey(trieKey []byte) ([][]byte, error) {
 // then Keccak256-hashes the result (mirroring how Ethereum hashes account
 // addresses before trie lookup).
 func makeTrieKey(user []byte, version uint64) []byte {
-	buf := make([]byte, len(user)+8)
+	if len(user)+8 > 32 {
+		panic(fmt.Sprintf("trie key is too long: %d", len(user)+8))
+	}
+	buf := make([]byte, 32)
 	copy(buf, user)
 	binary.BigEndian.PutUint64(buf[len(user):], version)
-	return crypto.Keccak256(buf)
+
+	return buf
 }

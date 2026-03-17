@@ -48,6 +48,7 @@ type optiksQueryResult struct {
 	CurrentVersionEpoch           uint64     `json:"current_version_epoch"`
 	OldVersions                   [][]byte   `json:"old_versions"`
 	OldVersionEpochs              []uint64   `json:"old_version_epochs"`
+	CommonProofPrefix             [][]byte   `json:"common_proof_prefix"`
 }
 
 type getCommitmentResponse struct {
@@ -55,11 +56,14 @@ type getCommitmentResponse struct {
 }
 
 type runClientMetrics struct {
-	TotalRequestsCompleted int64
-	TotalProofGenLatency   time.Duration
-	TotalVerifyLatency     time.Duration
-	TotalLatency           time.Duration
-	TotalPayloadSize       int64
+	TotalRequestsCompleted    int64
+	TotalProofGenLatency      time.Duration
+	TotalVerifyLatency        time.Duration
+	TotalLatency              time.Duration
+	TotalPayloadSize          int64
+	TotalCommonPrefixSize     int64
+	TotalProofElements        int64
+	TotalCommonPrefixElements int64
 }
 
 func main() {
@@ -133,6 +137,9 @@ func main() {
 		total.TotalVerifyLatency += m.TotalVerifyLatency
 		total.TotalLatency += m.TotalLatency
 		total.TotalPayloadSize += m.TotalPayloadSize
+		total.TotalCommonPrefixSize += m.TotalCommonPrefixSize
+		total.TotalProofElements += m.TotalProofElements
+		total.TotalCommonPrefixElements += m.TotalCommonPrefixElements
 	}
 
 	log.Infof("Run phase complete in %v", time.Since(runStart))
@@ -141,12 +148,18 @@ func main() {
 	log.Infof("Total verify latency: %v", total.TotalVerifyLatency)
 	log.Infof("Total latency: %v", total.TotalLatency)
 	log.Infof("Total payload: %d bytes", total.TotalPayloadSize)
+	log.Infof("Total common prefix size: %d bytes", total.TotalCommonPrefixSize)
+	log.Infof("Total proof elements: %d", total.TotalProofElements)
+	log.Infof("Total common prefix elements: %d", total.TotalCommonPrefixElements)
 	if total.TotalRequestsCompleted > 0 {
 		n := float64(total.TotalRequestsCompleted)
 		log.Infof("Avg proof-gen latency: %s", time.Duration(float64(total.TotalProofGenLatency)/n))
 		log.Infof("Avg verify latency: %s", time.Duration(float64(total.TotalVerifyLatency)/n))
 		log.Infof("Avg latency: %s", time.Duration(float64(total.TotalLatency)/n))
 		log.Infof("Avg payload: %.3f bytes", float64(total.TotalPayloadSize)/n)
+		log.Infof("Avg common prefix size: %.3f bytes", float64(total.TotalCommonPrefixSize)/n)
+		log.Infof("Avg proof elements: %.3f", float64(total.TotalProofElements)/n)
+		log.Infof("Avg common prefix elements: %.3f", float64(total.TotalCommonPrefixElements)/n)
 	}
 	log.Infof("Benchmark complete.")
 }
@@ -302,12 +315,24 @@ func runRunClient(clientID int, addr string, numUsers int, useCaching bool, dura
 		proofGenLatency := time.Since(reqStart)
 
 		verifyStart := time.Now()
+		var commonPrefixSize int64
+		var proofElements int64
+		var commonPrefixElements int64
 		if protocol == "optiks" {
 			var result optiksQueryResult
 			if err := json.Unmarshal(respBody, &result); err != nil {
 				log.Errorf("[Run %d] unmarshal Get response: %v", clientID, err)
 			} else {
 				verifyOptiksResult(clientID, user, &result, rootHash)
+				commonPrefixElements = int64(len(result.CommonProofPrefix))
+				for _, node := range result.CommonProofPrefix {
+					commonPrefixSize += int64(len(node))
+				}
+				numProofs := int64(1 + len(result.VersionProofs))
+				proofElements = commonPrefixElements*numProofs + int64(len(result.NextVersionNonMembershipProof))
+				for _, proof := range result.VersionProofs {
+					proofElements += int64(len(proof))
+				}
 			}
 		}
 		verifyLatency := time.Since(verifyStart)
@@ -319,6 +344,9 @@ func runRunClient(clientID int, addr string, numUsers int, useCaching bool, dura
 		metrics.TotalVerifyLatency += verifyLatency
 		metrics.TotalLatency += totalLatency
 		metrics.TotalPayloadSize += int64(len(respBody))
+		metrics.TotalCommonPrefixSize += commonPrefixSize
+		metrics.TotalProofElements += proofElements
+		metrics.TotalCommonPrefixElements += commonPrefixElements
 
 		if time.Since(lastLogTime) >= time.Second {
 			n := float64(metrics.TotalRequestsCompleted)
@@ -326,8 +354,11 @@ func runRunClient(clientID int, addr string, numUsers int, useCaching bool, dura
 			avgVer := time.Duration(float64(metrics.TotalVerifyLatency) / n)
 			avgTot := time.Duration(float64(metrics.TotalLatency) / n)
 			avgPay := float64(metrics.TotalPayloadSize) / n
-			log.Infof("[Run %d] reqs=%d avgProofGen=%s avgVerify=%s avgTotal=%s avgPayload=%.3fB",
-				clientID, metrics.TotalRequestsCompleted, avgGen, avgVer, avgTot, avgPay)
+			avgPrefix := float64(metrics.TotalCommonPrefixSize) / n
+			avgProofElems := float64(metrics.TotalProofElements) / n
+			avgPrefixElems := float64(metrics.TotalCommonPrefixElements) / n
+			log.Infof("[Run %d] reqs=%d avgProofGen=%s avgVerify=%s avgTotal=%s avgPayload=%.3fB avgCommonPrefix=%.3fB avgProofElems=%.1f avgPrefixElems=%.1f",
+				clientID, metrics.TotalRequestsCompleted, avgGen, avgVer, avgTot, avgPay, avgPrefix, avgProofElems, avgPrefixElems)
 			lastLogTime = time.Now()
 		}
 	}
@@ -340,11 +371,13 @@ func runRunClient(clientID int, addr string, numUsers int, useCaching bool, dura
 // See KT.md § "Verification" and internal/kt/optiks_test.go.
 func verifyOptiksResult(clientID int, user []byte, result *optiksQueryResult, rootHash common.Hash) {
 	n := result.CurrentVersion
+	prefix := result.CommonProofPrefix
 
 	// Verify non-membership proof for version n+1.
 	nonExistKey := makeTrieKey(user, n+1)
+	fullNonMembershipProof := prependPrefix(prefix, result.NextVersionNonMembershipProof)
 	proofDB := memorydb.New()
-	for _, node := range result.NextVersionNonMembershipProof {
+	for _, node := range fullNonMembershipProof {
 		proofDB.Put(crypto.Keccak256(node), node)
 	}
 	val, err := trie.VerifyProof(rootHash, nonExistKey, proofDB)
@@ -362,8 +395,9 @@ func verifyOptiksResult(clientID int, user []byte, result *optiksQueryResult, ro
 		version := uint64(i + 1)
 		trieKey := makeTrieKey(user, version)
 
+		fullProof := prependPrefix(prefix, proof)
 		vProofDB := memorydb.New()
-		for _, node := range proof {
+		for _, node := range fullProof {
 			vProofDB.Put(crypto.Keccak256(node), node)
 		}
 
@@ -379,11 +413,27 @@ func verifyOptiksResult(clientID int, user []byte, result *optiksQueryResult, ro
 	}
 }
 
+// prependPrefix reconstructs a full proof by concatenating the common prefix
+// with the per-proof suffix.
+func prependPrefix(prefix [][]byte, suffix [][]byte) [][]byte {
+	if len(prefix) == 0 {
+		return suffix
+	}
+	full := make([][]byte, len(prefix)+len(suffix))
+	copy(full, prefix)
+	copy(full[len(prefix):], suffix)
+	return full
+}
+
 // makeTrieKey builds the trie lookup key for a (user, version) pair.
 // Mirrors internal/kt.makeTrieKey: Keccak256(user || bigEndian(version)).
 func makeTrieKey(user []byte, version uint64) []byte {
-	buf := make([]byte, len(user)+8)
+	if len(user)+8 > 32 {
+		panic(fmt.Sprintf("trie key is too long: %d", len(user)+8))
+	}
+	buf := make([]byte, 32)
 	copy(buf, user)
 	binary.BigEndian.PutUint64(buf[len(user):], version)
-	return crypto.Keccak256(buf)
+
+	return buf
 }

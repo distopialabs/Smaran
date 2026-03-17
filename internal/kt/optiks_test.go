@@ -96,9 +96,10 @@ func TestNonMembershipProofVerifies(t *testing.T) {
 	// The non-membership proof is for version 2 (n=1, so n+1=2).
 	nonExistKey := makeTrieKey([]byte("carol"), result.CurrentVersion+1)
 
-	// Reconstruct the proof DB for verification.
+	// Reconstruct the full proof by prepending the common prefix.
+	fullProof := append(result.CommonProofPrefix, result.NextVersionNonMembershipProof...)
 	proofDB := memorydb.New()
-	for _, node := range result.NextVersionNonMembershipProof {
+	for _, node := range fullProof {
 		h := crypto.Keccak256(node)
 		if err := proofDB.Put(h, node); err != nil {
 			t.Fatalf("proofDB.Put: %v", err)
@@ -142,8 +143,9 @@ func TestMembershipProofVerifies(t *testing.T) {
 		version := uint64(i + 1)
 		trieKey := makeTrieKey([]byte("dave"), version)
 
+		fullProof := append(result.CommonProofPrefix, proof...)
 		proofDB := memorydb.New()
-		for _, node := range proof {
+		for _, node := range fullProof {
 			h := crypto.Keccak256(node)
 			if err := proofDB.Put(h, node); err != nil {
 				t.Fatalf("version %d: proofDB.Put: %v", version, err)
@@ -179,7 +181,8 @@ func TestGetUnknownUser(t *testing.T) {
 	if result.Value != nil {
 		t.Fatalf("expected nil value, got %x", result.Value)
 	}
-	if len(result.NextVersionNonMembershipProof) == 0 {
+	totalProofLen := len(result.CommonProofPrefix) + len(result.NextVersionNonMembershipProof)
+	if totalProofLen == 0 {
 		t.Fatal("expected non-empty non-membership proof")
 	}
 	if len(result.VersionProofs) != 0 {
@@ -282,7 +285,8 @@ func TestConcurrentPutGetCommitment(t *testing.T) {
 						readerID, user, n, len(result.VersionProofs))
 				}
 
-				if n > 0 && len(result.NextVersionNonMembershipProof) == 0 {
+				totalProofLen := len(result.CommonProofPrefix) + len(result.NextVersionNonMembershipProof)
+				if n > 0 && totalProofLen == 0 {
 					t.Errorf("reader %d: user %s version %d has empty non-membership proof",
 						readerID, user, n)
 				}
