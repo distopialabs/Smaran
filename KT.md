@@ -110,3 +110,67 @@ Read go-ethereum's Mpt docs to find the best API to do this job.
 Write fully commemnted code that occassionally refers back to this doc for steps.
 
 Add a test to check if the Mpt is reusable. That getting the root commitment, or calling get_proof doesn't internally destroy the Mpt.
+
+
+# Benchmarking Client
+
+For benchmarking Key Transparency protocols, create a benchmarking client that takes the following parameters:
+- `--addr` to know which IP and port to send request to (defaults `127.0.0.1:3191`)
+- `--protocol` which takes one of two values: either `samurai` or `optiks`
+- `--num-users` Number of users to simulate (defaults 1000)
+- `--num-load-clients` Number of concurrent clients during load phase (defaults 1)
+- `--num-run-clients` Number of concurrent clients during run phase (defaults 1)
+- `--num-versions` How many key updates per user to make (defaults 5)
+
+
+The client creates persistent TCP connections, one per goroutine to send HTTP requests.
+The client runs in 2 phases: Load phase and Run phase.
+
+## Load phase
+
+In load phase, the main thread launches `num-load-clients` goroutines, each with the following parameters:
+- `user_id_start`
+- `user_id_end`
+- `num_versions` (same as `--num-versions`)
+The main thread distributes `num-users` equally among all goroutines. (The ids are both inclusing (IMPORTANT FOR CORRECTNESS))
+
+Each goroutine launches a persistent TCP connection to the KT server, with TCP_NONBLOCKING set,
+then sends valid HTTP requests on the connection to hit the endpoint that triggers `Put(user, key)`.
+`user` is of the form `user:%d` and `%d` is a uniformly randomly sampled id in [user_id_start, user_id_end] (both inclusive).
+The key is a encoding of random 64 bytes.
+IMPORTANT: To load the server properly, the goroutines keep sending HTTP requests without waiting for response.
+
+For each user, the goroutine counts the number of versions it has sent requests for, and also keeps a counter for total number of requests sent.
+
+Once it has sent `num-versions` puts for each user, it waits until it hears responses for each request it has sent (remember that it doesn't wait for responses when it is actually sending the request, but keeps track only asynchronously), it informs increments a waitgroup and then closes the TCP connection and dies.
+
+
+The main thread waits until every goroutine has completed and then sleeps for 10 seconds.
+
+
+## Run Phase
+
+Include a new command line boolean argument `--use_caching` (defaults false).
+Include a new command line boolean argument `--run-duration-secs` (defaults 30).
+
+
+In the run phase, spawn `num-run-clients` goroutines.
+Spawn a persistent TCP connection per goroutine, each of which sends a Get() query with a random user and useCaching is set using the value from the command line argument.
+
+Instead of reading results asynchronously, this time the goroutines send a request and wait for a response.
+Then they use the response body run a result verification phase (explained below).
+
+Each goroutine keeps these metrics in memory: totalRequestsCompleted, totalLatency, totalPayloadSize.
+
+They log avg latency and avg payload size every second or so (don't have to implement a separate goroutine for this, just check after each response if its been enough time since the last log.)
+
+
+Each goroutine runs for `num-duration-secs` and then sends the 3 metrics over to the main thread.
+The main thread logs the total sum of these 3 metrics as well as the avg values.
+
+
+### Verification
+
+For Optiks verification, look at internal/kt/optiks_test.go. Verify that each Membership Proof verifies as well as the Non-membership proof verifies. Use go-ethereum MPT API as much as possible.
+
+To get the commitment, each run phase goroutine calls GetCommitment() once at startup.

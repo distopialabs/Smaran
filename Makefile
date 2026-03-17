@@ -10,6 +10,7 @@ build:
 	go build -o $(BUILD_DIR)/proofc ./cmd/proofc
 	go build -o $(BUILD_DIR)/makedataset ./cmd/tools/makedataset
 	go build -o $(BUILD_DIR)/ktserver ./cmd/ktserver
+	go build -o $(BUILD_DIR)/ktbench ./cmd/ktbench
 	@echo "Build artifacts in $(BUILD_DIR)/"
 
 clean:

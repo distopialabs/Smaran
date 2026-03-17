@@ -355,7 +355,7 @@ func (s *OptiksServer) proveKey(trieKey []byte) ([][]byte, error) {
 		log.Errorf("MPT proof failed for key %s: %v", hex.EncodeToString(trieKey), err)
 		return nil, err
 	}
-	log.Debugf("MPT proof succeeded for key %s %v", hex.EncodeToString(trieKey), pc.nodes)
+	// log.Debugf("MPT proof succeeded for key %s %v", hex.EncodeToString(trieKey), pc.nodes)
 	return pc.nodes, nil
 }
 

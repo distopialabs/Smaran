@@ -2,6 +2,7 @@ package kt
 
 import (
 	"bytes"
+	"encoding/base64"
 	"fmt"
 	"sync"
 	"testing"
@@ -219,11 +220,11 @@ func TestMultipleUsersIndependent(t *testing.T) {
 // read result and should be run with -race.
 func TestConcurrentPutGetCommitment(t *testing.T) {
 	const (
-		numWriters       = 8
-		numReaders       = 16
-		putsPerWriter    = 200
-		readsPerReader   = 300
-		usersPerWriter   = 5
+		numWriters     = 8
+		numReaders     = 16
+		putsPerWriter  = 200
+		readsPerReader = 300
+		usersPerWriter = 5
 	)
 
 	s := NewOptiksServer(0)
@@ -357,4 +358,10 @@ func TestConcurrentPutGetCommitment(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestBase64Encoding(t *testing.T) {
+	key := []byte(fmt.Sprintf("user:%d", 1))
+	key64 := base64.StdEncoding.EncodeToString(key)
+	fmt.Println(key64)
 }
