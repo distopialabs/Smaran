@@ -18,12 +18,11 @@ import (
 	"math/rand"
 	"net"
 	"net/http"
-	"slices"
+	"os"
 	"sync"
 	"time"
 
 	bls "github.com/consensys/gnark-crypto/ecc/bls12-381"
-	fr "github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
 	gnark_kzg "github.com/consensys/gnark-crypto/ecc/bls12-381/kzg"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -33,7 +32,6 @@ import (
 	"github.com/nepal80m/samurai/internal/config"
 	"github.com/nepal80m/samurai/internal/crypto/hash"
 	"github.com/nepal80m/samurai/internal/crypto/kzg"
-	"github.com/nepal80m/samurai/internal/crypto/polynomial"
 	"github.com/nepal80m/samurai/internal/logging"
 	"github.com/nepal80m/samurai/internal/proof"
 	"github.com/nepal80m/samurai/internal/tree"
@@ -63,21 +61,21 @@ type optiksQueryResult struct {
 }
 
 type samuraiRangeProofJSON struct {
-	Idx                  int              `json:"idx"`
-	Layer                int              `json:"layer"`
-	Commitment           []byte           `json:"commitment"`
-	Proof                []byte           `json:"proof"`
+	Idx                  int               `json:"idx"`
+	Layer                int               `json:"layer"`
+	Commitment           []byte            `json:"commitment"`
+	Proof                []byte            `json:"proof"`
 	BlockRange           *proof.BlockRange `json:"block_range"`
-	DependentCommitments []int            `json:"dependent_commitments"`
+	DependentCommitments []int             `json:"dependent_commitments"`
 }
 
 type samuraiQueryResult struct {
-	Value          []byte                  `json:"value"`
-	CurrentVersion uint64                  `json:"current_version"`
-	MptProof       [][]byte                `json:"mpt_proof"`
-	CommitmentHash []byte                  `json:"commitment_hash"`
-	SamuraiProofs  []samuraiRangeProofJSON `json:"samurai_proofs"`
-	LeafHashes     [][]byte                `json:"leaf_hashes"`
+	Value              []byte                  `json:"value"`
+	CurrentVersion     uint64                  `json:"current_version"`
+	MptProof           [][]byte                `json:"mpt_proof"`
+	CommitmentHash     []byte                  `json:"commitment_hash"`
+	SamuraiProofs      []samuraiRangeProofJSON `json:"samurai_proofs"`
+	HistoricalBalances [][]byte                `json:"historical_balances"`
 }
 
 type getCommitmentResponse struct {
@@ -106,6 +104,12 @@ func main() {
 	runDurationSecs := flag.Int("run-duration-secs", 30, "how long the run phase lasts (seconds)")
 	paramsDir := flag.String("params-dir", "./data/params", "directory for precomputed cryptographic parameters (samurai only)")
 	flag.Parse()
+
+	if lvl := os.Getenv("LOG_LEVEL"); lvl != "" {
+		if err := logging.SetLevel(lvl); err != nil {
+			log.Fatalf("invalid LOG_LEVEL %q: %v", lvl, err)
+		}
+	}
 
 	var precomputedData *config.PrecomputedData
 	if *protocol == "samurai" {
@@ -384,6 +388,7 @@ func runRunClient(clientID int, addr string, numUsers int, useCaching bool, dura
 			var result samuraiQueryResult
 			if err := json.Unmarshal(respBody, &result); err != nil {
 				log.Errorf("[Run %d] unmarshal Samurai Get response: %v", clientID, err)
+				log.Errorf("Body: %s", string(respBody))
 			} else {
 				verifySamuraiResult(clientID, user, &result, rootHash, precomputedData)
 				proofElements = int64(len(result.MptProof)) + int64(len(result.SamuraiProofs))
@@ -502,8 +507,8 @@ func makeSamuraiTrieKey(user []byte) []byte {
 // verifySamuraiResult verifies a Samurai KT Get response:
 //  1. Verify MPT proof => extract stored commitment hash.
 //  2. Deserialize top-layer BLS commitment, verify hash matches.
-//  3. Rebuild segment tree from leaf hashes.
-//  4. For each KZG range proof, perform vanishing polynomial + interpolation + pairing check.
+//  3. Deserialize historical balances and range proofs.
+//  4. Delegate KZG verification to proof.VerifyNewRangeProofs.
 func verifySamuraiResult(clientID int, user []byte, result *samuraiQueryResult, rootHash common.Hash, precomputedData *config.PrecomputedData) {
 	if result.CurrentVersion == 0 {
 		return
@@ -557,18 +562,21 @@ func verifySamuraiResult(clientID int, user []byte, result *samuraiQueryResult, 
 		return
 	}
 
-	// 3. Rebuild segment tree from leaf hashes
-	accountInfo := tree.NewAccountInfo(common.BytesToAddress(user), precomputedData)
-	for i, lh := range result.LeafHashes {
-		proof.AddLeafNode(accountInfo, uint64(i), common.BytesToHash(lh))
+	// 3. Deserialize historical balances and range proofs
+	account := common.BytesToAddress(user)
+
+	historicalBalances := make([]*tree.HistoricalBalance, len(result.HistoricalBalances))
+	for i, hbBytes := range result.HistoricalBalances {
+		hb := &tree.HistoricalBalance{}
+		if err := hb.UnmarshalBinary(hbBytes); err != nil {
+			log.Errorf("[Run %d] Samurai: failed to unmarshal historical balance %d: %v", clientID, i, err)
+			return
+		}
+		historicalBalances[i] = hb
 	}
 
-	// 4. Verify KZG range proofs
-	endVersion := int(result.CurrentVersion - 1)
-	reqCommits := proof.FindCommitmentsCoveringRange(0, endVersion)
-
-	proofHashMap := make(map[string]*proof.RangeProof, len(result.SamuraiProofs))
-	for _, sp := range result.SamuraiProofs {
+	rangeProofs := make([]*proof.RangeProof, len(result.SamuraiProofs))
+	for i, sp := range result.SamuraiProofs {
 		var commitment gnark_kzg.Digest
 		if _, err := commitment.SetBytes(sp.Commitment); err != nil {
 			log.Errorf("[Run %d] Samurai: failed to unmarshal commitment: %v", clientID, err)
@@ -579,8 +587,7 @@ func verifySamuraiResult(clientID int, user []byte, result *samuraiQueryResult, 
 			log.Errorf("[Run %d] Samurai: failed to unmarshal proof: %v", clientID, err)
 			return
 		}
-		key := fmt.Sprintf("%d:%d", sp.Layer, sp.Idx)
-		proofHashMap[key] = &proof.RangeProof{
+		rangeProofs[i] = &proof.RangeProof{
 			Idx:                  sp.Idx,
 			Layer:                sp.Layer,
 			Commitment:           commitment,
@@ -590,60 +597,13 @@ func verifySamuraiResult(clientID int, user []byte, result *samuraiQueryResult, 
 		}
 	}
 
-	slices.SortFunc(reqCommits, func(a, b proof.RangeCommitment) int {
-		if a.Layer != b.Layer {
-			return a.Layer - b.Layer
-		}
-		return a.Idx - b.Idx
-	})
-
-	isVerified := make(map[string]bool, len(result.SamuraiProofs))
-
-	for i := len(reqCommits) - 1; i >= 0; i-- {
-		rc := reqCommits[i]
-		rcKey := fmt.Sprintf("%d:%d", rc.Layer, rc.Idx)
-
-		if proofHashMap[rcKey] == nil {
-			log.Errorf("[Run %d] Samurai: missing proof for %s", clientID, rcKey)
-			return
-		}
-
-		if rc.Layer != tree.MaxLayer && !isVerified[rcKey] {
-			log.Errorf("[Run %d] Samurai: unverified commitment %s", clientID, rcKey)
-			return
-		}
-
-		nodesToInterpolate := proof.FindNodesToInterpolate(rc, true)
-		rp := proofHashMap[rcKey]
-
-		batchTree := accountInfo.CurrentLXBatchTree[rc.Layer-1]
-
-		Z := polynomial.VanishingPolynomial(nodesToInterpolate)
-		ZCommit, _ := kzg.CommitG2(Z, precomputedData.SRS.G2Powers)
-
-		xs := make([]fr.Element, len(nodesToInterpolate))
-		ys := make([]fr.Element, len(nodesToInterpolate))
-		for j, nodeIdx := range nodesToInterpolate {
-			xs[j] = fr.NewElement(uint64(nodeIdx))
-			ys[j] = polynomial.HashToFieldElement(batchTree[nodeIdx])
-		}
-
-		I := kzg.Interpolate(xs, ys)
-		ICommit, err := gnark_kzg.Commit(I, precomputedData.SRS.Inner.Pk)
-		if err != nil {
-			log.Errorf("[Run %d] Samurai: ICommit failed: %v", clientID, err)
-			return
-		}
-
-		_, err = proof.PairingCheck(rp.Commitment, rp.Proof, ICommit, ZCommit, precomputedData.SRS)
-		if err != nil {
-			log.Errorf("[Run %d] Samurai: pairing check failed for %s: %v", clientID, rcKey, err)
-			return
-		}
-
-		for _, depIdx := range rc.DependentCommitments {
-			depKey := fmt.Sprintf("%d:%d", rc.Layer-1, depIdx)
-			isVerified[depKey] = true
-		}
-	}
+	// 4. Verify KZG range proofs via the shared proof.VerifyNewRangeProofs API
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Errorf("[Run %d] Samurai: VerifyNewRangeProofs failed for user %s: %v", clientID, string(user), r)
+			}
+		}()
+		proof.VerifyNewRangeProofs(account, 0, result.CurrentVersion-1, rangeProofs, historicalBalances, precomputedData)
+	}()
 }

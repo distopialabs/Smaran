@@ -3,7 +3,6 @@ package proof
 import (
 	"fmt"
 	"slices"
-	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/nepal80m/samurai/internal/config"
@@ -13,7 +12,6 @@ import (
 )
 
 func RebuildSegmentTreeForVerify(account common.Address, lxRequiredBatchIdxs map[uint64][]uint64, startingVersion, endingVersion uint64, balanceInfos []*tree.HistoricalBalance, proofHashMap map[string]*RangeProof, reqCommits []RangeCommitment, precomputedData *config.PrecomputedData) map[string]*tree.BatchTree {
-
 	accountInfo := tree.NewAccountInfo(account, precomputedData)
 	// var tree tree.BatchTree
 	// for i := range MaxLayer {
@@ -26,7 +24,7 @@ func RebuildSegmentTreeForVerify(account common.Address, lxRequiredBatchIdxs map
 	// requiredTreeBatchesMap := make(map[string][]common.Hash)
 	requiredTreeBatchesMap := make(map[string]*tree.BatchTree)
 
-	start := time.Now()
+	// start := time.Now()
 
 	for i, hbInfo := range balanceInfos {
 		AddLeafNode(accountInfo, hbInfo.Version, hbInfo.Hash())
@@ -48,8 +46,8 @@ func RebuildSegmentTreeForVerify(account common.Address, lxRequiredBatchIdxs map
 		}
 	}
 
-	log.Infof("Time taken to add leaf nodes in segment tree: %v", time.Since(start))
-	start = time.Now()
+	// log.Infof("Time taken to add leaf nodes in segment tree: %v", time.Since(start))
+	// start = time.Now()
 	// fill in the commitHash part of the batch trees with commitments provided from prover.
 	for _, commit := range reqCommits {
 		if commit.Layer < tree.MaxLayer {
@@ -71,9 +69,7 @@ func RebuildSegmentTreeForVerify(account common.Address, lxRequiredBatchIdxs map
 				requiredTreeBatchesMap[treeKey][batchNodeOffsetIdx] = commitmentHash
 			}
 		}
-
 	}
-	log.Infof("Time taken to fill in the commitHash part of the batch trees: %v", time.Since(start))
+	// log.Infof("Time taken to fill in the commitHash part of the batch trees: %v", time.Since(start))
 	return requiredTreeBatchesMap
-
 }

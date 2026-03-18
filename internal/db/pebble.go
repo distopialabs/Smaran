@@ -2,11 +2,21 @@ package db
 
 import (
 	"github.com/cockroachdb/pebble"
+	"github.com/cockroachdb/pebble/vfs"
 )
 
 // PebbleDB wraps a Pebble database to implement the DB interface.
 type PebbleDB struct {
 	db *pebble.DB
+}
+
+// NewInMemoryPebbleDB creates a Pebble database backed entirely by RAM.
+func NewInMemoryPebbleDB() (*PebbleDB, error) {
+	db, err := pebble.Open("", &pebble.Options{FS: vfs.NewMem()})
+	if err != nil {
+		return nil, err
+	}
+	return &PebbleDB{db: db}, nil
 }
 
 // Metrics returns the current Pebble database metrics.

@@ -7,7 +7,6 @@ import (
 	"math"
 	"os"
 	"sync"
-	"time"
 
 	fr "github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
 	gnark_kzg "github.com/consensys/gnark-crypto/ecc/bls12-381/kzg"
@@ -84,7 +83,6 @@ func BinarySearchVersionByBlockNumber(blockNumber uint64, searchStart uint64, se
 // - If endingBlock < account's first recorded block: returns error (no data available)
 // - If startingBlock < account's first recorded block: clamps to version 0
 func BlockRangeToVersionRange(account common.Address, startingBlock uint64, endingBlock uint64, config *config.Config, db *db.SamuraiDB) (uint64, uint64, error) {
-
 	cbInfo, err := tree.GetCurrentBalanceInfo(account, db.StateDB)
 	if err != nil {
 		return 0, 0, fmt.Errorf("%w: %v", ErrAccountNotFound, err)
@@ -141,9 +139,9 @@ func GetNewProofRange(account common.Address, startingVersion, endingVersion uin
 	for _, reqCommit := range reqCommits {
 		lxRequiredBatchIdxs[uint64(reqCommit.Layer)] = append(lxRequiredBatchIdxs[uint64(reqCommit.Layer)], uint64(reqCommit.Idx))
 	}
-	start := time.Now()
+	// start := time.Now()
 	requiredTreeBatchesMap, requiredHBInfos := RebuildSegmentTreeForProof(account, lxRequiredBatchIdxs, startingVersion, endingVersion, db, precomputedData)
-	log.Infof("Time taken to rebuild segment tree: %dms", time.Since(start).Milliseconds())
+	// log.Infof("Time taken to rebuild segment tree: %dms", time.Since(start).Milliseconds())
 
 	allRangeProofs := make([]*RangeProof, len(reqCommits))
 	var wg sync.WaitGroup
@@ -160,14 +158,14 @@ func GetNewProofRange(account common.Address, startingVersion, endingVersion uin
 
 			nodesToInterpolate := FindNodesToInterpolate(reqCommit, true)
 
-		log.Debugf("layer: %d, idx: %d", reqCommit.Layer, reqCommit.Idx)
-		if reqCommit.BlockRange == nil {
-			log.Debugf("Commitment is not covering any range.")
-		} else {
-			log.Debugf("sb: %d, eb: %d", reqCommit.BlockRange.Start, reqCommit.BlockRange.End)
-		}
-		log.Debugf("DependentCommitments: %v", reqCommit.DependentCommitments)
-		log.Debugf("nodesToInterpolate: %v", nodesToInterpolate)
+			// log.Debugf("layer: %d, idx: %d", reqCommit.Layer, reqCommit.Idx)
+			if reqCommit.BlockRange == nil {
+				// log.Debugf("Commitment is not covering any range.")
+			} else {
+				// log.Debugf("sb: %d, eb: %d", reqCommit.BlockRange.Start, reqCommit.BlockRange.End)
+			}
+			// log.Debugf("DependentCommitments: %v", reqCommit.DependentCommitments)
+			// log.Debugf("nodesToInterpolate: %v", nodesToInterpolate)
 
 			treeKey := fmt.Sprintf("%d:%d", layer, idx)
 			batchTree := requiredTreeBatchesMap[treeKey]
@@ -221,51 +219,51 @@ func GetNewProofRange(account common.Address, startingVersion, endingVersion uin
 				if !ok {
 					// Recompute commitment from P
 					pCommit, _ := gnark_kzg.Commit(P, precomputedData.SRS.Inner.Pk)
-				log.Debugf("Stored Commitment: %x", storedCommitment.Bytes())
-				log.Debugf("Rebuilt Tree Commitment: %x", pCommit.Bytes())
+					log.Debugf("Stored Commitment: %x", storedCommitment.Bytes())
+					log.Debugf("Rebuilt Tree Commitment: %x", pCommit.Bytes())
 
-				// Load the stored tree from DB for comparison
-				storedLXTree := tree.GetCurrentLXBatchTree(account, db.TreeDB)
-				storedBatchTree := storedLXTree[layer-1]
+					// Load the stored tree from DB for comparison
+					storedLXTree := tree.GetCurrentLXBatchTree(account, db.TreeDB)
+					storedBatchTree := storedLXTree[layer-1]
 
-				log.Debugf("--- Comparing Rebuilt vs Stored BatchTree ---")
-				diffCount := 0
-				for i := 0; i < len(batchTree); i++ {
-					rebuilt := batchTree[i]
-					stored := storedBatchTree[i]
-					if rebuilt != stored {
-						diffCount++
-						if diffCount <= 50 { // limit output
-							log.Debugf("DIFF Idx %d: rebuilt=%s stored=%s", i, rebuilt.Hex(), stored.Hex())
+					log.Debugf("--- Comparing Rebuilt vs Stored BatchTree ---")
+					diffCount := 0
+					for i := 0; i < len(batchTree); i++ {
+						rebuilt := batchTree[i]
+						stored := storedBatchTree[i]
+						if rebuilt != stored {
+							diffCount++
+							if diffCount <= 50 { // limit output
+								log.Debugf("DIFF Idx %d: rebuilt=%s stored=%s", i, rebuilt.Hex(), stored.Hex())
+							}
 						}
 					}
-				}
-				log.Debugf("Total differing indices: %d", diffCount)
+					log.Debugf("Total differing indices: %d", diffCount)
 
-				// Also dump non-zero entries of rebuilt tree
-				nonZeroCount := 0
-				for i, h := range batchTree {
-					if h != (common.Hash{}) {
-						nonZeroCount++
-						if nonZeroCount <= 30 {
-							log.Debugf("Rebuilt NonZero Idx %d: %s", i, h.Hex())
+					// Also dump non-zero entries of rebuilt tree
+					nonZeroCount := 0
+					for i, h := range batchTree {
+						if h != (common.Hash{}) {
+							nonZeroCount++
+							if nonZeroCount <= 30 {
+								log.Debugf("Rebuilt NonZero Idx %d: %s", i, h.Hex())
+							}
 						}
 					}
-				}
-				log.Debugf("Total non-zero entries in rebuilt tree: %d", nonZeroCount)
+					log.Debugf("Total non-zero entries in rebuilt tree: %d", nonZeroCount)
 
-				// Dump non-zero entries of stored tree
-				storedNonZeroCount := 0
-				for i, h := range storedBatchTree {
-					if h != (common.Hash{}) {
-						storedNonZeroCount++
-						if storedNonZeroCount <= 30 {
-							log.Debugf("Stored NonZero Idx %d: %s", i, h.Hex())
+					// Dump non-zero entries of stored tree
+					storedNonZeroCount := 0
+					for i, h := range storedBatchTree {
+						if h != (common.Hash{}) {
+							storedNonZeroCount++
+							if storedNonZeroCount <= 30 {
+								log.Debugf("Stored NonZero Idx %d: %s", i, h.Hex())
+							}
 						}
 					}
-				}
-				log.Debugf("Total non-zero entries in stored tree: %d", storedNonZeroCount)
-				log.Debugf("--- End Comparison ---")
+					log.Debugf("Total non-zero entries in stored tree: %d", storedNonZeroCount)
+					log.Debugf("--- End Comparison ---")
 
 					panic("pairing check failed.")
 				} else {
@@ -295,12 +293,10 @@ func FindCommitmentsCoveringRange(sb, eb int) []RangeCommitment {
 	reqCommitments := addDepencencyCommitments(rcCommitments)
 
 	return reqCommitments
-
 }
 
 // addDepencencyCommitments adds dependency commitments for upper layers.
 func addDepencencyCommitments(dependentCommitments []RangeCommitment) []RangeCommitment {
-
 	commitHashMap := make(map[string]*RangeCommitment)
 
 	depQueue := Queue[RangeCommitment]{}
@@ -399,12 +395,10 @@ func findRangeCoveringCommitments(sb, eb int, layer int) []RangeCommitment {
 	}
 
 	return reqCommitments
-
 }
 
 // FindNodesToInterpolate finds the tree nodes that need to be interpolated for a commitment.
 func FindNodesToInterpolate(commitment RangeCommitment, includeDependentCommitments bool) []int {
-
 	layer := commitment.Layer
 	idx := commitment.Idx
 
@@ -450,12 +444,10 @@ func FindNodesToInterpolate(commitment RangeCommitment, includeDependentCommitme
 	nodesToInterpolate = append(nodesToInterpolate, coveringNodes...)
 
 	return nodesToInterpolate
-
 }
 
 // findCoveringNodes finds the segment tree nodes that cover a range [L, R] in a tree of N leaves.
 func findCoveringNodes(N, L, R int) []int {
-
 	base := N - 1
 	l := L + base
 	r := R + base
@@ -480,7 +472,7 @@ func findCoveringNodes(N, L, R int) []int {
 // DumpNewProofsAndBalances writes proofs and historical balances to JSON files.
 func DumpNewProofsAndBalances(proofs []*RangeProof, balances []*tree.HistoricalBalance) {
 	// Create the storage/proofs directory if it doesn't exist
-	err := os.MkdirAll(fmt.Sprintf("storage/proofs/"), 0755)
+	err := os.MkdirAll(fmt.Sprintf("storage/proofs/"), 0o755)
 	if err != nil {
 		panic(err)
 	}
@@ -499,5 +491,4 @@ func DumpNewProofsAndBalances(proofs []*RangeProof, balances []*tree.HistoricalB
 
 	json.NewEncoder(proofFile).Encode(proofs)
 	json.NewEncoder(balanceFile).Encode(balances)
-
 }

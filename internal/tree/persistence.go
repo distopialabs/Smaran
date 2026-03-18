@@ -177,7 +177,7 @@ func GetCurrentLXBatchTree(account common.Address, d db.DB) *LXBatchTree {
 // Store/Get LXBatchCommitments
 
 func StoreLXBatchCommitments(account common.Address, version uint64, bc *LXBatchCommitment, d db.DB) {
-	lastLeafNodeIdx := version - 1
+	lastLeafNodeIdx := version
 	lxBatchIdx := func(layer uint64) uint64 {
 		return lastLeafNodeIdx / (L1BatchSize * utils.PowUint64(L2BatchSize, layer-1))
 	}
@@ -188,6 +188,7 @@ func StoreLXBatchCommitments(account common.Address, version uint64, bc *LXBatch
 		valBytes := bc[layer-1].Bytes()
 		val := make([]byte, len(valBytes))
 		copy(val, valBytes[:])
+		// log.Infof("storing batch commitments for user %s, layer %d, batchIdx %d", account.Hex(), layer, batchIdx)
 		if err := d.Set([]byte(key), val, false); err != nil {
 			panic(fmt.Errorf("failed to store batch commitments: %w", err))
 		}
@@ -195,7 +196,7 @@ func StoreLXBatchCommitments(account common.Address, version uint64, bc *LXBatch
 }
 
 func GetLXBatchCommitments(account common.Address, version uint64, d db.DB) *LXBatchCommitment {
-	lastLeafNodeIdx := version - 1
+	lastLeafNodeIdx := version
 	lxBatchIdx := func(layer uint64) uint64 {
 		return lastLeafNodeIdx / (L1BatchSize * utils.PowUint64(L2BatchSize, layer-1))
 	}
@@ -224,7 +225,7 @@ func GetBatchCommitment(account common.Address, layer, batchIdx uint64, d db.DB)
 	key := GenerateBatchCommitmentsKey(account, layer, batchIdx)
 	val, err := d.Get([]byte(key))
 	if err != nil {
-		panic(fmt.Errorf("failed to get batch commitment: %w", err))
+		panic(fmt.Errorf("failed to get batch commitment: %w key: %s", err, key))
 	}
 	var commitment gnark_kzg.Digest
 	if _, err := commitment.SetBytes(val); err != nil {

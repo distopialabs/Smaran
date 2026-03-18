@@ -22,7 +22,7 @@ import (
 const (
 	L1BatchSize     = 2048
 	L2BatchSize     = 1365
-	MaxLayer        = 4
+	MaxLayer        = 1
 	ChunkSize       = 64
 	SegmentTreeSize = L1BatchSize * 2 // 4096
 )

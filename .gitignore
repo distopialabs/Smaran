@@ -17,4 +17,4 @@ samurai
 proofc
 bin/
 
-kt/testdata/
+internal/kt/testdata/

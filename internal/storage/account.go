@@ -5,8 +5,11 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/nepal80m/samurai/internal/db"
+	"github.com/nepal80m/samurai/internal/logging"
 	"github.com/nepal80m/samurai/internal/tree"
 )
+
+var log = logging.GetLogger("storage")
 
 // CreateOrUpdateAccountInfo updates an account's balance and returns the commitment hash.
 func CreateOrUpdateAccountInfo(account common.Address, balance *big.Int, blockNumber uint64, cache *Cache) common.Hash {

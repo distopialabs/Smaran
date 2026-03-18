@@ -19,7 +19,6 @@ import (
 // uses stored commitments to fill the commitHash part of the batch trees
 // in this process, stores only the involved batch trees and returns them
 func RebuildSegmentTreeForProof(account common.Address, lxRequiredBatchIdxs map[uint64][]uint64, startingVersion uint64, endingVersion uint64, db *db.SamuraiDB, precomputedData *config.PrecomputedData) (map[string]tree.BatchTree, []*tree.HistoricalBalance) {
-
 	cbInfo, err := tree.GetCurrentBalanceInfo(account, db.StateDB)
 	if err != nil {
 		panic(err)
@@ -42,7 +41,7 @@ func RebuildSegmentTreeForProof(account common.Address, lxRequiredBatchIdxs map[
 	requiredTreeBatchesMap := make(map[string]tree.BatchTree)
 	requiredHBInfos := make([]*tree.HistoricalBalance, 0)
 
-	start := time.Now()
+	// start := time.Now()
 
 	dbFetchTime := time.Duration(0)
 	leadAddTime := time.Duration(0)
@@ -82,9 +81,9 @@ func RebuildSegmentTreeForProof(account common.Address, lxRequiredBatchIdxs map[
 		extraTime += time.Since(extraStart)
 	}
 
-	log.Infof("Time taken to add leaf nodes to segment tree: %v with %v db fetch time and %v leaf add time and %v extra time", time.Since(start), dbFetchTime, leadAddTime, extraTime)
+	// log.Infof("Time taken to add leaf nodes to segment tree: %v with %v db fetch time and %v leaf add time and %v extra time", time.Since(start), dbFetchTime, leadAddTime, extraTime)
 
-	start = time.Now()
+	// start = time.Now()
 
 	// fill in the commitHash part of the batch trees with stored commitments
 	for layer := uint64(2); layer <= MaxLayer; layer++ {
@@ -97,13 +96,12 @@ func RebuildSegmentTreeForProof(account common.Address, lxRequiredBatchIdxs map[
 		}
 	}
 
-	log.Infof("Time taken to insert commitment hashes into segment tree: %v", time.Since(start))
+	// log.Infof("Time taken to insert commitment hashes into segment tree: %v", time.Since(start))
 
 	return requiredTreeBatchesMap, requiredHBInfos
 }
 
 func AddLeafNode(accountInfo *tree.AccountInfo, leafNodeIdx uint64, leafNodeHash common.Hash) {
-
 	// find which index to update for each layer
 	lxBatchNodeIdx := func(layer uint64) uint64 {
 		if layer == 0 || layer > MaxLayer {
@@ -111,7 +109,6 @@ func AddLeafNode(accountInfo *tree.AccountInfo, leafNodeIdx uint64, leafNodeHash
 		}
 		if layer == 1 {
 			return leafNodeIdx % L1BatchSize
-
 		} else {
 			return leafNodeIdx / (L1BatchSize * utils.PowUint64(L2BatchSize, layer-2)) % L2BatchSize
 		}
@@ -158,11 +155,9 @@ func AddLeafNode(accountInfo *tree.AccountInfo, leafNodeIdx uint64, leafNodeHash
 	// UpdateLXTree(accountInfo, L2BatchSize-1+lxModIdx(4), l3RootHash, 4)
 	// l4RootHash := accountInfo.CurrentBatchTree[3][0]
 	// _ = l4RootHash
-
 }
 
 func UpdateLXTree(accountInfo *tree.AccountInfo, idx uint64, val common.Hash, layer uint64) {
-
 	batchTree := &accountInfo.CurrentLXBatchTree[layer-1]
 
 	// updating the tree

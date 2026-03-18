@@ -72,9 +72,9 @@ func VerifyNewRangeProofs(account common.Address, startingVersion, endingVersion
 		lxRequiredBatchIdxs[uint64(reqCommit.Layer)] = append(lxRequiredBatchIdxs[uint64(reqCommit.Layer)], uint64(reqCommit.Idx))
 	}
 
-	start := time.Now()
+	// start := time.Now()
 	requiredTreeBatchesMap := RebuildSegmentTreeForVerify(account, lxRequiredBatchIdxs, startingVersion, endingVersion, balanceInfos, proofHashMap, reqCommits, precomputedData)
-	log.Infof("Time taken to rebuild segment tree: %v", time.Since(start))
+	// log.Infof("Time taken to rebuild segment tree: %v", time.Since(start))
 
 	slices.SortFunc(reqCommits, func(a, b RangeCommitment) int {
 		if a.Layer != b.Layer {
@@ -83,7 +83,7 @@ func VerifyNewRangeProofs(account common.Address, startingVersion, endingVersion
 		return a.Idx - b.Idx
 	})
 	isVerified := make(map[string]bool, len(rangeProofs))
-	verifyStart := time.Now()
+	// verifyStart := time.Now()
 
 	for i := len(reqCommits) - 1; i >= 0; i-- {
 		reqCommit := reqCommits[i]
@@ -132,7 +132,7 @@ func VerifyNewRangeProofs(account common.Address, startingVersion, endingVersion
 			}
 		}
 	}
-	log.Infof("Time taken to verify range proofs: %v", time.Since(verifyStart))
+	// log.Infof("Time taken to verify range proofs: %v", time.Since(verifyStart))
 }
 
 func VerifyRangeProofs(startingBlock, endingBlock int, rangeProofs []*RangeProof, balances []*big.Int, V polynomial.Polynomial, weights []fr.Element, srs *kzg.MultiSRS) {
@@ -207,7 +207,6 @@ func VerifyRangeProofs(startingBlock, endingBlock int, rangeProofs []*RangeProof
 		}
 	}
 	log.Infof("Time taken to rebuild partial segment tree: %v", treeRebuildTime)
-
 }
 
 type RequiredNode struct {
@@ -221,7 +220,6 @@ func (r *RequiredNode) GetKey() string {
 }
 
 func RebuildPartialSegmentTree(startingBlock, endingBlock int, reqCommits []RangeCommitment, proofHashMap map[string]*RangeProof, balances []*big.Int) map[string]common.Hash {
-
 	// sort reqCommits by layer and idx
 	// rangeCoveringCommits := make([]RangeCommitment, 0)
 	// for _, commit := range reqCommits {
@@ -294,7 +292,6 @@ func RebuildPartialSegmentTree(startingBlock, endingBlock int, reqCommits []Rang
 	}
 
 	for _, commit := range reqCommits {
-
 		if commit.Layer < tree.MaxLayer {
 			proofKey := fmt.Sprintf("%d:%d", commit.Layer, commit.Idx)
 			commitment := proofHashMap[proofKey].Commitment
@@ -354,10 +351,9 @@ func RebuildPartialSegmentTree(startingBlock, endingBlock int, reqCommits []Rang
 	// }
 
 	return nodesValuesHashMap
-
 }
-func (segmentTree *RebuiltLayeredSegmentTree) Update(blockNumber int, balance *big.Int) {
 
+func (segmentTree *RebuiltLayeredSegmentTree) Update(blockNumber int, balance *big.Int) {
 	if balance == nil {
 		panic("balance cannot be nil")
 	}
@@ -427,7 +423,6 @@ func (segmentTree *RebuiltLayeredSegmentTree) Update(blockNumber int, balance *b
 }
 
 func (segmentTree *RebuiltLayeredSegmentTree) UpdateLayerX(idx int, val common.Hash, layer int) {
-
 	trees := map[int][]common.Hash{
 		1: segmentTree.Layer1Tree,
 		2: segmentTree.Layer2Tree,
@@ -459,7 +454,6 @@ func (segmentTree *RebuiltLayeredSegmentTree) UpdateLayerX(idx int, val common.H
 }
 
 func PairingCheck(commit bls.G1Affine, proof bls.G1Affine, iCommit bls.G1Affine, zCommit bls.G2Affine, srs *kzg.MultiSRS) (bool, error) {
-
 	var lhsG1 bls.G1Affine
 	lhsG1.Sub(&commit, &iCommit)
 
@@ -481,7 +475,6 @@ func PairingCheck(commit bls.G1Affine, proof bls.G1Affine, iCommit bls.G1Affine,
 }
 
 func (segmentTree *RebuiltLayeredSegmentTree) DumpTrees() {
-
 	// dump trees to a json file
 	l1Tree := segmentTree.Storage.L1Tree
 	l2Tree := segmentTree.Storage.L2Tree
@@ -493,7 +486,7 @@ func (segmentTree *RebuiltLayeredSegmentTree) DumpTrees() {
 	if err != nil {
 		log.Fatalf("failed to marshal l1Tree: %v", err)
 	}
-	err = os.WriteFile("l1TreeRebuilt.json", l1TreeJSON, 0644)
+	err = os.WriteFile("l1TreeRebuilt.json", l1TreeJSON, 0o644)
 	if err != nil {
 		log.Fatalf("failed to write l1Tree to file: %v", err)
 	}
@@ -502,7 +495,7 @@ func (segmentTree *RebuiltLayeredSegmentTree) DumpTrees() {
 	if err != nil {
 		log.Fatalf("failed to marshal l2Tree: %v", err)
 	}
-	err = os.WriteFile("l2TreeRebuilt.json", l2TreeJSON, 0644)
+	err = os.WriteFile("l2TreeRebuilt.json", l2TreeJSON, 0o644)
 	if err != nil {
 		log.Fatalf("failed to write l2Tree to file: %v", err)
 	}
@@ -511,7 +504,7 @@ func (segmentTree *RebuiltLayeredSegmentTree) DumpTrees() {
 	if err != nil {
 		log.Fatalf("failed to marshal l3Tree: %v", err)
 	}
-	err = os.WriteFile("l3TreeRebuilt.json", l3TreeJSON, 0644)
+	err = os.WriteFile("l3TreeRebuilt.json", l3TreeJSON, 0o644)
 	if err != nil {
 		log.Fatalf("failed to write l3Tree to file: %v", err)
 	}
@@ -520,13 +513,12 @@ func (segmentTree *RebuiltLayeredSegmentTree) DumpTrees() {
 	if err != nil {
 		log.Fatalf("failed to marshal l4Tree: %v", err)
 	}
-	err = os.WriteFile("l4TreeRebuilt.json", l4TreeJSON, 0644)
+	err = os.WriteFile("l4TreeRebuilt.json", l4TreeJSON, 0o644)
 	if err != nil {
 		log.Fatalf("failed to write l4Tree to file: %v", err)
 	}
 
 	log.Infof("Dumped trees to json files")
-
 }
 
 func (segmentTree *RebuiltLayeredSegmentTree) DumpStorage() {
