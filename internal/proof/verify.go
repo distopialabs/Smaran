@@ -62,135 +62,75 @@ func VerifyNewRangeProofs(account common.Address, startingVersion, endingVersion
 		proofHashMap[key] = proof
 	}
 
-	reqCommits := findCommitmentsCoveringRange(int(startingVersion), int(endingVersion))
+	reqCommits := FindCommitmentsCoveringRange(int(startingVersion), int(endingVersion))
 
 	lxRequiredBatchIdxs := make(map[uint64][]uint64)
 	for i := uint64(1); i <= tree.MaxLayer; i++ {
 		lxRequiredBatchIdxs[i] = make([]uint64, 0)
 	}
 	for _, reqCommit := range reqCommits {
-		lxRequiredBatchIdxs[uint64(reqCommit.layer)] = append(lxRequiredBatchIdxs[uint64(reqCommit.layer)], uint64(reqCommit.idx))
+		lxRequiredBatchIdxs[uint64(reqCommit.Layer)] = append(lxRequiredBatchIdxs[uint64(reqCommit.Layer)], uint64(reqCommit.Idx))
 	}
 
-	// TODO: Rebuild partial tree
 	start := time.Now()
 	requiredTreeBatchesMap := RebuildSegmentTreeForVerify(account, lxRequiredBatchIdxs, startingVersion, endingVersion, balanceInfos, proofHashMap, reqCommits, precomputedData)
 	log.Infof("Time taken to rebuild segment tree: %v", time.Since(start))
 
 	slices.SortFunc(reqCommits, func(a, b RangeCommitment) int {
-		if a.layer != b.layer {
-			return a.layer - b.layer
+		if a.Layer != b.Layer {
+			return a.Layer - b.Layer
 		}
-		return a.idx - b.idx
+		return a.Idx - b.Idx
 	})
 	isVerified := make(map[string]bool, len(rangeProofs))
 	verifyStart := time.Now()
 
-	// loop from last item to first item
 	for i := len(reqCommits) - 1; i >= 0; i-- {
-
-		// innerVerifyStart := time.Now()
 		reqCommit := reqCommits[i]
 
-		reqCommitKey := fmt.Sprintf("%d:%d", reqCommit.layer, reqCommit.idx)
+		reqCommitKey := fmt.Sprintf("%d:%d", reqCommit.Layer, reqCommit.Idx)
 
 		if proofHashMap[reqCommitKey] == nil {
 			panic("This required commitment was not found in provided proofs.")
 		}
 
-		if reqCommit.layer != tree.MaxLayer && !isVerified[reqCommitKey] {
+		if reqCommit.Layer != tree.MaxLayer && !isVerified[reqCommitKey] {
 			panic("This commitment is not verified.")
 		}
 
-		nodesToInterpolate := findNodesToInterpolate(reqCommit, true)
+		nodesToInterpolate := FindNodesToInterpolate(reqCommit, true)
 		rangeProof := proofHashMap[reqCommitKey]
 
-		// fmt.Printf("\n\nlayer: %d, idx: %d, \n", reqCommit.layer, reqCommit.idx)
-		// if reqCommit.BlockRange == nil {
-		// 	fmt.Printf("Commitment is not covering any range.\n")
-		// } else {
-		// 	fmt.Printf("sb: %d, eb: %d\n", reqCommit.BlockRange.Start, reqCommit.BlockRange.End)
-		// }
-		// fmt.Printf("dependentCommitments: %v\n", reqCommit.dependentCommitments)
-		// fmt.Printf("nodesToInterpolate: %v\n", nodesToInterpolate)
-		// for i, nodeIdx := range nodesToInterpolate {
-		// 	key := fmt.Sprintf("%d:%d", reqCommit.layer, reqCommit.idx)
-		// 	fmt.Printf("ys[%d]: %v\n", i, requiredTreeBatchesMap[key][nodeIdx])
-		// }
 		Commitment := rangeProof.Commitment
 
-		// pCommitBytes := Commitment.Bytes()
-		// pCommitHash := common.BytesToHash(pCommitBytes[:])
-		// fmt.Printf("pCommitmentHash: %s\n", pCommitHash)
-
-		// TODO: reconstruct tree using given balance values
-		// tree := lxTrees[reqCommit.layer][reqCommit.idx]
-
 		Z := polynomial.VanishingPolynomial(nodesToInterpolate)
-		// ZCommit, err := gnark_kzg.Commit(Z, srs.Inner.Pk)
 		ZCommit, _ := kzg.CommitG2(Z, precomputedData.SRS.G2Powers)
-
-		// zCommitBytes := ZCommit.Bytes()
-		// zCommitHash := common.BytesToHash(zCommitBytes[:])
-		// fmt.Printf("zCommitmentHash: %s\n", zCommitHash)
-
-		// _ = ZCommit
-		// if err != nil {
-		// 	panic(err)
-		// }
 
 		xs := make([]fr.Element, len(nodesToInterpolate))
 		ys := make([]fr.Element, len(nodesToInterpolate))
 		for i, nodeIdx := range nodesToInterpolate {
 			xs[i] = fr.NewElement(uint64(nodeIdx))
-			key := fmt.Sprintf("%d:%d", reqCommit.layer, reqCommit.idx)
+			key := fmt.Sprintf("%d:%d", reqCommit.Layer, reqCommit.Idx)
 			ys[i] = polynomial.HashToFieldElement(requiredTreeBatchesMap[key][nodeIdx])
 		}
 
-		// I := polynomial.Interpolate(nodesToInterpolate, ys, V, weights)
 		I := kzg.Interpolate(xs, ys)
 		ICommit, err := gnark_kzg.Commit(I, precomputedData.SRS.Inner.Pk)
 		if err != nil {
 			panic(err)
 		}
 
-		// iCommitBytes := ICommit.Bytes()
-		// iCommitHash := common.BytesToHash(iCommitBytes[:])
-		// fmt.Printf("iCommitmentHash: %s\n", iCommitHash)
-
 		QCommit := rangeProof.Proof
-		// qCommitBytes := QCommit.Bytes()
-		// qCommitHash := common.BytesToHash(qCommitBytes[:])
-		// fmt.Printf("qCommitmentHash: %s\n", qCommitHash)
 
-		// fmt.Printf("Commitment: %v\n", Commitment)
-		// fmt.Printf("Proof: %v\n", QCommit)
-		// fmt.Printf("ys: %v\n", ys)
-
-		// fmt.Printf("I: %v\n", I)
-		// fmt.Printf("Z: %v\n", Z)
-
-		// TODO: Pairing check using G1 elements only
 		_, err = PairingCheck(Commitment, QCommit, ICommit, ZCommit, precomputedData.SRS)
 		if err != nil {
 			panic(err)
-			// fmt.Printf("pairing check failed: invalid proof\n")
-			// panic("pairing check failed: invalid proof")
 		} else {
-			// fmt.Println("pairing check passed✅")
-			for _, depCommitIdx := range reqCommit.dependentCommitments {
-				depCommitKey := fmt.Sprintf("%d:%d", reqCommit.layer-1, depCommitIdx)
+			for _, depCommitIdx := range reqCommit.DependentCommitments {
+				depCommitKey := fmt.Sprintf("%d:%d", reqCommit.Layer-1, depCommitIdx)
 				isVerified[depCommitKey] = true
 			}
 		}
-
-		// nodesToInterpolate := findNodesToInterpolate(rangeProof)
-
-		// balance := big.NewInt(1000000000000000000)
-
-		// Z := polynomial.VanishingPolynomial(nodesToInterpolate)
-
-		// fmt.Printf("Time taken to verify range proof %d:%d: %v\n", reqCommit.layer, reqCommit.idx, time.Since(innerVerifyStart))
 	}
 	log.Infof("Time taken to verify range proofs: %v", time.Since(verifyStart))
 }
@@ -204,124 +144,67 @@ func VerifyRangeProofs(startingBlock, endingBlock int, rangeProofs []*RangeProof
 		proofHashMap[key] = proof
 	}
 
-	reqCommits := findCommitmentsCoveringRange(startingBlock, endingBlock)
+	reqCommits := FindCommitmentsCoveringRange(startingBlock, endingBlock)
 	start := time.Now()
 	nodesValuesHashMap := RebuildPartialSegmentTree(startingBlock, endingBlock, reqCommits, proofHashMap, balances)
 	treeRebuildTime := time.Since(start)
-	// fmt.Printf("Time taken to rebuild partial segment tree: %v\n", treeRebuildTime)
 
-	// sort reqCommits by layer and idx
 	slices.SortFunc(reqCommits, func(a, b RangeCommitment) int {
-		if a.layer != b.layer {
-			return a.layer - b.layer
+		if a.Layer != b.Layer {
+			return a.Layer - b.Layer
 		}
-		return a.idx - b.idx
+		return a.Idx - b.Idx
 	})
 
 	isVerified := make(map[string]bool, len(rangeProofs))
 
-	// loop from last item to first item
 	for i := len(reqCommits) - 1; i >= 0; i-- {
 		reqCommit := reqCommits[i]
 
-		reqCommitKey := fmt.Sprintf("%d:%d", reqCommit.layer, reqCommit.idx)
+		reqCommitKey := fmt.Sprintf("%d:%d", reqCommit.Layer, reqCommit.Idx)
 
 		if proofHashMap[reqCommitKey] == nil {
 			panic("This required commitment was not found in provided proofs.")
 		}
 
-		if reqCommit.layer != tree.MaxLayer && !isVerified[reqCommitKey] {
+		if reqCommit.Layer != tree.MaxLayer && !isVerified[reqCommitKey] {
 			panic("This commitment is not verified.")
 		}
 
-		nodesToInterpolate := findNodesToInterpolate(reqCommit, true)
+		nodesToInterpolate := FindNodesToInterpolate(reqCommit, true)
 		rangeProof := proofHashMap[reqCommitKey]
 
-		log.Debugf("layer: %d, idx: %d", reqCommit.layer, reqCommit.idx)
-		if reqCommit.BlockRange == nil {
-			log.Debugf("Commitment is not covering any range.")
-		} else {
-			log.Debugf("sb: %d, eb: %d", reqCommit.BlockRange.Start, reqCommit.BlockRange.End)
-		}
-		log.Debugf("dependentCommitments: %v", reqCommit.dependentCommitments)
-		log.Debugf("nodesToInterpolate: %v", nodesToInterpolate)
-		for i, nodeIdx := range nodesToInterpolate {
-			nodeKey := fmt.Sprintf("%d:%d:%d", reqCommit.layer, reqCommit.idx, nodeIdx)
-			log.Debugf("ys[%d]: %v", i, nodesValuesHashMap[nodeKey])
-		}
 		Commitment := rangeProof.Commitment
 
-		pCommitBytes := Commitment.Bytes()
-		pCommitHash := common.BytesToHash(pCommitBytes[:])
-		log.Debugf("pCommitmentHash: %s", pCommitHash)
-
-		// TODO: reconstruct tree using given balance values
-		// tree := lxTrees[reqCommit.layer][reqCommit.idx]
-
 		Z := polynomial.VanishingPolynomial(nodesToInterpolate)
-		// ZCommit, err := gnark_kzg.Commit(Z, srs.Inner.Pk)
 		ZCommit, _ := kzg.CommitG2(Z, srs.G2Powers)
-
-		zCommitBytes := ZCommit.Bytes()
-		zCommitHash := common.BytesToHash(zCommitBytes[:])
-		log.Debugf("zCommitmentHash: %s", zCommitHash)
-
-		// _ = ZCommit
-		// if err != nil {
-		// 	panic(err)
-		// }
 
 		xs := make([]fr.Element, len(nodesToInterpolate))
 		ys := make([]fr.Element, len(nodesToInterpolate))
 		for i, nodeIdx := range nodesToInterpolate {
 			xs[i] = fr.NewElement(uint64(nodeIdx))
-			nodeKey := fmt.Sprintf("%d:%d:%d", reqCommit.layer, reqCommit.idx, nodeIdx)
+			nodeKey := fmt.Sprintf("%d:%d:%d", reqCommit.Layer, reqCommit.Idx, nodeIdx)
 			ys[i] = polynomial.HashToFieldElement(nodesValuesHashMap[nodeKey])
 		}
 
-		// I := polynomial.Interpolate(nodesToInterpolate, ys, V, weights)
 		I := kzg.Interpolate(xs, ys)
 		ICommit, err := gnark_kzg.Commit(I, srs.Inner.Pk)
 		if err != nil {
 			panic(err)
 		}
 
-		iCommitBytes := ICommit.Bytes()
-		iCommitHash := common.BytesToHash(iCommitBytes[:])
-		log.Debugf("iCommitmentHash: %s", iCommitHash)
-
 		QCommit := rangeProof.Proof
-		qCommitBytes := QCommit.Bytes()
-		qCommitHash := common.BytesToHash(qCommitBytes[:])
-		log.Debugf("qCommitmentHash: %s", qCommitHash)
 
-		// fmt.Printf("Commitment: %v\n", Commitment)
-		// fmt.Printf("Proof: %v\n", QCommit)
-		// fmt.Printf("ys: %v\n", ys)
-
-		// fmt.Printf("I: %v\n", I)
-		// fmt.Printf("Z: %v\n", Z)
-
-		// TODO: Pairing check using G1 elements only
 		_, err = PairingCheck(Commitment, QCommit, ICommit, ZCommit, srs)
 		if err != nil {
 			panic(err)
-			// fmt.Printf("pairing check failed: invalid proof\n")
-			// panic("pairing check failed: invalid proof")
 		} else {
 			log.Infof("pairing check passed")
-			for _, depCommitIdx := range reqCommit.dependentCommitments {
-				depCommitKey := fmt.Sprintf("%d:%d", reqCommit.layer-1, depCommitIdx)
+			for _, depCommitIdx := range reqCommit.DependentCommitments {
+				depCommitKey := fmt.Sprintf("%d:%d", reqCommit.Layer-1, depCommitIdx)
 				isVerified[depCommitKey] = true
 			}
 		}
-
-		// nodesToInterpolate := findNodesToInterpolate(rangeProof)
-
-		// balance := big.NewInt(1000000000000000000)
-
-		// Z := polynomial.VanishingPolynomial(nodesToInterpolate)
-
 	}
 	log.Infof("Time taken to rebuild partial segment tree: %v", treeRebuildTime)
 
@@ -358,61 +241,24 @@ func RebuildPartialSegmentTree(startingBlock, endingBlock int, reqCommits []Rang
 
 	for _, commit := range reqCommits {
 
-		if commit.layer < tree.MaxLayer {
-			proofKey := fmt.Sprintf("%d:%d", commit.layer, commit.idx)
+		if commit.Layer < tree.MaxLayer {
+			proofKey := fmt.Sprintf("%d:%d", commit.Layer, commit.Idx)
 			commitment := proofHashMap[proofKey].Commitment
-			// commitmentHash := hash.CommitmentToHash(commitment)
 			commitmentHash := hash.CommitmentToHash(commitment)
-			// commitmentBytes := commitment.Bytes()
-			// commitmentHash := common.BytesToHash(commitmentBytes[:])
 
-			modCommitIdx := 2*tree.L2BatchSize - 1 + (commit.idx % tree.L2BatchSize)
-			parentCommitIdx := commit.idx / tree.L2BatchSize
-			nodeKey := fmt.Sprintf("%d:%d:%d", commit.layer+1, parentCommitIdx, modCommitIdx)
+			modCommitIdx := 2*tree.L2BatchSize - 1 + (commit.Idx % tree.L2BatchSize)
+			parentCommitIdx := commit.Idx / tree.L2BatchSize
+			nodeKey := fmt.Sprintf("%d:%d:%d", commit.Layer+1, parentCommitIdx, modCommitIdx)
 			nodesValuesHashMap[nodeKey] = commitmentHash
-
-			// if commit.layer == 1 {
-			// 	storage.L2Tree[parentCommitIdx][modCommitIdx] = commitmentHash
-			// }
-			// if commit.layer == 2 {
-			// 	storage.L3Tree[parentCommitIdx][modCommitIdx] = commitmentHash
-			// }
-			// if commit.layer == 3 {
-			// 	storage.L4Tree[parentCommitIdx][modCommitIdx] = commitmentHash
-			// }
-
 		}
 
-		// for _, dCommitIdx := range commit.dependentCommitments {
-		// 	proofKey := fmt.Sprintf("%d:%d", commit.layer-1, dCommitIdx)
-		// 	commitment := proofHashMap[proofKey].Commitment
-		// 	commitmentBytes := commitment.Bytes()
-		// 	commitmentHash := common.Hash(commitmentBytes[:])
-
-		// 	modDepCommitIdx := 2*tree.L2BatchSize - 1 + (dCommitIdx % tree.L2BatchSize)
-		// 	nodeKey := fmt.Sprintf("%d:%d:%d", commit.layer, commit.idx, modDepCommitIdx)
-		// 	nodesValuesHashMap[nodeKey] = commitmentHash
-		// }
-
-		nodesToInterpolate := findNodesToInterpolate(commit, false)
+		nodesToInterpolate := FindNodesToInterpolate(commit, false)
 		for _, nodeIdx := range nodesToInterpolate {
-			// skipping dependent commitments nodes
-			// if commit.layer > 1 && nodeIdx >= 2*tree.L2BatchSize-1 {
-			// 	commitIdx := commit.idx*tree.L2BatchSize + nodeIdx - 2*tree.L2BatchSize + 1
-			// 	proofKey := fmt.Sprintf("%d:%d", commit.layer-1, commitIdx)
-			// 	commitment := proofHashMap[proofKey].Commitment
-			// 	commitmentBytes := commitment.Bytes()
-			// 	commitmentHash := common.Hash(commitmentBytes[:])
-			// 	nodeKey := fmt.Sprintf("%d:%d:%d", commit.layer, commit.idx, nodeIdx)
-			// 	requiredNodesValues[nodeKey] = commitmentHash
-
-			// } else {
 			requiredNodes = append(requiredNodes, RequiredNode{
-				layer:     commit.layer,
-				commitIdx: commit.idx,
+				layer:     commit.Layer,
+				commitIdx: commit.Idx,
 				nodeIdx:   nodeIdx,
 			})
-			// }
 		}
 
 	}
@@ -449,25 +295,22 @@ func RebuildPartialSegmentTree(startingBlock, endingBlock int, reqCommits []Rang
 
 	for _, commit := range reqCommits {
 
-		if commit.layer < tree.MaxLayer {
-			proofKey := fmt.Sprintf("%d:%d", commit.layer, commit.idx)
+		if commit.Layer < tree.MaxLayer {
+			proofKey := fmt.Sprintf("%d:%d", commit.Layer, commit.Idx)
 			commitment := proofHashMap[proofKey].Commitment
 			commitmentBytes := commitment.Bytes()
-			// commitmentHash := common.Hash(commitmentBytes[:])
 			commitmentHash := common.BytesToHash(commitmentBytes[:])
 
-			modCommitIdx := 2*tree.L2BatchSize - 1 + (commit.idx % tree.L2BatchSize)
-			parentCommitIdx := commit.idx / tree.L2BatchSize
-			// nodeKey := fmt.Sprintf("%d:%d:%d", commit.layer+1, parentCommitIdx, modCommitIdx)
-			// nodesValuesHashMap[nodeKey] = commitmentHash
+			modCommitIdx := 2*tree.L2BatchSize - 1 + (commit.Idx % tree.L2BatchSize)
+			parentCommitIdx := commit.Idx / tree.L2BatchSize
 
-			if commit.layer == 1 {
+			if commit.Layer == 1 {
 				segmentTree.Storage.L2Tree[parentCommitIdx][modCommitIdx] = commitmentHash
 			}
-			if commit.layer == 2 {
+			if commit.Layer == 2 {
 				segmentTree.Storage.L3Tree[parentCommitIdx][modCommitIdx] = commitmentHash
 			}
-			if commit.layer == 3 {
+			if commit.Layer == 3 {
 				segmentTree.Storage.L4Tree[parentCommitIdx][modCommitIdx] = commitmentHash
 			}
 

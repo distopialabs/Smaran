@@ -25,8 +25,9 @@ var log = logging.GetLogger("ktserver")
 
 func main() {
 	addr := flag.String("addr", "0.0.0.0:3191", "IP:port to bind to")
-	protocol := flag.String("protocol", "optiks", "protocol to use: 'samurai' or 'optiks'")
+	protocol := flag.String("protocol", "samurai", "protocol to use: 'samurai' or 'optiks'")
 	batchSize := flag.Uint64("batch_size", 0, "flush update buffer when it reaches this size (0 = disabled)")
+	paramsDir := flag.String("params-dir", "./data/params", "directory for precomputed cryptographic parameters (samurai only)")
 	flag.Parse()
 
 	p := kt.Protocol(*protocol)
@@ -34,7 +35,7 @@ func main() {
 		log.Fatalf("invalid --protocol %q: must be 'samurai' or 'optiks'", *protocol)
 	}
 
-	handler := kt.NewKTHandler(p, *batchSize)
+	handler := kt.NewKTHandler(p, *batchSize, *paramsDir)
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux)
 

@@ -41,10 +41,10 @@ var (
 
 // RangeCommitment represents a commitment required to prove a block range.
 type RangeCommitment struct {
-	idx                  int
-	layer                int
+	Idx                  int
+	Layer                int
 	BlockRange           *BlockRange
-	dependentCommitments []int
+	DependentCommitments []int
 }
 
 // RangeProof represents a proof for a range of blocks.
@@ -132,16 +132,14 @@ func BlockRangeToVersionRange(account common.Address, startingBlock uint64, endi
 
 // GetNewProofRange generates range proofs for a given account and version range.
 func GetNewProofRange(account common.Address, startingVersion, endingVersion uint64, precomputedData *config.PrecomputedData, db *db.SamuraiDB) ([]*RangeProof, []*tree.HistoricalBalance) {
-	reqCommits := findCommitmentsCoveringRange(int(startingVersion), int(endingVersion))
+	reqCommits := FindCommitmentsCoveringRange(int(startingVersion), int(endingVersion))
 
 	lxRequiredBatchIdxs := make(map[uint64][]uint64)
 	for i := uint64(1); i <= tree.MaxLayer; i++ {
 		lxRequiredBatchIdxs[i] = make([]uint64, 0)
 	}
-	// fmt.Println("Required Commits:")
 	for _, reqCommit := range reqCommits {
-		lxRequiredBatchIdxs[uint64(reqCommit.layer)] = append(lxRequiredBatchIdxs[uint64(reqCommit.layer)], uint64(reqCommit.idx))
-		// fmt.Printf("layer: %d, idx: %d\n", reqCommit.layer, reqCommit.idx)
+		lxRequiredBatchIdxs[uint64(reqCommit.Layer)] = append(lxRequiredBatchIdxs[uint64(reqCommit.Layer)], uint64(reqCommit.Idx))
 	}
 	start := time.Now()
 	requiredTreeBatchesMap, requiredHBInfos := RebuildSegmentTreeForProof(account, lxRequiredBatchIdxs, startingVersion, endingVersion, db, precomputedData)
@@ -157,18 +155,18 @@ func GetNewProofRange(account common.Address, startingVersion, endingVersion uin
 		go func(i int, reqCommit RangeCommitment) {
 			defer wg.Done()
 
-			layer := reqCommit.layer
-			idx := reqCommit.idx
+			layer := reqCommit.Layer
+			idx := reqCommit.Idx
 
-			nodesToInterpolate := findNodesToInterpolate(reqCommit, true)
+			nodesToInterpolate := FindNodesToInterpolate(reqCommit, true)
 
-		log.Debugf("layer: %d, idx: %d", reqCommit.layer, reqCommit.idx)
+		log.Debugf("layer: %d, idx: %d", reqCommit.Layer, reqCommit.Idx)
 		if reqCommit.BlockRange == nil {
 			log.Debugf("Commitment is not covering any range.")
 		} else {
 			log.Debugf("sb: %d, eb: %d", reqCommit.BlockRange.Start, reqCommit.BlockRange.End)
 		}
-		log.Debugf("dependentCommitments: %v", reqCommit.dependentCommitments)
+		log.Debugf("DependentCommitments: %v", reqCommit.DependentCommitments)
 		log.Debugf("nodesToInterpolate: %v", nodesToInterpolate)
 
 			treeKey := fmt.Sprintf("%d:%d", layer, idx)
@@ -281,7 +279,7 @@ func GetNewProofRange(account common.Address, startingVersion, endingVersion uin
 				Commitment:           storedCommitment,
 				Proof:                QCommit,
 				BlockRange:           reqCommit.BlockRange,
-				DependentCommitments: reqCommit.dependentCommitments,
+				DependentCommitments: reqCommit.DependentCommitments,
 			}
 
 			allRangeProofs[i] = rangeProof
@@ -291,8 +289,8 @@ func GetNewProofRange(account common.Address, startingVersion, endingVersion uin
 	return allRangeProofs, requiredHBInfos
 }
 
-// findCommitmentsCoveringRange finds all commitments needed to cover the given block range.
-func findCommitmentsCoveringRange(sb, eb int) []RangeCommitment {
+// FindCommitmentsCoveringRange finds all commitments needed to cover the given block range.
+func FindCommitmentsCoveringRange(sb, eb int) []RangeCommitment {
 	rcCommitments := findRangeCoveringCommitments(sb, eb, 1)
 	reqCommitments := addDepencencyCommitments(rcCommitments)
 
@@ -307,7 +305,7 @@ func addDepencencyCommitments(dependentCommitments []RangeCommitment) []RangeCom
 
 	depQueue := Queue[RangeCommitment]{}
 	for _, dCommit := range dependentCommitments {
-		key := fmt.Sprintf("%d:%d", dCommit.layer, dCommit.idx)
+		key := fmt.Sprintf("%d:%d", dCommit.Layer, dCommit.Idx)
 		commitHashMap[key] = &dCommit
 		depQueue.Enqueue(dCommit)
 	}
@@ -318,23 +316,23 @@ func addDepencencyCommitments(dependentCommitments []RangeCommitment) []RangeCom
 			panic(err)
 		}
 
-		if dCommit.layer == tree.MaxLayer {
+		if dCommit.Layer == tree.MaxLayer {
 			continue
 		}
 
-		reqCommitIdx := dCommit.idx / tree.L2BatchSize
-		reqCommitLayer := dCommit.layer + 1
+		reqCommitIdx := dCommit.Idx / tree.L2BatchSize
+		reqCommitLayer := dCommit.Layer + 1
 
 		reqCommitKey := fmt.Sprintf("%d:%d", reqCommitLayer, reqCommitIdx)
 
 		_, exists := commitHashMap[reqCommitKey]
 		if exists {
-			commitHashMap[reqCommitKey].dependentCommitments = append(commitHashMap[reqCommitKey].dependentCommitments, dCommit.idx)
+			commitHashMap[reqCommitKey].DependentCommitments = append(commitHashMap[reqCommitKey].DependentCommitments, dCommit.Idx)
 		} else {
 			newCommit := RangeCommitment{
-				idx:                  reqCommitIdx,
-				layer:                reqCommitLayer,
-				dependentCommitments: []int{dCommit.idx},
+				Idx:                  reqCommitIdx,
+				Layer:                reqCommitLayer,
+				DependentCommitments: []int{dCommit.Idx},
 			}
 			commitHashMap[reqCommitKey] = &newCommit
 			depQueue.Enqueue(newCommit)
@@ -363,8 +361,8 @@ func findRangeCoveringCommitments(sb, eb int, layer int) []RangeCommitment {
 
 	if leftCommitIndex == rightCommitIndex && (hasLeftFragment || hasRightFragment) {
 		reqCommitments = append(reqCommitments, RangeCommitment{
-			idx:        leftCommitIndex,
-			layer:      layer,
+			Idx:        leftCommitIndex,
+			Layer:      layer,
 			BlockRange: &BlockRange{Start: sb, End: eb},
 		})
 
@@ -376,8 +374,8 @@ func findRangeCoveringCommitments(sb, eb int, layer int) []RangeCommitment {
 		leftFragmentEnd := (leftCommitIndex+1)*l0BatchSize - 1
 
 		reqCommitments = append(reqCommitments, RangeCommitment{
-			idx:        leftCommitIndex,
-			layer:      layer,
+			Idx:        leftCommitIndex,
+			Layer:      layer,
 			BlockRange: &BlockRange{Start: leftFragmentStart, End: leftFragmentEnd},
 		})
 
@@ -389,8 +387,8 @@ func findRangeCoveringCommitments(sb, eb int, layer int) []RangeCommitment {
 		rightFragmentEnd := eb
 
 		reqCommitments = append(reqCommitments, RangeCommitment{
-			idx:        rightCommitIndex,
-			layer:      layer,
+			Idx:        rightCommitIndex,
+			Layer:      layer,
 			BlockRange: &BlockRange{Start: rightFragmentStart, End: rightFragmentEnd},
 		})
 		eb = rightFragmentStart - 1
@@ -404,15 +402,15 @@ func findRangeCoveringCommitments(sb, eb int, layer int) []RangeCommitment {
 
 }
 
-// findNodesToInterpolate finds the tree nodes that need to be interpolated for a commitment.
-func findNodesToInterpolate(commitment RangeCommitment, includeDependentCommitments bool) []int {
+// FindNodesToInterpolate finds the tree nodes that need to be interpolated for a commitment.
+func FindNodesToInterpolate(commitment RangeCommitment, includeDependentCommitments bool) []int {
 
-	layer := commitment.layer
-	idx := commitment.idx
+	layer := commitment.Layer
+	idx := commitment.Idx
 
 	nodesToInterpolate := make([]int, 0)
 	if includeDependentCommitments {
-		for _, depCommitIdx := range commitment.dependentCommitments {
+		for _, depCommitIdx := range commitment.DependentCommitments {
 			if layer <= 1 {
 				panic("layer1 cannot have dependents")
 			}

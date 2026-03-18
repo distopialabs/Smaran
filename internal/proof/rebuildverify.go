@@ -52,18 +52,17 @@ func RebuildSegmentTreeForVerify(account common.Address, lxRequiredBatchIdxs map
 	start = time.Now()
 	// fill in the commitHash part of the batch trees with commitments provided from prover.
 	for _, commit := range reqCommits {
-		if commit.layer < tree.MaxLayer {
-			proofKey := fmt.Sprintf("%d:%d", commit.layer, commit.idx)
+		if commit.Layer < tree.MaxLayer {
+			proofKey := fmt.Sprintf("%d:%d", commit.Layer, commit.Idx)
 			if proofHashMap[proofKey] == nil {
 				panic(fmt.Sprintf("Required proof for key %s not found in provided proofs", proofKey))
 			}
 			commitment := proofHashMap[proofKey].Commitment
-			// commitmentHash := hash.CommitmentToHash(commitment)
 			commitmentHash := hash.CommitmentToHash(commitment)
 
-			parentLayer := commit.layer + 1
-			parentBatchIdx := commit.idx / L2BatchSize
-			batchNodeIdx := commit.idx % L2BatchSize
+			parentLayer := commit.Layer + 1
+			parentBatchIdx := commit.Idx / L2BatchSize
+			batchNodeIdx := commit.Idx % L2BatchSize
 			batchNodeOffsetIdx := 2*L2BatchSize - 1 + batchNodeIdx
 
 			treeKey := fmt.Sprintf("%d:%d", parentLayer, parentBatchIdx)
