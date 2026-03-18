@@ -63,14 +63,16 @@ type SamuraiKTServer struct {
 	mpt    *trie.Trie
 	trieDB *triedb.Database
 
-	samuraiDB  *db.SamuraiDB
-	cache      *storage.Cache
-	putCounts  map[string]uint64
-	currentKey map[string][]byte
+	samuraiDB      *db.SamuraiDB
+	cache          *storage.Cache
+	currentKey     map[string][]byte
+	currentVersion map[string]uint64
 
 	precomputedData *config.PrecomputedData
 	batchSize       uint64
 	keysUpdated     atomic.Uint64
+
+	epoch atomic.Uint64
 }
 
 func newInMemorySamuraiDB() *db.SamuraiDB {
@@ -123,13 +125,14 @@ func NewSamuraiKTServer(batchSize uint64, paramsDir string) *SamuraiKTServer {
 		trieDB:                mptDB,
 		samuraiDB:             samuraiDB,
 		cache:                 cache,
-		putCounts:             make(map[string]uint64),
 		currentKey:            make(map[string][]byte),
 		precomputedData:       precomputedData,
 		batchSize:             batchSize,
+		epoch:                 atomic.Uint64{},
+		currentVersion:        make(map[string]uint64),
 	}
 	s.keysUpdated.Store(0)
-
+	s.epoch.Store(0)
 	go func() {
 		ticker := time.NewTicker(1 * time.Second)
 		defer ticker.Stop()
@@ -203,7 +206,7 @@ func userToAddress(user []byte) common.Address {
 // getResult builds the SamuraiQueryResult for a user.
 func (s *SamuraiKTServer) getResult(user []byte) (*SamuraiQueryResult, error) {
 	userKey := string(user)
-	n := s.putCounts[userKey]
+	n := s.currentVersion[userKey]
 
 	trieKey := makeSamuraiTrieKey(user)
 	mptProof, err := s.proveKey(trieKey)
@@ -264,7 +267,7 @@ func (s *SamuraiKTServer) getResult(user []byte) (*SamuraiQueryResult, error) {
 
 		commitmentHash = hash.CommitmentToHash(ai.CurrentLXBatchCommitment[tree.MaxLayer-1]).Bytes()
 
-		version := s.putCounts[string(user)]
+		version := s.currentVersion[userKey]
 		log.Infof("version: %d", version)
 		if version > 0 {
 			log.Infof("getting new proof range for user %s", account.Hex())
@@ -306,6 +309,7 @@ func (s *SamuraiKTServer) getResult(user []byte) (*SamuraiQueryResult, error) {
 // and MPT via storage.CreateOrUpdateAccountInfo.
 func (s *SamuraiKTServer) applyUpdates() {
 	s.rootCommitmentIsDirty = false
+	epoch := s.epoch.Add(1)
 
 	for _, pair := range s.updateBuffer {
 		userKey := string(pair.User)
@@ -313,11 +317,13 @@ func (s *SamuraiKTServer) applyUpdates() {
 
 		s.currentKey[userKey] = common.CopyBytes(pair.Key)
 
-		s.putCounts[userKey]++
-		blockNumber := s.putCounts[userKey]
+		if _, ok := s.currentVersion[userKey]; !ok {
+			s.currentVersion[userKey] = 0
+		}
+		s.currentVersion[userKey]++
 
 		balance := new(big.Int).SetBytes(hash.BytesToHash(pair.Key).Bytes())
-		storage.CreateOrUpdateAccountInfo(account, balance, blockNumber, s.cache)
+		storage.CreateOrUpdateAccountInfo(account, balance, epoch, s.cache)
 		// s.cache.C.Purge()
 
 		ai, ok := s.cache.C.Get(account)
