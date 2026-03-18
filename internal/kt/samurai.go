@@ -11,10 +11,12 @@ import (
 	"encoding/hex"
 	"fmt"
 	"math/big"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -26,10 +28,12 @@ import (
 	"github.com/nepal80m/samurai/internal/config"
 	"github.com/nepal80m/samurai/internal/crypto/hash"
 	"github.com/nepal80m/samurai/internal/crypto/kzg"
-	"github.com/nepal80m/samurai/internal/db"
+	"github.com/nepal80m/samurai/internal/crypto/polynomial"
 	"github.com/nepal80m/samurai/internal/proof"
-	"github.com/nepal80m/samurai/internal/storage"
 	"github.com/nepal80m/samurai/internal/tree"
+	"github.com/nepal80m/samurai/internal/utils"
+
+	gnark_kzg "github.com/consensys/gnark-crypto/ecc/bls12-381/kzg"
 )
 
 // SamuraiRangeProofJSON is a JSON-serializable representation of a KZG range proof.
@@ -60,11 +64,10 @@ type SamuraiKTServer struct {
 	rootCommitment        common.Hash
 	rootCommitmentIsDirty bool
 
-	mpt    *trie.Trie
-	trieDB *triedb.Database
+	mpt             *trie.Trie
+	trieDB          *triedb.Database
+	samuraiAccounts map[string]*tree.AccountInfo
 
-	samuraiDB      *db.SamuraiDB
-	cache          *storage.Cache
 	currentKey     map[string][]byte
 	currentVersion map[string]uint64
 
@@ -73,22 +76,6 @@ type SamuraiKTServer struct {
 	keysUpdated     atomic.Uint64
 
 	epoch atomic.Uint64
-}
-
-func newInMemorySamuraiDB() *db.SamuraiDB {
-	stateDB, err := db.NewInMemoryPebbleDB()
-	if err != nil {
-		panic(fmt.Sprintf("failed to create in-memory StateDB: %v", err))
-	}
-	treeDB, err := db.NewInMemoryPebbleDB()
-	if err != nil {
-		panic(fmt.Sprintf("failed to create in-memory TreeDB: %v", err))
-	}
-	historyDB, err := db.NewInMemoryPebbleDB()
-	if err != nil {
-		panic(fmt.Sprintf("failed to create in-memory HistoryDB: %v", err))
-	}
-	return &db.SamuraiDB{StateDB: stateDB, TreeDB: treeDB, HistoryDB: historyDB}
 }
 
 // NewSamuraiKTServer initialises a SamuraiKTServer with a blank in-memory MPT
@@ -109,22 +96,13 @@ func NewSamuraiKTServer(batchSize uint64, paramsDir string) *SamuraiKTServer {
 	mptDB := triedb.NewDatabase(rawdb.NewMemoryDatabase(), nil)
 	mpt := trie.NewEmpty(mptDB)
 
-	samuraiDB := newInMemorySamuraiDB()
-
-	cacheCfg := &config.Cache{Size: 1}
-	cache, err := storage.NewCache(samuraiDB, cacheCfg, precomputedData)
-	if err != nil {
-		panic(fmt.Sprintf("failed to create storage cache: %v", err))
-	}
-
 	s := &SamuraiKTServer{
 		updateBuffer:          make([]OptiksKVPair, 0),
 		rootCommitment:        types.EmptyRootHash,
 		rootCommitmentIsDirty: false,
 		mpt:                   mpt,
 		trieDB:                mptDB,
-		samuraiDB:             samuraiDB,
-		cache:                 cache,
+		samuraiAccounts:       make(map[string]*tree.AccountInfo),
 		currentKey:            make(map[string][]byte),
 		precomputedData:       precomputedData,
 		batchSize:             batchSize,
@@ -203,6 +181,122 @@ func userToAddress(user []byte) common.Address {
 	return common.BytesToAddress(user)
 }
 
+func (s *SamuraiKTServer) GetTreeMaps(ai *tree.AccountInfo, lxRequiredBatchIdxs map[uint64][]uint64, startingVersion, endingVersion uint64) (map[string]*tree.BatchTree, []*tree.HistoricalBalance) {
+	requiredTreeBatchesMap := make(map[string]*tree.BatchTree)
+	requiredHBInfos := make([]*tree.HistoricalBalance, 0)
+
+	numHistorical := uint64(len(ai.HistoricalBalances))
+
+	for i, hbInfo := range ai.HistoricalBalances {
+		if hbInfo.Version >= startingVersion && hbInfo.Version <= endingVersion {
+			requiredHBInfos = append(requiredHBInfos, hbInfo)
+		}
+
+		version := hbInfo.Version
+		nextVersion := version + 1
+		for layer := uint64(1); layer <= tree.MaxLayer; layer++ {
+			batchSize := tree.L1BatchSize * utils.PowUint64(tree.L2BatchSize, layer-1)
+			currentBatchIdx := version / batchSize
+			nextBatchIdx := nextVersion / batchSize
+			isLastInBatch := uint64(i) == numHistorical-1 || (nextBatchIdx != currentBatchIdx)
+			if isLastInBatch && slices.Contains(lxRequiredBatchIdxs[layer], currentBatchIdx) {
+				key := fmt.Sprintf("%d:%d", layer, currentBatchIdx)
+				requiredTreeBatchesMap[key] = &ai.CurrentLXBatchTree[layer-1]
+			}
+		}
+	}
+
+	return requiredTreeBatchesMap, requiredHBInfos
+}
+
+func (s *SamuraiKTServer) GetProofRangeInMemory(account common.Address, startingVersion, endingVersion uint64, userKey string) ([]*proof.RangeProof, []*tree.HistoricalBalance) {
+	ai, ok := s.samuraiAccounts[account.Hex()]
+	if !ok {
+		return nil, nil
+	}
+
+	reqCommits := proof.FindCommitmentsCoveringRange(int(startingVersion), int(endingVersion))
+	// log.Infof("reqCommits: %+v", reqCommits)
+
+	lxRequiredBatchIdxs := make(map[uint64][]uint64)
+	for i := uint64(1); i <= tree.MaxLayer; i++ {
+		lxRequiredBatchIdxs[i] = make([]uint64, 0)
+	}
+	for _, reqCommit := range reqCommits {
+		lxRequiredBatchIdxs[uint64(reqCommit.Layer)] = append(lxRequiredBatchIdxs[uint64(reqCommit.Layer)], uint64(reqCommit.Idx))
+	}
+	requiredTreeBatchesMap, requiredHBInfos := s.GetTreeMaps(ai, lxRequiredBatchIdxs, startingVersion, endingVersion)
+
+	allRangeProofs := make([]*proof.RangeProof, len(reqCommits))
+	// var wg sync.WaitGroup
+
+	for i, reqCommit := range reqCommits {
+		// wg.Add(1)
+		// go func(i int, reqCommit proof.RangeCommitment) {
+		// 	defer wg.Done()
+
+		layer := reqCommit.Layer
+		idx := reqCommit.Idx
+
+		nodesToInterpolate := proof.FindNodesToInterpolate(reqCommit, true)
+		// log.Debugf("layer: %d, idx: %d", reqCommit.Layer, reqCommit.Idx)
+		if reqCommit.BlockRange == nil {
+			// log.Debugf("Commitment is not covering any range.")
+		} else {
+			// log.Debugf("sb: %d, eb: %d", reqCommit.BlockRange.Start, reqCommit.BlockRange.End)
+		}
+		// log.Debugf("DependentCommitments: %v", reqCommit.DependentCommitments)
+		// log.Debugf("nodesToInterpolate: %v", nodesToInterpolate)
+
+		treeKey := fmt.Sprintf("%d:%d", layer, idx)
+		batchTree := requiredTreeBatchesMap[treeKey]
+
+		xs1 := make([]int, len(batchTree))
+		ys1 := make([]fr.Element, len(batchTree))
+		for i, v := range batchTree {
+			xs1[i] = i
+			ys1[i] = polynomial.HashToFieldElement(v)
+			// fmt.Printf("xs1[%d] = %d, ys1[%d] = %s\n", i, i, i, ys1[i].String())
+		}
+		P := polynomial.Interpolate(xs1, ys1, s.precomputedData.V, s.precomputedData.Weights)
+
+		storedCommitment := ai.CurrentLXBatchCommitment[layer-1] // We are always going to query the entire range, so the commitment to use is always the current commitment of the layer.
+		Z := polynomial.VanishingPolynomial(nodesToInterpolate)
+
+		xs := make([]fr.Element, len(nodesToInterpolate))
+		ys := make([]fr.Element, len(nodesToInterpolate))
+		for i, v := range nodesToInterpolate {
+			xs[i] = fr.NewElement(uint64(v))
+			ys[i] = polynomial.HashToFieldElement(batchTree[v])
+			// fmt.Printf("xs[%d] = %d, ys[%d] = %s\n", i, v, i, ys[i].String())
+		}
+
+		I := kzg.Interpolate(xs, ys)
+
+		diff := kzg.SubtractPolys(P, I)
+		Q := kzg.PolyDiv(diff, Z)
+		QCommit, err := gnark_kzg.Commit(Q, s.precomputedData.SRS.Inner.Pk)
+		if err != nil {
+			panic(err)
+		}
+
+		rangeProof := &proof.RangeProof{
+			Idx:                  idx,
+			Layer:                layer,
+			Commitment:           storedCommitment,
+			Proof:                QCommit,
+			BlockRange:           reqCommit.BlockRange,
+			DependentCommitments: reqCommit.DependentCommitments,
+		}
+
+		allRangeProofs[i] = rangeProof
+		// }(i, reqCommit)
+	}
+
+	// wg.Wait()
+	return allRangeProofs, requiredHBInfos
+}
+
 // getResult builds the SamuraiQueryResult for a user.
 func (s *SamuraiKTServer) getResult(user []byte) (*SamuraiQueryResult, error) {
 	userKey := string(user)
@@ -220,47 +314,7 @@ func (s *SamuraiKTServer) getResult(user []byte) (*SamuraiQueryResult, error) {
 
 	if n > 0 {
 		account := userToAddress(user)
-		log.Infof("account: %s", account.Hex())
-		s.cache.Update(account,
-			func(account common.Address) *tree.AccountInfo { return nil },
-			func(account common.Address, sdb *db.SamuraiDB) *tree.AccountInfo {
-				cbInfo, err := tree.GetCurrentBalanceInfo(account, sdb.StateDB)
-				if err != nil {
-					if err != db.ErrNotFound {
-						panic(err)
-					}
-					return nil
-				}
-				batchTree := tree.GetCurrentLXBatchTree(account, sdb.TreeDB)
-				batchCommitments := tree.GetLXBatchCommitments(account, cbInfo.Version, sdb.StateDB)
-				treeCounts := tree.GetTreeCounts(account, sdb.TreeDB)
-
-				// Fresh LXLeafNodes
-				var lxLeafNodes [tree.MaxLayer]map[tree.LeafNodeIdx]common.Hash
-				for layer := uint64(1); layer <= tree.MaxLayer; layer++ {
-					lxLeafNodes[layer-1] = make(map[tree.LeafNodeIdx]common.Hash)
-				}
-				for layer := uint64(1); layer <= tree.MaxLayer; layer++ {
-					for treeIdx := uint64(0); treeIdx < treeCounts[layer-1]; treeIdx++ {
-						for leafIdx := uint64(0); leafIdx < tree.L1BatchSize; leafIdx++ {
-							lxLeafNodes[layer-1][tree.LeafNodeIdx{TreeIdx: treeIdx, LeafIdx: leafIdx}] = common.Hash{}
-						}
-					}
-				}
-				return &tree.AccountInfo{
-					Account:                  account,
-					CurrentBalanceInfo:       cbInfo,
-					CurrentLXBatchTree:       batchTree,
-					CurrentLXBatchCommitment: batchCommitments,
-					PrecomputedData:          s.precomputedData,
-					DirtyChunks:              tree.InitDirtyChunks(),
-					CurrentLXTreeCounts:      treeCounts,
-					LXLeafNodes:              lxLeafNodes,
-				}
-			},
-			func(accountInfo *tree.AccountInfo, sdb *db.SamuraiDB) {},
-		)
-		ai, ok := s.cache.C.Get(account)
+		ai, ok := s.samuraiAccounts[account.Hex()]
 		if !ok {
 			return nil, fmt.Errorf("account not found in cache for user %s", hex.EncodeToString(user))
 		}
@@ -268,12 +322,8 @@ func (s *SamuraiKTServer) getResult(user []byte) (*SamuraiQueryResult, error) {
 		commitmentHash = hash.CommitmentToHash(ai.CurrentLXBatchCommitment[tree.MaxLayer-1]).Bytes()
 
 		version := s.currentVersion[userKey]
-		log.Infof("version: %d", version)
 		if version > 0 {
-			log.Infof("getting new proof range for user %s", account.Hex())
-			rangeProofs, historicalBalances := proof.GetNewProofRange(
-				account, 0, version-1, s.precomputedData, s.samuraiDB,
-			)
+			rangeProofs, historicalBalances := s.GetProofRangeInMemory(account, 0, version-1, userKey)
 
 			samuraiProofs = make([]SamuraiRangeProofJSON, len(rangeProofs))
 			for i, rp := range rangeProofs {
@@ -292,6 +342,8 @@ func (s *SamuraiKTServer) getResult(user []byte) (*SamuraiQueryResult, error) {
 				b := hb.MarshalBinary()
 				hbBytes[i] = b[:]
 			}
+			// Test, see if the verification works
+			proof.VerifyNewRangeProofs(account, 0, version-1, rangeProofs, historicalBalances, s.precomputedData)
 		}
 	}
 
@@ -303,6 +355,15 @@ func (s *SamuraiKTServer) getResult(user []byte) (*SamuraiQueryResult, error) {
 		SamuraiProofs:      samuraiProofs,
 		HistoricalBalances: hbBytes,
 	}, nil
+}
+
+func (s *SamuraiKTServer) CreateOrUpdateAccountInfo(account common.Address, balance *big.Int, epoch uint64) *tree.AccountInfo {
+	if _, ok := s.samuraiAccounts[account.Hex()]; !ok {
+		s.samuraiAccounts[account.Hex()] = tree.NewAccountInfo(account, s.precomputedData)
+	}
+
+	s.samuraiAccounts[account.Hex()].UpdateInMemory(epoch, balance)
+	return s.samuraiAccounts[account.Hex()]
 }
 
 // applyUpdates flushes the updateBuffer into the segment trees, SamuraiDB,
@@ -323,17 +384,7 @@ func (s *SamuraiKTServer) applyUpdates() {
 		s.currentVersion[userKey]++
 
 		balance := new(big.Int).SetBytes(hash.BytesToHash(pair.Key).Bytes())
-		storage.CreateOrUpdateAccountInfo(account, balance, epoch, s.cache)
-		// s.cache.C.Purge()
-
-		ai, ok := s.cache.C.Get(account)
-		if !ok {
-			log.Errorf("account missing from cache after CreateOrUpdateAccountInfo for user %s", hex.EncodeToString(pair.User))
-			continue
-		}
-
-		// log.Infof("saving account info for user %s", account.Hex())
-		ai.Save(s.samuraiDB)
+		ai := s.CreateOrUpdateAccountInfo(account, balance, epoch)
 
 		commitmentHash := hash.CommitmentToHash(ai.CurrentLXBatchCommitment[tree.MaxLayer-1])
 		trieKey := makeSamuraiTrieKey(pair.User)

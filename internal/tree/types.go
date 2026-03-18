@@ -97,6 +97,7 @@ type AccountInfo struct {
 	CurrentLXTreeCounts      [MaxLayer]uint64                      // number of trees in total up till now
 	DirtyChunks              [MaxLayer]map[int]bool
 	PrecomputedData          *config.PrecomputedData
+	HistoricalBalances       []*HistoricalBalance
 }
 
 // NewAccountInfo creates a new AccountInfo with initialized tree structures.
@@ -117,18 +118,53 @@ func NewAccountInfo(account common.Address, precomputedData *config.PrecomputedD
 		PrecomputedData:          precomputedData,
 		LXLeafNodes:              lxLeafNodes,
 		CurrentLXTreeCounts:      currentLXTreeCounts,
+		HistoricalBalances:       make([]*HistoricalBalance, 0),
 	}
 }
 
 // DeepCopy creates a deep copy of the AccountInfo.
 func (a *AccountInfo) DeepCopy() *AccountInfo {
+	hbs := make([]*HistoricalBalance, len(a.HistoricalBalances))
+	for i, hb := range a.HistoricalBalances {
+		hbs[i] = hb.DeepCopy()
+	}
 	return &AccountInfo{
 		Account:                  a.Account,
 		CurrentBalanceInfo:       a.CurrentBalanceInfo.DeepCopy(),
 		CurrentLXBatchTree:       a.CurrentLXBatchTree.DeepCopy(),
 		CurrentLXBatchCommitment: a.CurrentLXBatchCommitment.DeepCopy(),
 		PrecomputedData:          a.PrecomputedData,
+		HistoricalBalances:       hbs,
 	}
+}
+
+func (accountInfo *AccountInfo) UpdateInMemory(blockNumber uint64, balance *big.Int) {
+	prevCb := accountInfo.CurrentBalanceInfo
+
+	if prevCb == nil {
+		accountInfo.CurrentBalanceInfo = &CurrentBalance{
+			Version:    0,
+			Balance:    balance,
+			StartBlock: blockNumber,
+		}
+		return
+	}
+	hb := prevCb.ToHistoricalBalance(blockNumber - 1)
+
+	// Update current balance
+	cb := &CurrentBalance{
+		Version:    prevCb.Version + 1,
+		Balance:    balance,
+		StartBlock: blockNumber,
+	}
+	accountInfo.CurrentBalanceInfo = cb
+
+	// Store historical balance for in-memory proof generation
+	accountInfo.HistoricalBalances = append(accountInfo.HistoricalBalances, hb)
+
+	// Update segment tree
+	hbHash := hb.Hash()
+	accountInfo.AddLeafNode(hb.Version, hbHash)
 }
 
 // Update updates the account with a new balance at the given block.
