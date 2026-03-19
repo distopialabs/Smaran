@@ -116,6 +116,8 @@ var blockCSVHeader = []string{
 	"e2e_latency_ms",
 	"mpt_phase_latency_ms",
 	"wait_commitments_latency_ms",
+	"commit_state_latency_ms",
+	"flush_trie_latency_ms",
 	"commit_latency_count",
 	"commit_latency_sum_us",
 	"commit_latency_min_us",
@@ -199,6 +201,7 @@ func (mc *MetricsCollector) WriteBlockRow(
 	blockNumber, rawUpdates, selectedUpdates, discardedUpdates uint64,
 	emittedAtNs, mptStartNs, completedAtNs int64,
 	mptPhaseNs, waitCommitmentsNs int64,
+	commitStateNs, flushTrieNs int64,
 ) {
 	e2eNs := completedAtNs - emittedAtNs
 
@@ -238,6 +241,8 @@ func (mc *MetricsCollector) WriteBlockRow(
 		fmt.Sprintf("%.3f", float64(e2eNs)/1e6),
 		fmt.Sprintf("%.3f", float64(mptPhaseNs)/1e6),
 		fmt.Sprintf("%.3f", float64(waitCommitmentsNs)/1e6),
+		fmt.Sprintf("%.3f", float64(commitStateNs)/1e6),
+		fmt.Sprintf("%.3f", float64(flushTrieNs)/1e6),
 		strconv.FormatUint(clCount, 10),
 		fmt.Sprintf("%.3f", clSumUs),
 		fmt.Sprintf("%.3f", clMinUs),

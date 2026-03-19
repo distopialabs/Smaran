@@ -73,13 +73,12 @@ func (s *MPTStateStore) OpenState(root common.Hash) (*state.StateDB, error) {
 	return stateDB, nil
 }
 
-// func (s *MPTStateStore) OpenState(root common.Hash) (*trie.StateTrie, error) {
-// 	tr, err := trie.NewStateTrie(trie.StateTrieID(root), s.TrieDB)
-// 	if err != nil {
-// 		return nil, fmt.Errorf("failed to open state at root %s: %w", root.Hex(), err)
-// 	}
-// 	return tr, nil
-// }
+// OpenTrie opens the account trie directly at the given root.
+// Use this for read-only operations like proof generation where
+// state.StateDB is not needed (its trie is lazily initialized).
+func (s *MPTStateStore) OpenTrie(root common.Hash) (state.Trie, error) {
+	return s.cachingDB.OpenTrie(root)
+}
 
 func (s *MPTStateStore) CommitState(stateDB *state.StateDB, parentRoot common.Hash, blockNum uint64) (common.Hash, error) {
 	root, err := stateDB.Commit(blockNum, true, true)

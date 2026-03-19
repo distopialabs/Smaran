@@ -45,7 +45,7 @@ func ParseFlags() *Flags {
 	f := &Flags{}
 
 	// Data Directory
-	flag.StringVar(&f.DataDir, "datadir", "samurai-data", "Directory to store data (db, profiles, benchmarks)")
+	flag.StringVar(&f.DataDir, "datadir", "tmp-db-dir", "Directory to store data (db, profiles, benchmarks)")
 
 	// Mode selection
 	flag.StringVar(&f.Mode, "mode", "commit", "Mode to run: commit, proof, verify, serve")

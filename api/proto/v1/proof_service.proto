@@ -31,6 +31,12 @@ message GetProofResponse {
   repeated BalanceInfo balance_infos = 2;
   // Time taken to generate proofs in milliseconds.
   int64 generation_time_ms = 3;
+  // MPT membership proof nodes (raw trie nodes, in traversal order).
+  repeated bytes mpt_proof_nodes = 4;
+  // Current balance of the account (big-endian bytes of big.Int).
+  bytes current_balance = 5;
+  // The block number for which the MPT proof is valid.
+  uint64 mpt_block_number = 6;
 }
 
 // RangeProof represents a cryptographic proof for a range of blocks.

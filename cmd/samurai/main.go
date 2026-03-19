@@ -61,7 +61,7 @@ func main() {
 		endBlock := uint64(flags.QueryEndBlock)
 		commands.RunProof(addr, startBlock, endBlock, dbs, precomputedData, cfg)
 	case "serve":
-		commands.RunServe(flags.ServerPort, dbs, precomputedData, cfg)
+		commands.RunServe(flags.ServerPort, dbs, precomputedData, cfg, flags.DataDir)
 	case "verify":
 		commands.RunVerify(flags.QueryStartBlock, flags.QueryEndBlock, precomputedData.V, precomputedData.Weights, precomputedData.SRS)
 	default:

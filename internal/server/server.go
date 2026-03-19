@@ -14,7 +14,9 @@ import (
 	"github.com/nepal80m/samurai/internal/config"
 	"github.com/nepal80m/samurai/internal/db"
 	"github.com/nepal80m/samurai/internal/proof"
+	"github.com/nepal80m/samurai/internal/tree"
 	"github.com/nepal80m/samurai/internal/utils"
+	st "github.com/nepal80m/samurai/mpt/state"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -26,14 +28,16 @@ type ProofServer struct {
 	dbs             []*db.SamuraiStore
 	precomputedData *config.PrecomputedData
 	cfg             *config.Config
+	mptStore        *st.MPTStateStore
 }
 
 // NewProofServer creates a new ProofServer instance.
-func NewProofServer(dbs []*db.SamuraiStore, precomputedData *config.PrecomputedData, cfg *config.Config) *ProofServer {
+func NewProofServer(dbs []*db.SamuraiStore, precomputedData *config.PrecomputedData, cfg *config.Config, mptStore *st.MPTStateStore) *ProofServer {
 	return &ProofServer{
 		dbs:             dbs,
 		precomputedData: precomputedData,
 		cfg:             cfg,
+		mptStore:        mptStore,
 	}
 }
 
@@ -90,11 +94,33 @@ func (s *ProofServer) GetProof(ctx context.Context, req *proofpb.GetProofRequest
 	log.Printf("Generated %d range proofs and %d balance infos in %dms",
 		len(rangeProofs), len(balanceInfos), generationTimeMs)
 
+	// Get current balance for the account
+	cbInfo, err := tree.GetCurrentBalanceInfo(addr, sdb.StateDB)
+	if err != nil {
+		log.Printf("Error getting current balance for account %s: %v", addr.Hex(), err)
+		return nil, status.Errorf(codes.Internal, "failed to get current balance: %v", err)
+	}
+
+	// Generate MPT proof
+	var mptProofNodes [][]byte
+	var mptBlockNumber uint64
+	if s.mptStore != nil {
+		mptBlockNumber, mptProofNodes, err = proof.GenerateMPTProof(s.mptStore, addr)
+		if err != nil {
+			log.Printf("Error generating MPT proof for account %s: %v", addr.Hex(), err)
+			return nil, status.Errorf(codes.Internal, "failed to generate MPT proof: %v", err)
+		}
+		log.Printf("Generated MPT proof with %d nodes for block %d", len(mptProofNodes), mptBlockNumber)
+	}
+
 	// Convert to protobuf response
 	resp := &proofpb.GetProofResponse{
 		RangeProofs:      make([]*proofpb.RangeProof, len(rangeProofs)),
 		BalanceInfos:     make([]*proofpb.BalanceInfo, len(balanceInfos)),
 		GenerationTimeMs: generationTimeMs,
+		MptProofNodes:    mptProofNodes,
+		CurrentBalance:   cbInfo.Bytes(),
+		MptBlockNumber:   mptBlockNumber,
 	}
 
 	for i, rp := range rangeProofs {
@@ -157,6 +183,25 @@ func (s *ProofServer) GetProofStream(req *proofpb.GetProofRequest, stream proofp
 	log.Printf("Generated %d range proofs and %d balance infos in %dms. Streaming...",
 		len(rangeProofs), len(balanceInfos), generationTimeMs)
 
+	// Get current balance for the account
+	cbInfo, err := tree.GetCurrentBalanceInfo(addr, sdb.StateDB)
+	if err != nil {
+		log.Printf("Error getting current balance for account %s: %v", addr.Hex(), err)
+		return status.Errorf(codes.Internal, "failed to get current balance: %v", err)
+	}
+
+	// Generate MPT proof
+	var mptProofNodes [][]byte
+	var mptBlockNumber uint64
+	if s.mptStore != nil {
+		mptBlockNumber, mptProofNodes, err = proof.GenerateMPTProof(s.mptStore, addr)
+		if err != nil {
+			log.Printf("Error generating MPT proof for account %s: %v", addr.Hex(), err)
+			return status.Errorf(codes.Internal, "failed to generate MPT proof: %v", err)
+		}
+		log.Printf("Generated MPT proof with %d nodes for block %d", len(mptProofNodes), mptBlockNumber)
+	}
+
 	// Range proofs are small (max 7), we can send them all in the first message
 	protoRangeProofs := make([]*proofpb.RangeProof, len(rangeProofs))
 	for i, rp := range rangeProofs {
@@ -172,6 +217,9 @@ func (s *ProofServer) GetProofStream(req *proofpb.GetProofRequest, stream proofp
 			RangeProofs:      protoRangeProofs,
 			BalanceInfos:     nil,
 			GenerationTimeMs: generationTimeMs,
+			MptProofNodes:    mptProofNodes,
+			CurrentBalance:   cbInfo.Bytes(),
+			MptBlockNumber:   mptBlockNumber,
 		})
 	}
 
@@ -190,6 +238,9 @@ func (s *ProofServer) GetProofStream(req *proofpb.GetProofRequest, stream proofp
 		if i == 0 {
 			resp.RangeProofs = protoRangeProofs
 			resp.GenerationTimeMs = generationTimeMs
+			resp.MptProofNodes = mptProofNodes
+			resp.CurrentBalance = cbInfo.Bytes()
+			resp.MptBlockNumber = mptBlockNumber
 		}
 
 		for j, bi := range balanceInfos[i:balanceEnd] {

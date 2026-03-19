@@ -77,11 +77,18 @@ func main() {
 	accountsFile := flag.String("accounts-file", "cmd/proofc/top_1k_accounts_all_blocks.csv", "Path to accounts CSV file")
 	outputDir := flag.String("output-dir", "./benchmark_output", "Output directory for benchmark results")
 
+	// MPT verification
+	stateRoot := flag.String("state-root", "", "MPT state root hash (hex) for verification")
+
 	// Legacy dump flags
 	dumpJson := flag.String("dump-json", "", "Path to dump response as JSON (optional)")
 	dumpBin := flag.String("dump-bin", "", "Path to dump response as Binary Protobuf (optional)")
 
 	flag.Parse()
+
+	if *stateRoot == "" {
+		log.Println("WARNING: --state-root not provided. MPT proof verification will be skipped — proofs are not anchored to a trusted state root.")
+	}
 
 	// Setup gRPC connection
 	maxMsgSize := 100 * 1024 * 1024 // 100MB for large payloads
@@ -117,6 +124,7 @@ func main() {
 				OutputDir:  *outputDir,
 				DumpJson:   *dumpJson,
 				DumpBin:    *dumpBin,
+				StateRoot:  parseStateRoot(*stateRoot),
 			}
 			runRangeBenchmark(client, opts)
 
@@ -156,7 +164,7 @@ func main() {
 		}
 	} else {
 		// Normal mode (single proof with verification)
-		runSingleProof(client, *account, *startBlock, *endBlock, *paramsDir)
+		runSingleProof(client, *account, *startBlock, *endBlock, *paramsDir, parseStateRoot(*stateRoot))
 	}
 }
 
@@ -190,6 +198,16 @@ func fetchProofStream(ctx context.Context, client proofpb.ProofServiceClient, re
 		if len(chunk.BalanceInfos) > 0 {
 			finalResp.BalanceInfos = append(finalResp.BalanceInfos, chunk.BalanceInfos...)
 		}
+		// Propagate MPT proof fields (sent in first chunk)
+		if len(chunk.MptProofNodes) > 0 {
+			finalResp.MptProofNodes = chunk.MptProofNodes
+		}
+		if len(chunk.CurrentBalance) > 0 {
+			finalResp.CurrentBalance = chunk.CurrentBalance
+		}
+		if chunk.MptBlockNumber > 0 {
+			finalResp.MptBlockNumber = chunk.MptBlockNumber
+		}
 	}
 
 	return finalResp, nil
@@ -208,6 +226,7 @@ type RangeOpts struct {
 	OutputDir  string
 	DumpJson   string
 	DumpBin    string
+	StateRoot  common.Hash
 }
 
 type ConcurrencyOpts struct {
@@ -314,7 +333,7 @@ func runRangeBenchmark(client proofpb.ProofServiceClient, opts RangeOpts) {
 	// Verification (optional)
 	verifyTimeMs := int64(0)
 	if opts.Verify && precomputed != nil {
-		verifyTimeMs = runVerification(resp, opts.Account, precomputed)
+		verifyTimeMs = runVerification(resp, opts.Account, precomputed, opts.StateRoot)
 	}
 
 	// Print results
@@ -348,7 +367,7 @@ func runRangeBenchmark(client proofpb.ProofServiceClient, opts RangeOpts) {
 	}
 }
 
-func runVerification(resp *proofpb.GetProofResponse, account string, precomputed *config.PrecomputedData) int64 {
+func runVerification(resp *proofpb.GetProofResponse, account string, precomputed *config.PrecomputedData, stateRoot common.Hash) int64 {
 	addr := common.HexToAddress(account)
 
 	rangeProofs := make([]*proof.RangeProof, len(resp.RangeProofs))
@@ -371,8 +390,20 @@ func runVerification(resp *proofpb.GetProofResponse, account string, precomputed
 		}
 	}
 
+	// Build current balance from response data (full 48-byte encoding)
+	var currentBalance *tree.CurrentBalance
+	if len(resp.CurrentBalance) > 0 {
+		currentBalance = &tree.CurrentBalance{}
+		if err := currentBalance.UnmarshalBinary(resp.CurrentBalance); err != nil {
+			log.Printf("Failed to unmarshal current balance: %v", err)
+			currentBalance = nil
+		}
+	}
+
 	start := time.Now()
-	proof.VerifyNewRangeProofs(addr, startingVersion, endingVersion, rangeProofs, balanceInfos, precomputed)
+	if err := proof.VerifyNewRangeProofs(addr, startingVersion, endingVersion, rangeProofs, balanceInfos, precomputed, resp.MptProofNodes, stateRoot, currentBalance); err != nil {
+		log.Printf("Verification failed: %v", err)
+	}
 	return time.Since(start).Milliseconds()
 }
 
@@ -738,7 +769,7 @@ func runStressBenchmark(opts StressOpts) {
 // Single Proof (Normal Mode)
 // =============================================================================
 
-func runSingleProof(client proofpb.ProofServiceClient, account string, startBlock, endBlock uint64, paramsDir string) {
+func runSingleProof(client proofpb.ProofServiceClient, account string, startBlock, endBlock uint64, paramsDir string, stateRoot common.Hash) {
 	precomputedData, err := SetupPrecomputedData(paramsDir)
 	if err != nil {
 		log.Fatalf("failed to setup precomputed data: %v", err)
@@ -782,12 +813,32 @@ func runSingleProof(client proofpb.ProofServiceClient, account string, startBloc
 		}
 	}
 
-	proof.VerifyNewRangeProofs(addr, startingVersion, endingVersion, rangeProofs, balanceInfos, precomputedData)
+	// Build current balance from response data (full 48-byte encoding)
+	var currentBalance *tree.CurrentBalance
+	if len(resp.CurrentBalance) > 0 {
+		currentBalance = &tree.CurrentBalance{}
+		if err := currentBalance.UnmarshalBinary(resp.CurrentBalance); err != nil {
+			log.Printf("Failed to unmarshal current balance: %v", err)
+			currentBalance = nil
+		}
+	}
+
+	if err := proof.VerifyNewRangeProofs(addr, startingVersion, endingVersion, rangeProofs, balanceInfos, precomputedData, resp.MptProofNodes, stateRoot, currentBalance); err != nil {
+		log.Fatalf("Verification failed: %v", err)
+	}
 }
 
 // =============================================================================
 // Utility Functions
 // =============================================================================
+
+// parseStateRoot converts a hex string to common.Hash. Returns zero hash if empty.
+func parseStateRoot(hex string) common.Hash {
+	if hex == "" {
+		return common.Hash{}
+	}
+	return common.HexToHash(hex)
+}
 
 func loadAccounts(filename string) ([]string, error) {
 	f, err := os.Open(filename)

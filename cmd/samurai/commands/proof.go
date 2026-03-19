@@ -2,6 +2,7 @@ package commands
 
 import (
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -33,28 +34,12 @@ func RunProof(addr common.Address, queryStartBlock uint64, queryEndBlock uint64,
 	fmt.Println("Time taken to generate range proofs", time.Since(start))
 
 	fmt.Println("Range proofs", rangeProofs)
-	// for _, b := range balanceInfos {
-	// 	fmt.Println("Balance info", b.Version, b.StartBlock, b.EndBlock, b.Balance)
-	// 	// fmt.Println("Balance info", b.Version, hexutil.EncodeUint64(b.StartBlock), hexutil.EncodeUint64(b.EndBlock), hexutil.EncodeBig(b.Balance))
-	// }
 
-	// balances := make([]*big.Int, int(queryEndBlock-queryStartBlock+1))
-	// for _, b := range balanceInfos {
-	// 	start := b.StartBlock
-	// 	if start < queryStartBlock {
-	// 		start = queryStartBlock
-	// 	}
-	// 	end := b.EndBlock
-	// 	if end > queryEndBlock {
-	// 		end = queryEndBlock
-	// 	}
-	// 	for j := start; j <= end; j++ {
-	// 		balances[int(j-queryStartBlock)] = b.Balance
-	// 	}
-	// }
-	// proof.VerifyRangeProofs(int(queryStartBlock), int(queryEndBlock), rangeProofs, balances, precomputedData.V, precomputedData.Weights, precomputedData.SRS)
-
-	proof.VerifyNewRangeProofs(addr, startingVersion, endingVersion, rangeProofs, balanceInfos, precomputedData)
+	// Note: MPT proof verification is skipped in local proof mode (no state root available).
+	// Pass nil/empty MPT arguments — MPT verification is gracefully skipped when no proof nodes are provided.
+	if err := proof.VerifyNewRangeProofs(addr, startingVersion, endingVersion, rangeProofs, balanceInfos, precomputedData, nil, common.Hash{}, nil); err != nil {
+		log.Fatalf("Verification failed: %v", err)
+	}
 
 	start = time.Now()
 	fmt.Println("Time taken to verify range proofs", time.Since(start))

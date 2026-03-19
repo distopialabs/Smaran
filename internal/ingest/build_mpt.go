@@ -145,6 +145,9 @@ func BuildMPT(cfg Config) error {
 	}
 
 	meta.PutRoot(cfg.MPTStore.DiskDB, cfg.Blocks.End, root)
+	if err := meta.PutLast(cfg.MPTStore.DiskDB, cfg.Blocks.End); err != nil {
+		return fmt.Errorf("store last block: %w", err)
+	}
 
 	if err := cfg.MPTStore.FlushTrieDB(root); err != nil {
 		return fmt.Errorf("flush trie db: %w", err)

@@ -54,7 +54,7 @@ func NewRebuiltLayeredSegmentTree() *RebuiltLayeredSegmentTree {
 	}
 }
 
-func VerifyNewRangeProofs(account common.Address, startingVersion, endingVersion uint64, rangeProofs []*RangeProof, balanceInfos []*tree.HistoricalBalance, precomputedData *config.PrecomputedData) {
+func VerifyNewRangeProofs(account common.Address, startingVersion, endingVersion uint64, rangeProofs []*RangeProof, balanceInfos []*tree.HistoricalBalance, precomputedData *config.PrecomputedData, mptProofNodes [][]byte, stateRoot common.Hash, currentBalance *tree.CurrentBalance) error {
 	// fmt.Println("\n\nVerifying range proofs...")
 
 	proofHashMap := make(map[string]*RangeProof, len(rangeProofs))
@@ -73,10 +73,49 @@ func VerifyNewRangeProofs(account common.Address, startingVersion, endingVersion
 		lxRequiredBatchIdxs[uint64(reqCommit.layer)] = append(lxRequiredBatchIdxs[uint64(reqCommit.layer)], uint64(reqCommit.idx))
 	}
 
+	// Step 1: Verify MPT proof to establish trust in the top-layer commitment.
+	if stateRoot != (common.Hash{}) && len(mptProofNodes) == 0 {
+		return fmt.Errorf("state root provided but server sent no MPT proof nodes — cannot verify trust anchor")
+	}
+	if len(mptProofNodes) > 0 && stateRoot == (common.Hash{}) {
+		return fmt.Errorf("MPT proof nodes received but no --state-root given — cannot verify trust anchor")
+	}
+	if len(mptProofNodes) > 0 {
+		exists, mptBalance, err := VerifyMPTProof(stateRoot, account, mptProofNodes)
+		if err != nil {
+			return fmt.Errorf("MPT proof verification failed: %w", err)
+		}
+		if !exists {
+			return fmt.Errorf("MPT proof verification failed: account does not exist in state trie")
+		}
+
+		// Find the top-layer commitment from the provided range proofs.
+		// The top-layer commitment hash is computed from the proof's commitment digest.
+		var topLayerCommitmentHash common.Hash
+		for _, reqCommit := range reqCommits {
+			if reqCommit.layer == tree.MaxLayer {
+				proofKey := fmt.Sprintf("%d:%d", reqCommit.layer, reqCommit.idx)
+				rp := proofHashMap[proofKey]
+				if rp == nil {
+					return fmt.Errorf("top-layer commitment not found in provided proofs")
+				}
+				topLayerCommitmentHash = hash.CommitmentToHash(rp.Commitment)
+				break
+			}
+		}
+
+		// Verify the final commitment hash matches: hash(currentBalance, topLayerCommitmentHash) == mptBalance
+		if !VerifyFinalCommitmentHash(mptBalance, currentBalance, topLayerCommitmentHash) {
+			return fmt.Errorf("final commitment hash mismatch: MPT balance does not match hash(currentBalance, topLayerCommitment)")
+		}
+		log.Printf("MPT proof verification passed")
+	}
+
+	// Step 2: Rebuild segment tree and verify range proofs (existing logic).
 	// TODO: Rebuild partial tree
 	start := time.Now()
 	requiredTreeBatchesMap := RebuildSegmentTreeForVerify(account, lxRequiredBatchIdxs, startingVersion, endingVersion, balanceInfos, proofHashMap, reqCommits, precomputedData)
-	fmt.Println("Time taken to rebuild segment tree", time.Since(start))
+	log.Printf("Time taken to rebuild segment tree: %v", time.Since(start))
 
 	slices.SortFunc(reqCommits, func(a, b RangeCommitment) int {
 		if a.layer != b.layer {
@@ -96,12 +135,13 @@ func VerifyNewRangeProofs(account common.Address, startingVersion, endingVersion
 		reqCommitKey := fmt.Sprintf("%d:%d", reqCommit.layer, reqCommit.idx)
 
 		if proofHashMap[reqCommitKey] == nil {
-			panic("This required commitment was not found in provided proofs.")
+			return fmt.Errorf("required commitment %s was not found in provided proofs", reqCommitKey)
 		}
 
 		if reqCommit.layer != tree.MaxLayer && !isVerified[reqCommitKey] {
-			panic("This commitment is not verified.")
+			return fmt.Errorf("commitment %s is not verified", reqCommitKey)
 		}
+
 
 		nodesToInterpolate := findNodesToInterpolate(reqCommit, true)
 		rangeProof := proofHashMap[reqCommitKey]
@@ -152,7 +192,7 @@ func VerifyNewRangeProofs(account common.Address, startingVersion, endingVersion
 		I := kzg.Interpolate(xs, ys)
 		ICommit, err := gnark_kzg.Commit(I, precomputedData.SRS.Inner.Pk)
 		if err != nil {
-			panic(err)
+			return fmt.Errorf("commit I polynomial for layer %d idx %d: %w", reqCommit.layer, reqCommit.idx, err)
 		}
 
 		// iCommitBytes := ICommit.Bytes()
@@ -174,9 +214,7 @@ func VerifyNewRangeProofs(account common.Address, startingVersion, endingVersion
 		// TODO: Pairing check using G1 elements only
 		_, err = PairingCheck(Commitment, QCommit, ICommit, ZCommit, precomputedData.SRS)
 		if err != nil {
-			panic(err)
-			// fmt.Printf("pairing check failed: invalid proof\n")
-			// panic("pairing check failed: invalid proof")
+			return fmt.Errorf("pairing check failed for layer %d idx %d: %w", reqCommit.layer, reqCommit.idx, err)
 		} else {
 			// fmt.Println("pairing check passed✅")
 			for _, depCommitIdx := range reqCommit.dependentCommitments {
@@ -193,7 +231,8 @@ func VerifyNewRangeProofs(account common.Address, startingVersion, endingVersion
 
 		// fmt.Printf("Time taken to verify range proof %d:%d: %v\n", reqCommit.layer, reqCommit.idx, time.Since(innerVerifyStart))
 	}
-	fmt.Println("Time taken to verify range proofs", time.Since(verifyStart))
+	log.Printf("Time taken to verify range proofs: %v", time.Since(verifyStart))
+	return nil
 }
 
 func VerifyRangeProofs(startingBlock, endingBlock int, rangeProofs []*RangeProof, balances []*big.Int, V polynomial.Polynomial, weights []fr.Element, srs *kzg.MultiSRS) {
