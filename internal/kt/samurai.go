@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"math/big"
+	"runtime"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -365,6 +366,13 @@ func (s *SamuraiKTServer) getResult(user []byte) (*SamuraiQueryResult, error) {
 	}, nil
 }
 
+func (s *SamuraiKTServer) GetAccountOrCreate(account common.Address) *tree.AccountInfo {
+	if _, ok := s.samuraiAccounts[account.Hex()]; !ok {
+		s.samuraiAccounts[account.Hex()] = tree.NewAccountInfo(account, s.precomputedData)
+	}
+	return s.samuraiAccounts[account.Hex()]
+}
+
 func (s *SamuraiKTServer) CreateOrUpdateAccountInfo(account common.Address, balance *big.Int, epoch uint64) *tree.AccountInfo {
 	if _, ok := s.samuraiAccounts[account.Hex()]; !ok {
 		s.samuraiAccounts[account.Hex()] = tree.NewAccountInfo(account, s.precomputedData)
@@ -374,11 +382,30 @@ func (s *SamuraiKTServer) CreateOrUpdateAccountInfo(account common.Address, bala
 	return s.samuraiAccounts[account.Hex()]
 }
 
+type workerUpdate struct {
+	balance *big.Int
+	epoch   uint64
+	account string
+}
+
+func updateWorker(accounts *map[string]*tree.AccountInfo, updateChan chan workerUpdate, wg *sync.WaitGroup) {
+	defer wg.Done()
+	for update := range updateChan {
+		ai, ok := (*accounts)[update.account]
+		if !ok {
+			continue
+		}
+		ai.UpdateInMemory(update.epoch, update.balance)
+	}
+}
+
 // applyUpdates flushes the updateBuffer into the segment trees, SamuraiDB,
 // and MPT via storage.CreateOrUpdateAccountInfo.
 func (s *SamuraiKTServer) applyUpdates() {
 	s.rootCommitmentIsDirty = false
 	epoch := s.epoch.Add(1)
+
+	updatedAccounts := make(map[string]*tree.AccountInfo)
 
 	for _, pair := range s.updateBuffer {
 		userKey := string(pair.User)
@@ -391,18 +418,63 @@ func (s *SamuraiKTServer) applyUpdates() {
 		}
 		s.currentVersion[userKey]++
 
-		balance := new(big.Int).SetBytes(hash.BytesToHash(pair.Key).Bytes())
-		ai := s.CreateOrUpdateAccountInfo(account, balance, epoch)
+		ai := s.GetAccountOrCreate(account)
+		updatedAccounts[string(pair.User)] = ai
+	}
 
+	num_workers := runtime.NumCPU()
+	// Divide the updated accounts into num_workers chunks
+	chunks := make([]map[string]*tree.AccountInfo, num_workers)
+	user_to_worker_map := make(map[string]int)
+	for i := 0; i < num_workers; i++ {
+		chunks[i] = make(map[string]*tree.AccountInfo)
+	}
+	i := 0
+	for userKey, ai := range updatedAccounts {
+		if _, ok := user_to_worker_map[userKey]; !ok {
+			chunks[i%num_workers][userKey] = ai
+			user_to_worker_map[userKey] = i % num_workers
+			i++
+		} // Else, the user is already in a chunk.
+	}
+
+	// Spawn num_workers workers
+	updateChans := make([]chan workerUpdate, num_workers)
+	var wg sync.WaitGroup
+	for i := 0; i < num_workers; i++ {
+		updateChans[i] = make(chan workerUpdate, s.batchSize)
+		wg.Add(1)
+		go updateWorker(&chunks[i], updateChans[i], &wg)
+	}
+
+	// Send updates to the workers
+
+	for _, pair := range s.updateBuffer {
+		userKey := string(pair.User)
+		balance := new(big.Int).SetBytes(hash.BytesToHash(pair.Key).Bytes())
+		updateChans[user_to_worker_map[userKey]] <- workerUpdate{
+			balance: balance,
+			epoch:   epoch,
+			account: userKey,
+		}
+	}
+
+	for i := 0; i < num_workers; i++ {
+		close(updateChans[i])
+	}
+	wg.Wait()
+
+	for userKey, ai := range updatedAccounts {
+		user := []byte(userKey)
 		commitmentHash := hash.CommitmentToHash(ai.CurrentLXBatchCommitment[tree.MaxLayer-1])
-		trieKey := makeSamuraiTrieKey(pair.User)
+		trieKey := makeSamuraiTrieKey(user)
 		trieValue, err := rlp.EncodeToBytes(commitmentHash.Bytes())
 		if err != nil {
-			log.Errorf("RLP encode failed for user %s: %v", hex.EncodeToString(pair.User), err)
+			log.Errorf("RLP encode failed for user %s: %v", hex.EncodeToString(user), err)
 			continue
 		}
 		if err := s.mpt.Update(trieKey, trieValue); err != nil {
-			log.Errorf("MPT update failed for user %s: %v", hex.EncodeToString(pair.User), err)
+			log.Errorf("MPT update failed for user %s: %v", hex.EncodeToString(user), err)
 		}
 	}
 
