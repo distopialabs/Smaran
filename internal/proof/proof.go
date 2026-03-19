@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	fr "github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
+	"github.com/consensys/gnark-crypto/ecc/bls12-381/fr/fft"
 	gnark_kzg "github.com/consensys/gnark-crypto/ecc/bls12-381/kzg"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/nepal80m/samurai/internal/config"
@@ -181,7 +182,8 @@ func GetNewProofRange(account common.Address, startingVersion, endingVersion uin
 
 			storedCommitment := tree.GetBatchCommitment(account, uint64(layer), uint64(idx), db.StateDB)
 
-			Z := polynomial.VanishingPolynomial(nodesToInterpolate)
+			domain := fft.NewDomain(uint64(len(batchTree)))
+			Z := polynomial.VanishingPolynomial(nodesToInterpolate, &domain.Generator)
 
 			xs := make([]fr.Element, len(nodesToInterpolate))
 			ys := make([]fr.Element, len(nodesToInterpolate))

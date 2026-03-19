@@ -2,24 +2,34 @@ package kt
 
 import (
 	"bytes"
+	"crypto/rand"
 	"fmt"
+	"math/big"
 	"os"
 	"sync"
 	"testing"
 
+	bls "github.com/consensys/gnark-crypto/ecc/bls12-381"
+	"github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
+	"github.com/consensys/gnark-crypto/ecc/bls12-381/fr/fft"
+	gnark_kzg "github.com/consensys/gnark-crypto/ecc/bls12-381/kzg"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethdb/memorydb"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/trie"
+
+	"github.com/nepal80m/samurai/internal/crypto/polynomial"
+	"github.com/nepal80m/samurai/internal/proof"
+	"github.com/nepal80m/samurai/internal/tree"
 )
 
-const testParamsDir = "./testdata/params"
+const testParamsDir = "/tmp/testdata/params"
 
 func setupTestParamsDir(t *testing.T) {
 	t.Helper()
-	if err := os.MkdirAll(testParamsDir, 0755); err != nil {
+	if err := os.MkdirAll(testParamsDir, 0o755); err != nil {
 		t.Fatalf("failed to create test params dir: %v", err)
 	}
 }
@@ -173,11 +183,142 @@ func TestSamuraiMultipleUsersIndependent(t *testing.T) {
 	}
 }
 
+func TestSamuraiKZGProofGenerateAndVerify(t *testing.T) {
+	s := newTestSamuraiServer(t, 1)
+
+	user := []byte("proof-user")
+	const numPuts = 10
+
+	for i := 0; i < numPuts; i++ {
+		s.Put(user, []byte(fmt.Sprintf("key-v%d", i+1)))
+	}
+	_ = s.GetCommitment()
+
+	account := userToAddress(user)
+	userKey := string(user)
+	version := s.currentVersion[userKey]
+	if version < 2 {
+		t.Fatalf("need at least 2 versions for proof generation, got %d", version)
+	}
+
+	// Diagnostic: check that the stored commitment matches a direct KZG commit
+	// on the polynomial recovered via FFT from the tree evaluations.
+	ai := s.samuraiAccounts[account.Hex()]
+	batchTree := &ai.CurrentLXBatchTree[0]
+	storedCommit := ai.CurrentLXBatchCommitment[0]
+
+	evals := make([]fr.Element, len(batchTree))
+	for i, v := range batchTree {
+		evals[i] = polynomial.HashToFieldElement(v)
+	}
+	domain := fft.NewDomain(uint64(len(evals)))
+	fft.BitReverse(evals)
+	domain.FFTInverse(evals, fft.DIF)
+	fft.BitReverse(evals)
+
+	directCommit, err := gnark_kzg.Commit(evals, s.precomputedData.SRS.Inner.Pk)
+	if err != nil {
+		t.Fatalf("direct commit: %v", err)
+	}
+	if !storedCommit.Equal(&directCommit) {
+		t.Logf("STORED  commitment: %x", storedCommit.Marshal()[:16])
+		t.Logf("DIRECT  commitment: %x", directCommit.Marshal()[:16])
+		t.Fatalf("incremental commitment does not match direct KZG commit — WeightCommits may be stale")
+	}
+	t.Logf("commitment match OK")
+
+	rangeProofs, historicalBalances := s.GetProofRangeInMemory(account, 0, version-1, userKey)
+	if len(rangeProofs) == 0 {
+		t.Fatal("expected non-empty range proofs")
+	}
+	if len(historicalBalances) == 0 {
+		t.Fatal("expected non-empty historical balances")
+	}
+	t.Logf("versions=%d  proofs=%d  balances=%d", version, len(rangeProofs), len(historicalBalances))
+
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				t.Fatalf("proof verification panicked: %v", r)
+			}
+		}()
+		proof.VerifyNewRangeProofs(account, 0, version-1, rangeProofs, historicalBalances, s.precomputedData)
+	}()
+}
+
+func TestSamuraiKZGProofViaGetResponse(t *testing.T) {
+	s := newTestSamuraiServer(t, 1)
+
+	user := []byte("roundtrip-user")
+	const numPuts = 10
+	for i := 0; i < numPuts; i++ {
+		s.Put(user, []byte(fmt.Sprintf("key-v%d", i+1)))
+	}
+	_ = s.GetCommitment()
+
+	result, err := s.Get(user)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if result.CurrentVersion < 2 {
+		t.Skipf("too few versions (%d) to generate proofs", result.CurrentVersion)
+	}
+	if len(result.SamuraiProofs) == 0 {
+		t.Fatal("expected non-empty samurai proofs in response")
+	}
+	if len(result.HistoricalBalances) == 0 {
+		t.Fatal("expected non-empty historical balances in response")
+	}
+
+	account := userToAddress(user)
+
+	historicalBalances := make([]*tree.HistoricalBalance, len(result.HistoricalBalances))
+	for i, hbBytes := range result.HistoricalBalances {
+		hb := &tree.HistoricalBalance{}
+		if err := hb.UnmarshalBinary(hbBytes); err != nil {
+			t.Fatalf("unmarshal historical balance %d: %v", i, err)
+		}
+		historicalBalances[i] = hb
+	}
+
+	rangeProofs := make([]*proof.RangeProof, len(result.SamuraiProofs))
+	for i, sp := range result.SamuraiProofs {
+		var commitment gnark_kzg.Digest
+		if _, err := commitment.SetBytes(sp.Commitment); err != nil {
+			t.Fatalf("unmarshal commitment %d: %v", i, err)
+		}
+		var proofG1 bls.G1Affine
+		if _, err := proofG1.SetBytes(sp.Proof); err != nil {
+			t.Fatalf("unmarshal proof %d: %v", i, err)
+		}
+		rangeProofs[i] = &proof.RangeProof{
+			Idx:                  sp.Idx,
+			Layer:                sp.Layer,
+			Commitment:           commitment,
+			Proof:                proofG1,
+			BlockRange:           sp.BlockRange,
+			DependentCommitments: sp.DependentCommitments,
+		}
+	}
+
+	t.Logf("versions=%d  proofs=%d  balances=%d",
+		result.CurrentVersion, len(rangeProofs), len(historicalBalances))
+
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				t.Fatalf("proof verification panicked: %v", r)
+			}
+		}()
+		proof.VerifyNewRangeProofs(account, 0, result.CurrentVersion-1, rangeProofs, historicalBalances, s.precomputedData)
+	}()
+}
+
 func TestSamuraiConcurrentPutGetCommitment(t *testing.T) {
 	const (
-		numWriters     = 4
-		putsPerWriter  = 50
-		usersPerWriter = 3
+		numWriters       = 4
+		putsPerWriter    = 50
+		usersPerWriter   = 3
 		numCommitReaders = 8
 		readsPerReader   = 50
 	)
@@ -229,6 +370,48 @@ func TestSamuraiConcurrentPutGetCommitment(t *testing.T) {
 			if result.CurrentVersion == 0 {
 				t.Errorf("user %s: expected non-zero version count", user)
 			}
+		}
+	}
+}
+
+func TestFFT(t *testing.T) {
+	domain := fft.NewDomain(uint64(4096))
+
+	poly := make(polynomial.Polynomial, 4096)
+	for i := 0; i < 4096; i++ {
+		var randBytes [32]byte
+		rand.Read(randBytes[:])
+		rand_hash := common.Hash(randBytes)
+		poly[i] = polynomial.HashToFieldElement(rand_hash)
+	}
+
+	points := make([]fr.Element, 4096)
+	for i := 0; i < 4096; i++ {
+		points[i] = poly[i]
+	}
+
+	domain.FFT(points, fft.DIF)
+	fft.BitReverse(points)
+
+	_poly := polynomial.Polynomial(poly)
+
+	evals := make([]fr.Element, 4096)
+	for i := 0; i < 4096; i++ {
+		var omegaI fr.Element
+		omegaI.Exp(domain.Generator, new(big.Int).SetInt64(int64(i)))
+		evals[i] = _poly.Eval(&omegaI)
+
+		if !evals[i].Equal(&points[i]) {
+			t.Fatalf("bad at %d", i)
+		}
+	}
+
+	domain.FFTInverse(evals, fft.DIF)
+	fft.BitReverse(evals)
+
+	for i := 0; i < 4096; i++ {
+		if !evals[i].Equal(&poly[i]) {
+			t.Fatalf("bad at %d", i)
 		}
 	}
 }

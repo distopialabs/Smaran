@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
+	"github.com/consensys/gnark-crypto/ecc/bls12-381/fr/fft"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -216,7 +217,6 @@ func (s *SamuraiKTServer) GetProofRangeInMemory(account common.Address, starting
 	}
 
 	reqCommits := proof.FindCommitmentsCoveringRange(int(startingVersion), int(endingVersion))
-	// log.Infof("reqCommits: %+v", reqCommits)
 
 	lxRequiredBatchIdxs := make(map[uint64][]uint64)
 	for i := uint64(1); i <= tree.MaxLayer; i++ {
@@ -248,37 +248,43 @@ func (s *SamuraiKTServer) GetProofRangeInMemory(account common.Address, starting
 		// log.Debugf("DependentCommitments: %v", reqCommit.DependentCommitments)
 		// log.Debugf("nodesToInterpolate: %v", nodesToInterpolate)
 
+		// start := time.Now()
 		treeKey := fmt.Sprintf("%d:%d", layer, idx)
 		batchTree := requiredTreeBatchesMap[treeKey]
 
-		xs1 := make([]int, len(batchTree))
-		ys1 := make([]fr.Element, len(batchTree))
+		P := make([]fr.Element, len(batchTree))
 		for i, v := range batchTree {
-			xs1[i] = i
-			ys1[i] = polynomial.HashToFieldElement(v)
-			// fmt.Printf("xs1[%d] = %d, ys1[%d] = %s\n", i, i, i, ys1[i].String())
+			P[i] = polynomial.HashToFieldElement(v)
 		}
-		P := polynomial.Interpolate(xs1, ys1, s.precomputedData.V, s.precomputedData.Weights)
+		domain := fft.NewDomain(uint64(len(P)))
+		// fft.BitReverse(P)
+		domain.FFTInverse(P, fft.DIF)
+		fft.BitReverse(P)
+		// log.Infof("Time to P: %dms", time.Since(start).Milliseconds())
 
+		// start = time.Now()
 		storedCommitment := ai.CurrentLXBatchCommitment[layer-1] // We are always going to query the entire range, so the commitment to use is always the current commitment of the layer.
-		Z := polynomial.VanishingPolynomial(nodesToInterpolate)
+		Z := polynomial.VanishingPolynomial(nodesToInterpolate, &domain.Generator)
+		// log.Infof("Time to Z: %dms", time.Since(start).Milliseconds())
 
-		xs := make([]fr.Element, len(nodesToInterpolate))
-		ys := make([]fr.Element, len(nodesToInterpolate))
-		for i, v := range nodesToInterpolate {
-			xs[i] = fr.NewElement(uint64(v))
-			ys[i] = polynomial.HashToFieldElement(batchTree[v])
-			// fmt.Printf("xs[%d] = %d, ys[%d] = %s\n", i, v, i, ys[i].String())
+		// start = time.Now()
+		I := make([]fr.Element, int(domain.Cardinality))
+		for _, v := range nodesToInterpolate {
+			I[v] = polynomial.HashToFieldElement(batchTree[v])
 		}
+		// fft.BitReverse(I)
+		domain.FFTInverse(I, fft.DIF)
+		fft.BitReverse(I)
+		// log.Infof("Time to I: %dms", time.Since(start).Milliseconds())
 
-		I := kzg.Interpolate(xs, ys)
-
+		// start = time.Now()
 		diff := kzg.SubtractPolys(P, I)
 		Q := kzg.PolyDiv(diff, Z)
 		QCommit, err := gnark_kzg.Commit(Q, s.precomputedData.SRS.Inner.Pk)
 		if err != nil {
 			panic(err)
 		}
+		// log.Infof("Time to generate witness: %dms", time.Since(start).Milliseconds())
 
 		rangeProof := &proof.RangeProof{
 			Idx:                  idx,
@@ -323,7 +329,9 @@ func (s *SamuraiKTServer) getResult(user []byte) (*SamuraiQueryResult, error) {
 
 		version := s.currentVersion[userKey]
 		if version > 0 {
+			// start := time.Now()
 			rangeProofs, historicalBalances := s.GetProofRangeInMemory(account, 0, version-1, userKey)
+			// log.Infof("Time taken to get proof range: %dms", time.Since(start).Milliseconds())
 
 			samuraiProofs = make([]SamuraiRangeProofJSON, len(rangeProofs))
 			for i, rp := range rangeProofs {
@@ -343,7 +351,7 @@ func (s *SamuraiKTServer) getResult(user []byte) (*SamuraiQueryResult, error) {
 				hbBytes[i] = b[:]
 			}
 			// Test, see if the verification works
-			proof.VerifyNewRangeProofs(account, 0, version-1, rangeProofs, historicalBalances, s.precomputedData)
+			// proof.VerifyNewRangeProofs(account, 0, version-1, rangeProofs, historicalBalances, s.precomputedData)
 		}
 	}
 

@@ -12,6 +12,7 @@ import (
 	bls "github.com/consensys/gnark-crypto/ecc/bls12-381"
 
 	fr "github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
+	"github.com/consensys/gnark-crypto/ecc/bls12-381/fr/fft"
 	gnark_kzg "github.com/consensys/gnark-crypto/ecc/bls12-381/kzg"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/nepal80m/samurai/internal/config"
@@ -103,18 +104,19 @@ func VerifyNewRangeProofs(account common.Address, startingVersion, endingVersion
 
 		Commitment := rangeProof.Commitment
 
-		Z := polynomial.VanishingPolynomial(nodesToInterpolate)
+		domain := fft.NewDomain(uint64(len(precomputedData.V) - 1))
+		Z := polynomial.VanishingPolynomial(nodesToInterpolate, &domain.Generator)
 		ZCommit, _ := kzg.CommitG2(Z, precomputedData.SRS.G2Powers)
 
-		xs := make([]fr.Element, len(nodesToInterpolate))
-		ys := make([]fr.Element, len(nodesToInterpolate))
-		for i, nodeIdx := range nodesToInterpolate {
-			xs[i] = fr.NewElement(uint64(nodeIdx))
-			key := fmt.Sprintf("%d:%d", reqCommit.Layer, reqCommit.Idx)
-			ys[i] = polynomial.HashToFieldElement(requiredTreeBatchesMap[key][nodeIdx])
+		I := make(polynomial.Polynomial, int(domain.Cardinality))
+		treeKey := fmt.Sprintf("%d:%d", reqCommit.Layer, reqCommit.Idx)
+		for _, nodeIdx := range nodesToInterpolate {
+			I[nodeIdx] = polynomial.HashToFieldElement(requiredTreeBatchesMap[treeKey][nodeIdx])
 		}
+		// fft.BitReverse(I)
+		domain.FFTInverse(I, fft.DIF)
+		fft.BitReverse(I)
 
-		I := kzg.Interpolate(xs, ys)
 		ICommit, err := gnark_kzg.Commit(I, precomputedData.SRS.Inner.Pk)
 		if err != nil {
 			panic(err)
@@ -176,7 +178,8 @@ func VerifyRangeProofs(startingBlock, endingBlock int, rangeProofs []*RangeProof
 
 		Commitment := rangeProof.Commitment
 
-		Z := polynomial.VanishingPolynomial(nodesToInterpolate)
+		domain := fft.NewDomain(uint64(len(V) - 1))
+		Z := polynomial.VanishingPolynomial(nodesToInterpolate, &domain.Generator)
 		ZCommit, _ := kzg.CommitG2(Z, srs.G2Powers)
 
 		xs := make([]fr.Element, len(nodesToInterpolate))
