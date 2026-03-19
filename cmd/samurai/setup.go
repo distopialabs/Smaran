@@ -84,14 +84,14 @@ func SetupPrecomputedData(cfg *config.Config) (*config.PrecomputedData, error) {
 }
 
 // SetupDatabases creates sharded Pebble databases for state, tree, and history.
-func SetupDatabases(cfg *config.Config, cleanOnCommit bool) ([]*db.SamuraiDB, []*db.PebbleDB, error) {
-	dbs := make([]*db.SamuraiDB, cfg.Database.Shards)
+func SetupDatabases(cfg *config.Config, cleanOnCommit bool) ([]*db.SamuraiStore, []*db.PebbleDB, error) {
+	dbs := make([]*db.SamuraiStore, cfg.Database.Shards)
 	pebbleDbs := make([]*db.PebbleDB, cfg.Database.Shards)
 
 	for i := range cfg.Database.Shards {
-		stateDBPath := fmt.Sprintf(cfg.Database.StoragePath+"/samurai-shard-%d-state.db", i)
-		treeDBPath := fmt.Sprintf(cfg.Database.StoragePath+"/samurai-shard-%d-tree.db", i)
-		historyDBPath := fmt.Sprintf(cfg.Database.StoragePath+"/samurai-shard-%d-history.db", i)
+		stateDBPath := fmt.Sprintf(cfg.Database.StoragePath+"/shard-%d-state", i)
+		treeDBPath := fmt.Sprintf(cfg.Database.StoragePath+"/shard-%d-tree", i)
+		historyDBPath := fmt.Sprintf(cfg.Database.StoragePath+"/shard-%d-history", i)
 
 		if cleanOnCommit {
 			dirsToRemove := []string{stateDBPath, treeDBPath, historyDBPath}
@@ -156,7 +156,7 @@ func SetupDatabases(cfg *config.Config, cleanOnCommit bool) ([]*db.SamuraiDB, []
 			return nil, nil, fmt.Errorf("failed to create HistoryDB %s: %w", historyDBPath, err)
 		}
 
-		dbs[i] = &db.SamuraiDB{
+		dbs[i] = &db.SamuraiStore{
 			StateDB:   stateDB,
 			TreeDB:    treeDB,
 			HistoryDB: historyDB,
@@ -168,11 +168,11 @@ func SetupDatabases(cfg *config.Config, cleanOnCommit bool) ([]*db.SamuraiDB, []
 }
 
 // SetupCaches creates Ristretto caches for each shard.
-func SetupCaches(dbs []*db.SamuraiDB, cfg *config.Config, precomputed *config.PrecomputedData) ([]*storage.Cache, error) {
+func SetupCaches(dbs []*db.SamuraiStore, cfg *config.Config, precomputed *config.PrecomputedData) ([]*storage.Cache, error) {
 	caches := make([]*storage.Cache, cfg.Database.Shards)
 
 	for i := range cfg.Database.Shards {
-		cache, err := storage.NewCache(dbs[i], &cfg.Cache, precomputed)
+		cache, err := storage.NewCache(cfg.Cache.Size, dbs[i], precomputed)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create cache for shard %d: %w", i, err)
 		}
@@ -183,7 +183,7 @@ func SetupCaches(dbs []*db.SamuraiDB, cfg *config.Config, precomputed *config.Pr
 }
 
 // Cleanup closes all caches and databases.
-func Cleanup(caches []*storage.Cache, dbs []*db.SamuraiDB) {
+func Cleanup(caches []*storage.Cache, dbs []*db.SamuraiStore) {
 	for i := range caches {
 		if caches[i] != nil {
 			caches[i].Close()

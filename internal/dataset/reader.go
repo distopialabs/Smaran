@@ -27,6 +27,7 @@ func (dr *DatasetReader) GetBlock(block uint32) ([]Entry, error) {
 	return sr.getBlock(block)
 }
 
+// IterateRange iterates over the range [a, b] of blocks, calling fn for each block.
 func (dr *DatasetReader) IterateRange(a, b uint32, fn func(n uint32, entries []Entry) error) error {
 	if b < a {
 		return nil

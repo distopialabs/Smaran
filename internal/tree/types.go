@@ -115,7 +115,7 @@ func (a *AccountInfo) DeepCopy() *AccountInfo {
 }
 
 // Update updates the account with a new balance at the given block.
-func (accountInfo *AccountInfo) Update(blockNumber uint64, balance *big.Int, sdb *db.SamuraiDB) {
+func (accountInfo *AccountInfo) Update(blockNumber uint64, balance *big.Int, sdb *db.SamuraiStore) {
 	prevCb := accountInfo.CurrentBalanceInfo
 
 	if prevCb == nil {
@@ -160,7 +160,7 @@ func (accountInfo *AccountInfo) CalculateFinalCommitment() common.Hash {
 }
 
 // Save persists the account to the database.
-func (accountInfo *AccountInfo) Save(sdb *db.SamuraiDB) {
+func (accountInfo *AccountInfo) Save(sdb *db.SamuraiStore) {
 	StoreCurrentBalanceInfo(accountInfo.Account, accountInfo.CurrentBalanceInfo, sdb.StateDB)
 	StoreCurrentLXBatchTree(accountInfo.Account, accountInfo.CurrentLXBatchTree, &accountInfo.DirtyChunks, sdb.TreeDB)
 	StoreLXBatchCommitments(accountInfo.Account, accountInfo.CurrentBalanceInfo.Version, accountInfo.CurrentLXBatchCommitment, sdb.StateDB)

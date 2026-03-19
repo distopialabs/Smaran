@@ -23,13 +23,13 @@ import (
 // ProofServer implements the ProofServiceServer gRPC interface.
 type ProofServer struct {
 	proofpb.UnimplementedProofServiceServer
-	dbs             []*db.SamuraiDB
+	dbs             []*db.SamuraiStore
 	precomputedData *config.PrecomputedData
 	cfg             *config.Config
 }
 
 // NewProofServer creates a new ProofServer instance.
-func NewProofServer(dbs []*db.SamuraiDB, precomputedData *config.PrecomputedData, cfg *config.Config) *ProofServer {
+func NewProofServer(dbs []*db.SamuraiStore, precomputedData *config.PrecomputedData, cfg *config.Config) *ProofServer {
 	return &ProofServer{
 		dbs:             dbs,
 		precomputedData: precomputedData,

@@ -13,6 +13,10 @@ benchmark_output/
 venv
 data/
 samurai-data
+tmp-bench-db-dir/
+tmp-db-dir/
+cpu.prof
+samuraimpt
 samurai
 proofc
 bin/

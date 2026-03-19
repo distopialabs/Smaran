@@ -18,7 +18,7 @@ type Metadata struct {
 // SaveMetadata saves the metadata to the specified directory
 func SaveMetadata(dir string, meta Metadata) error {
 	path := filepath.Join(dir, MetadataFileName)
-	
+
 	// Ensure directory exists
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("failed to create directory: %w", err)
@@ -38,7 +38,7 @@ func SaveMetadata(dir string, meta Metadata) error {
 // LoadMetadata loads the metadata from the specified directory
 func LoadMetadata(dir string) (Metadata, error) {
 	path := filepath.Join(dir, MetadataFileName)
-	
+
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -53,4 +53,20 @@ func LoadMetadata(dir string) (Metadata, error) {
 	}
 
 	return meta, nil
+}
+
+func GetLastProcessedBlockNumber(dbDir string) (uint64, error) {
+	meta, err := LoadMetadata(dbDir)
+	if err != nil {
+		return 0, err
+	}
+	return meta.LastProcessedBlock, nil
+}
+
+func SetLastProcessedBlockNumber(dbDir string, blockNumber uint64) error {
+	meta := Metadata{
+		LastProcessedBlock: blockNumber,
+	}
+	return SaveMetadata(dbDir, meta)
+
 }

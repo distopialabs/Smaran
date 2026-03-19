@@ -57,7 +57,7 @@ type RangeProof struct {
 }
 
 // BinarySearchVersionByBlockNumber finds the version for a given block number using binary search.
-func BinarySearchVersionByBlockNumber(blockNumber uint64, searchStart uint64, searchEnd uint64, account common.Address, db *db.SamuraiDB) (uint64, error) {
+func BinarySearchVersionByBlockNumber(blockNumber uint64, searchStart uint64, searchEnd uint64, account common.Address, db *db.SamuraiStore) (uint64, error) {
 	L := searchStart
 	R := searchEnd
 	for L <= R {
@@ -82,7 +82,7 @@ func BinarySearchVersionByBlockNumber(blockNumber uint64, searchStart uint64, se
 // It handles edge cases:
 // - If endingBlock < account's first recorded block: returns error (no data available)
 // - If startingBlock < account's first recorded block: clamps to version 0
-func BlockRangeToVersionRange(account common.Address, startingBlock uint64, endingBlock uint64, config *config.Config, db *db.SamuraiDB) (uint64, uint64, error) {
+func BlockRangeToVersionRange(account common.Address, startingBlock uint64, endingBlock uint64, config *config.Config, db *db.SamuraiStore) (uint64, uint64, error) {
 
 	cbInfo, err := tree.GetCurrentBalanceInfo(account, db.StateDB)
 	if err != nil {
@@ -130,7 +130,7 @@ func BlockRangeToVersionRange(account common.Address, startingBlock uint64, endi
 }
 
 // GetNewProofRange generates range proofs for a given account and version range.
-func GetNewProofRange(account common.Address, startingVersion, endingVersion uint64, precomputedData *config.PrecomputedData, db *db.SamuraiDB) ([]*RangeProof, []*tree.HistoricalBalance) {
+func GetNewProofRange(account common.Address, startingVersion, endingVersion uint64, precomputedData *config.PrecomputedData, db *db.SamuraiStore) ([]*RangeProof, []*tree.HistoricalBalance) {
 	reqCommits := findCommitmentsCoveringRange(int(startingVersion), int(endingVersion))
 
 	lxRequiredBatchIdxs := make(map[uint64][]uint64)

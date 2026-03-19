@@ -18,7 +18,7 @@ import (
 // rebuilds the whole segment tree
 // uses stored commitments to fill the commitHash part of the batch trees
 // in this process, stores only the involved batch trees and returns them
-func RebuildSegmentTreeForProof(account common.Address, lxRequiredBatchIdxs map[uint64][]uint64, startingVersion uint64, endingVersion uint64, db *db.SamuraiDB, precomputedData *config.PrecomputedData) (map[string]tree.BatchTree, []*tree.HistoricalBalance) {
+func RebuildSegmentTreeForProof(account common.Address, lxRequiredBatchIdxs map[uint64][]uint64, startingVersion uint64, endingVersion uint64, db *db.SamuraiStore, precomputedData *config.PrecomputedData) (map[string]tree.BatchTree, []*tree.HistoricalBalance) {
 
 	cbInfo, err := tree.GetCurrentBalanceInfo(account, db.StateDB)
 	if err != nil {
@@ -184,7 +184,7 @@ func UpdateLXTree(accountInfo *tree.AccountInfo, idx uint64, val common.Hash, la
 	}
 }
 
-func InsertCommitmentHashes(layer uint64, batchIdx uint64, batchTree *tree.BatchTree, account common.Address, latestVersion uint64, sdb *db.SamuraiDB) {
+func InsertCommitmentHashes(layer uint64, batchIdx uint64, batchTree *tree.BatchTree, account common.Address, latestVersion uint64, sdb *db.SamuraiStore) {
 	if layer <= 1 || layer > MaxLayer {
 		panic("layer" + strconv.Itoa(int(layer)) + " is invalid")
 	}

@@ -10,7 +10,7 @@ import (
 )
 
 // RunServe starts the gRPC proof server.
-func RunServe(port int, dbs []*db.SamuraiDB, precomputedData *config.PrecomputedData, cfg *config.Config) {
+func RunServe(port int, dbs []*db.SamuraiStore, precomputedData *config.PrecomputedData, cfg *config.Config) {
 	addr := fmt.Sprintf(":%d", port)
 
 	proofServer := server.NewProofServer(dbs, precomputedData, cfg)

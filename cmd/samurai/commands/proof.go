@@ -12,7 +12,7 @@ import (
 )
 
 // RunProof executes the proof generation mode.
-func RunProof(addr common.Address, queryStartBlock uint64, queryEndBlock uint64, dbs []*db.SamuraiDB, precomputedData *config.PrecomputedData, cfg *config.Config) {
+func RunProof(addr common.Address, queryStartBlock uint64, queryEndBlock uint64, dbs []*db.SamuraiStore, precomputedData *config.PrecomputedData, cfg *config.Config) {
 	shardIdx := utils.AddressToShardIndex(addr, cfg.Database.Shards)
 	db := dbs[shardIdx]
 
