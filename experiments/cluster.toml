@@ -1,0 +1,41 @@
+[nodes.node1]
+ip = "169.229.48.114"
+port = 22
+username = "shubham_mishra"
+key_path = "/Users/shubham_mishra/.ssh/id_ed25519"
+
+[nodes.node2]
+ip = "169.229.48.114"
+port = 22
+username = "shubham_mishra"
+key_path = "/Users/shubham_mishra/.ssh/id_ed25519"
+
+[experiment]
+repo_url = "https://github.com/distopialabs/Samurai"
+remote_base_dir = "/data/shubham_mishra"
+remote_repo_dir = "/data/shubham_mishra/Samurai"
+remote_bin_dir = "/data/shubham_mishra/Samurai/bin"
+remote_tmp_dir = "/tmp/"
+server_node = "node1"
+server_addr = "0.0.0.0:3191"
+server_port = 3191
+server_log_path = "/data/shubham_mishra/server.log"
+repo_branch = "main"
+build_command = "make"
+server_binary = "/tmp/bin/ktserver"
+server_process_name = "ktserver"
+server_batch_size = 1024
+bench_binary = "/tmp/bin/ktbench"
+bench_num_users = 10000
+bench_num_load_clients = 10
+bench_num_run_clients = 10
+bench_num_versions = 20
+bench_run_duration_secs = 90
+bench_protocol = "samurai"
+local_logs_dir = "logs"
+server_startup_wait_seconds = 2.0
+
+[sweeping_parameters]
+bench_protocol = ["samurai", "optiks"]
+bench_num_versions = [64, 128, 256, 512, 700, 1024, 1500, 2047]
+

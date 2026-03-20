@@ -18,3 +18,5 @@ proofc
 bin/
 
 internal/kt/testdata/
+
+.venv/
