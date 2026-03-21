@@ -214,6 +214,25 @@ def dump_run_config(
     )
 
 
+def rewrite_coniks_client_config(local_bin_dir: Path, settings: KtExperimentSettings) -> None:
+    config_path = local_bin_dir / "coniks-client-config" / "config.toml"
+    if not config_path.exists():
+        return
+
+    remote_tmp_bin_dir = f"{settings.remote_tmp_dir.rstrip('/')}/bin"
+    updated_lines: List[str] = []
+    for line in config_path.read_text(encoding="utf-8").splitlines():
+        stripped_line = line.strip()
+        if stripped_line.startswith("sign_pubkey_path ="):
+            updated_lines.append(f'sign_pubkey_path = "{remote_tmp_bin_dir}/sign.pub"')
+        elif stripped_line.startswith("init_str_path ="):
+            updated_lines.append(f'init_str_path = "{remote_tmp_bin_dir}/init.str"')
+        else:
+            updated_lines.append(line)
+
+    config_path.write_text("\n".join(updated_lines) + "\n", encoding="utf-8")
+
+
 def get_local_commit_hash(repo_root: Path | str = ROOT) -> str:
     result = subprocess.run(
         ["git", "rev-parse", "HEAD"],
@@ -230,17 +249,28 @@ def build_repo_prepare_commands(commit_hash: str, settings: KtExperimentSettings
         f"mkdir -p {settings.remote_base_dir}",
         (
             f"if [ ! -d {settings.remote_repo_dir}/.git ]; then "
-            f"git clone {settings.repo_url} {settings.remote_repo_dir}; "
+            f"git clone --recurse-submodules {settings.repo_url} {settings.remote_repo_dir}; "
             "fi"
         ),
         f"cd {settings.remote_repo_dir} && git checkout {settings.repo_branch}",
-        f"cd {settings.remote_repo_dir} && git pull",
+        f"cd {settings.remote_repo_dir} && git pull --recurse-submodules",
         f"cd {settings.remote_repo_dir} && git checkout {commit_hash}",
+        f"cd {settings.remote_repo_dir} && git submodule sync --recursive",
+        f"cd {settings.remote_repo_dir} && git submodule update --init --recursive",
         f"cd {settings.remote_repo_dir} && {settings.build_command}",
     ]
 
 
+def is_coniks_protocol(settings: KtExperimentSettings) -> bool:
+    return settings.bench_protocol == "coniks"
+
+
 def build_server_start_command(settings: KtExperimentSettings) -> str:
+    if is_coniks_protocol(settings):
+        return (
+            f"cd {settings.remote_repo_dir}/coniks-server-config && "
+            f"nohup ../coniksserver run -p > {settings.server_log_path} 2>&1 < /dev/null &"
+        )
     return (
         f"nohup {settings.server_binary} -batch_size {settings.server_batch_size} "
         f"--addr {settings.server_addr} "
@@ -254,6 +284,18 @@ def build_bench_command(
     server_ip: str,
     settings: KtExperimentSettings,
 ) -> str:
+    if is_coniks_protocol(settings):
+        return (
+            f"cd {settings.remote_repo_dir}/coniks-client-config && "
+            f"../coniksbench run -c config.toml "
+            f"-n {settings.bench_num_run_clients} "
+            f"-k {settings.bench_num_users} "
+            f"-d {settings.bench_run_duration_secs} "
+            f"-e {settings.bench_num_versions} "
+            f"-a {settings.bench_num_versions} "
+            f"-v"
+            f"> {settings.remote_base_dir}/{node_name}.log 2>&1"
+        )
     return (
         f"{settings.bench_binary} "
         f"-num-users {settings.bench_num_users} "
@@ -330,6 +372,7 @@ def run_experiment_with_settings(
     print(f"Downloading built bin directory from {settings.server_node}")
     cluster.rsync_from(settings.server_node, settings.remote_bin_dir, str(experiment_dir))
     local_bin_dir = experiment_dir / "bin"
+    rewrite_coniks_client_config(local_bin_dir, settings)
 
     print("Distributing bin directory to all nodes")
     cluster.rsync_to_all(

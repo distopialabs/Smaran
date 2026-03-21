@@ -20,3 +20,5 @@ bin/
 internal/kt/testdata/
 
 .venv/
+coniks-server-config/
+coniks-client-config/

@@ -35,7 +35,11 @@ bench_protocol = "samurai"
 local_logs_dir = "logs"
 server_startup_wait_seconds = 2.0
 
-[sweeping_parameters]
-bench_protocol = ["samurai", "optiks"]
-bench_num_versions = [64, 128, 256, 512, 700, 1024, 1500, 2047]
+# [sweeping_parameters]
+# bench_protocol = ["samurai", "optiks"]
+# bench_num_versions = [64, 128, 256, 512, 700, 1024, 1500, 2047]
 
+
+[sweeping_parameters]
+bench_protocol = ["coniks"]
+bench_num_versions = [64, 128]
