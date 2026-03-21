@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 from itertools import product
 import json
+import os
 import subprocess
 import sys
 import time
@@ -24,7 +25,7 @@ except ImportError:  # pragma: no cover
     import tomllib as tomli  # pyright: ignore[reportMissingImports]
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=False)
 class KtExperimentSettings:
     repo_url: str
     remote_base_dir: str
@@ -214,23 +215,66 @@ def dump_run_config(
     )
 
 
-def rewrite_coniks_client_config(local_bin_dir: Path, settings: KtExperimentSettings) -> None:
+def rewrite_coniks_client_config(
+    local_bin_dir: Path,
+    settings: KtExperimentSettings,
+    server_ip: str,
+) -> None:
     config_path = local_bin_dir / "coniks-client-config" / "config.toml"
     if not config_path.exists():
         return
 
-    remote_tmp_bin_dir = f"{settings.remote_tmp_dir.rstrip('/')}/bin"
+    remote_tmp_config_dir = os.path.join(settings.remote_tmp_dir, "bin", "coniks-server-config")
     updated_lines: List[str] = []
     for line in config_path.read_text(encoding="utf-8").splitlines():
         stripped_line = line.strip()
         if stripped_line.startswith("sign_pubkey_path ="):
-            updated_lines.append(f'sign_pubkey_path = "{remote_tmp_bin_dir}/sign.pub"')
+            updated_lines.append(f'sign_pubkey_path = "{remote_tmp_config_dir}/sign.pub"')
         elif stripped_line.startswith("init_str_path ="):
-            updated_lines.append(f'init_str_path = "{remote_tmp_bin_dir}/init.str"')
+            updated_lines.append(f'init_str_path = "{remote_tmp_config_dir}/init.str"')
+        elif stripped_line.startswith("address ="):
+            updated_lines.append(f'address = "tcp://{server_ip}:3000"')
         else:
             updated_lines.append(line)
 
     config_path.write_text("\n".join(updated_lines) + "\n", encoding="utf-8")
+
+
+def sync_coniks_init_str(
+    cluster: RemoteCluster,
+    local_bin_dir: Path,
+    settings: KtExperimentSettings,
+) -> None:
+    remote_server_init_path = os.path.join(
+        settings.remote_tmp_dir, "bin", "coniks-server-config", "init.str"
+    )
+    local_server_config_dir = local_bin_dir / "coniks-server-config"
+    local_server_config_dir.mkdir(parents=True, exist_ok=True)
+    local_init_path = local_server_config_dir / "init.str"
+
+    cluster.rsync_from(
+        settings.server_node,
+        remote_server_init_path,
+        str(local_init_path),
+        recursive=False,
+    )
+
+    client_nodes = [
+        node_name for node_name in cluster.list_nodes() if node_name != settings.server_node
+    ]
+    if not client_nodes:
+        return
+
+    remote_client_init_path = os.path.join(
+        settings.remote_tmp_dir, "bin", "coniks-client-config", "init.str"
+    )
+    cluster.rsync_to_all(
+        {
+            node_name: [(str(local_init_path), remote_client_init_path)]
+            for node_name in client_nodes
+        },
+        recursive=False,
+    )
 
 
 def get_local_commit_hash(repo_root: Path | str = ROOT) -> str:
@@ -267,8 +311,9 @@ def is_coniks_protocol(settings: KtExperimentSettings) -> bool:
 
 def build_server_start_command(settings: KtExperimentSettings) -> str:
     if is_coniks_protocol(settings):
+        server_config_dir = os.path.join(settings.remote_tmp_dir, "bin", "coniks-server-config")
         return (
-            f"cd {settings.remote_repo_dir}/coniks-server-config && "
+            f"cd {server_config_dir} && "
             f"nohup ../coniksserver run -p > {settings.server_log_path} 2>&1 < /dev/null &"
         )
     return (
@@ -285,8 +330,9 @@ def build_bench_command(
     settings: KtExperimentSettings,
 ) -> str:
     if is_coniks_protocol(settings):
+        client_config_dir = os.path.join(settings.remote_tmp_dir, "bin", "coniks-client-config")
         return (
-            f"cd {settings.remote_repo_dir}/coniks-client-config && "
+            f"cd {client_config_dir} && "
             f"../coniksbench run -c config.toml "
             f"-n {settings.bench_num_run_clients} "
             f"-k {settings.bench_num_users} "
@@ -344,7 +390,7 @@ def run_experiment_with_settings(
     sweep_values: Optional[Mapping[str, object]] = None,
 ) -> Path:
     cluster = RemoteCluster(config_path)
-    cluster.get(settings.server_node)
+    server_node = cluster.get(settings.server_node)
     commit_hash = get_local_commit_hash()
 
     if experiment_dir is None:
@@ -372,7 +418,7 @@ def run_experiment_with_settings(
     print(f"Downloading built bin directory from {settings.server_node}")
     cluster.rsync_from(settings.server_node, settings.remote_bin_dir, str(experiment_dir))
     local_bin_dir = experiment_dir / "bin"
-    rewrite_coniks_client_config(local_bin_dir, settings)
+    rewrite_coniks_client_config(local_bin_dir, settings, server_node.ip)
 
     print("Distributing bin directory to all nodes")
     cluster.rsync_to_all(
@@ -389,6 +435,12 @@ def run_experiment_with_settings(
     try:
         print(f"Starting ktserver on {settings.server_node}")
         cluster.run(settings.server_node, build_server_start_command(settings), hide=False)
+        if is_coniks_protocol(settings):
+            time.sleep(1.0)
+            print("Syncing coniks init.str to client nodes")
+            sync_coniks_init_str(cluster, local_bin_dir, settings)
+            settings.server_process_name = "coniksserver"
+
         time.sleep(settings.server_startup_wait_seconds)
 
         if bench_commands:
@@ -403,7 +455,10 @@ def run_experiment_with_settings(
         try:
             cluster.run(
                 settings.server_node,
-                f"pkill -c {settings.server_process_name} || true",
+                [
+                    f"pkill -c {settings.server_process_name} || true",
+                    "rm -rf /tmp/coniks.sock || true",
+                ],
                 hide=False,
             )
         except Exception as exc:  # noqa: BLE001

@@ -30,7 +30,7 @@ bench_num_users = 10000
 bench_num_load_clients = 10
 bench_num_run_clients = 10
 bench_num_versions = 20
-bench_run_duration_secs = 90
+bench_run_duration_secs = 30
 bench_protocol = "samurai"
 local_logs_dir = "logs"
 server_startup_wait_seconds = 2.0
@@ -42,4 +42,4 @@ server_startup_wait_seconds = 2.0
 
 [sweeping_parameters]
 bench_protocol = ["coniks"]
-bench_num_versions = [64, 128]
+bench_num_versions = [64]
