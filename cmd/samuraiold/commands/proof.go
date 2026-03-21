@@ -20,7 +20,7 @@ func RunProof(addr common.Address, queryStartBlock uint64, queryEndBlock uint64,
 	fmt.Println("Generating range proofs for account", addr.Hex())
 	fmt.Println("Query start block", queryStartBlock, "Query end block", queryEndBlock)
 
-	startingVersion, endingVersion, err := proof.BlockRangeToVersionRange(addr, queryStartBlock, queryEndBlock, cfg, db)
+	startingVersion, endingVersion, err := proof.BlockRangeToVersionRange(addr, queryStartBlock, queryEndBlock, db)
 	if err != nil {
 		fmt.Printf("Error: Failed to convert block range [%d, %d] to version range for account %s\n", queryStartBlock, queryEndBlock, addr.Hex())
 		fmt.Printf("Reason: %v\n", err)

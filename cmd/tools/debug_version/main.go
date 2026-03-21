@@ -35,8 +35,8 @@ func main() {
 	fmt.Printf("Shard index: %d\n\n", shardIdx)
 
 	// Open shard databases (read-only)
-	stateDBPath := fmt.Sprintf("%ssamurai-shard-%d-state.db", datadir, shardIdx)
-	historyDBPath := fmt.Sprintf("%ssamurai-shard-%d-history.db", datadir, shardIdx)
+	stateDBPath := fmt.Sprintf("%sshard-%d-state", datadir, shardIdx)
+	historyDBPath := fmt.Sprintf("%sshard-%d-history", datadir, shardIdx)
 
 	stateDB, err := db.NewPebbleDB(stateDBPath, &pebble.Options{ReadOnly: true})
 	if err != nil {

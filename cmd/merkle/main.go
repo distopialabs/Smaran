@@ -19,6 +19,7 @@ import (
 	"github.com/ethereum/go-ethereum/trie"
 	"github.com/urfave/cli/v2"
 
+	"github.com/nepal80m/samurai/internal/dataset"
 	"github.com/nepal80m/samurai/internal/merkle/ingest"
 	"github.com/nepal80m/samurai/internal/merkle/meta"
 	"github.com/nepal80m/samurai/internal/merkle/proof"
@@ -53,15 +54,16 @@ func ingestCmd() *cli.Command {
 		Name:  "ingest",
 		Usage: "Ingest block data into the Merkle Patricia Trie",
 		Flags: []cli.Flag{
-			&cli.StringFlag{Name: "blocks-dir", Value: "data/blocks", Usage: "Path to blocks data directory"},
 			&cli.StringFlag{Name: "db-dir", Required: true, Usage: "Path to state database directory"},
-			&cli.StringFlag{Name: "db-backend", Value: "pebble", Usage: "Database backend: pebble or leveldb"},
-			&cli.Uint64Flag{Name: "start", Value: defaultStartBlock, Usage: "Start block number"},
-			&cli.Uint64Flag{Name: "end", Value: 0, Usage: "End block number (0 = all available)"},
+			&cli.StringFlag{Name: "blocks-dir", Value: "data/blocks", Usage: "Path to blocks data directory"},
+			&cli.Uint64Flag{Name: "n", Value: 1000, Usage: "Number of blocks to ingest"},
 			&cli.BoolFlag{Name: "fresh", Value: false, Usage: "Delete existing DB and start from scratch"},
 		},
 		Action: func(c *cli.Context) error {
 			dbDir := c.String("db-dir")
+
+			startBlock := dataset.FIRST_BLOCK
+			endBlock := startBlock + c.Uint64("n") - 1
 
 			// If --fresh, remove existing database directory before opening.
 			if c.Bool("fresh") {
@@ -73,7 +75,7 @@ func ingestCmd() *cli.Command {
 				}
 			}
 
-			store, err := st.OpenDBWithBackend(dbDir, c.String("db-backend"))
+			store, err := st.OpenDB(dbDir)
 			if err != nil {
 				return err
 			}
@@ -82,8 +84,8 @@ func ingestCmd() *cli.Command {
 			cfg := ingest.Config{
 				BlocksDir: c.String("blocks-dir"),
 				Store:     store,
-				Start:     c.Uint64("start"),
-				End:       c.Uint64("end"),
+				Start:     startBlock,
+				End:       endBlock,
 			}
 			return ingest.Run(cfg)
 		},
@@ -333,18 +335,20 @@ func serveCmd() *cli.Command {
 		Usage: "Start the gRPC range proof server",
 		Flags: []cli.Flag{
 			&cli.StringFlag{Name: "db-dir", Required: true, Usage: "Path to state database directory"},
-			&cli.StringFlag{Name: "db-backend", Value: "pebble", Usage: "Database backend: pebble or leveldb"},
+			&cli.StringFlag{Name: "host", Value: "0.0.0.0", Usage: "gRPC server host"},
 			&cli.IntFlag{Name: "port", Value: 50051, Usage: "gRPC server port"},
 		},
 		Action: func(c *cli.Context) error {
-			store, err := st.OpenDBWithBackend(c.String("db-dir"), c.String("db-backend"))
+			host := c.String("host")
+			port := c.Int("port")
+			addr := fmt.Sprintf("%s:%d", host, port)
+			store, err := st.OpenDB(c.String("db-dir"))
 			if err != nil {
 				return err
 			}
 			defer store.Close()
 
 			proofServer := server.NewProofServer(store)
-			addr := fmt.Sprintf(":%d", c.Int("port"))
 			return server.ListenAndServe(addr, proofServer)
 		},
 	}

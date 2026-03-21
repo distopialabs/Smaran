@@ -5,22 +5,29 @@ import (
 
 	"github.com/nepal80m/samurai/internal/verkle/server"
 	"github.com/nepal80m/samurai/internal/verkle/store"
-	"github.com/spf13/cobra"
+	"github.com/urfave/cli/v2"
 )
 
-func serveCmd() *cobra.Command {
-	var (
-		dbDir     string
-		dbBackend string
-		port      int
-	)
+func serveCmd() *cli.Command {
+	return &cli.Command{
+		Name:  "serve",
+		Usage: "Start the gRPC Verkle proof server",
+		Flags: []cli.Flag{
+			&cli.StringFlag{Name: "db-dir", Value: "", Usage: "Path to state database directory (required)"},
+			&cli.StringFlag{Name: "db-backend", Value: "pebble", Usage: "DB backend: pebble or leveldb"},
+			&cli.StringFlag{Name: "host", Value: "0.0.0.0", Usage: "gRPC server host"},
+			&cli.IntFlag{Name: "port", Value: 50051, Usage: "gRPC server port"},
+		},
+		Action: func(c *cli.Context) error {
+			dbDir := c.String("db-dir")
+			host := c.String("host")
+			port := c.Int("port")
+			addr := fmt.Sprintf("%s:%d", host, port)
+			if dbDir == "" {
+				return fmt.Errorf("--db-dir is required")
+			}
 
-	cmd := &cobra.Command{
-		Use:   "serve",
-		Short: "Start the gRPC Verkle proof server",
-		Long:  `Starts a gRPC server that serves Verkle proof queries for ingested blocks.`,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			kv, err := store.OpenKVStore(dbBackend, dbDir)
+			kv, err := store.OpenKVStore(c.String("db-backend"), dbDir)
 			if err != nil {
 				return fmt.Errorf("open db: %w", err)
 			}
@@ -28,15 +35,7 @@ func serveCmd() *cobra.Command {
 
 			ns := store.NewNodeStore(kv)
 			proofServer := server.NewProofServer(ns)
-			addr := fmt.Sprintf(":%d", port)
 			return server.ListenAndServe(addr, proofServer)
 		},
 	}
-
-	cmd.Flags().StringVar(&dbDir, "db-dir", "", "Path to state database directory (required)")
-	cmd.Flags().StringVar(&dbBackend, "db-backend", "pebble", "DB backend: pebble or leveldb")
-	cmd.Flags().IntVar(&port, "port", 50051, "gRPC server port")
-	cmd.MarkFlagRequired("db-dir")
-
-	return cmd
 }

@@ -11,30 +11,36 @@ import (
 
 	"github.com/nepal80m/samurai/internal/verkle/proof"
 	verkle "github.com/ethereum/go-verkle"
-	"github.com/spf13/cobra"
+	"github.com/urfave/cli/v2"
 )
 
-func verifyproofCmd() *cobra.Command {
-	var (
-		root      string
-		address   string
-		proofFile string
-	)
+func verifyproofCmd() *cli.Command {
+	return &cli.Command{
+		Name:  "verifyproof",
+		Usage: "Verify a Verkle balance proof from JSON",
+		Flags: []cli.Flag{
+			&cli.StringFlag{Name: "root", Value: "", Usage: "State root (0x-prefixed hex, required)"},
+			&cli.StringFlag{Name: "address", Value: "", Usage: "Address (0x-prefixed hex, required)"},
+			&cli.StringFlag{Name: "proof", Value: "-", Usage: "Path to proof JSON file (or - for stdin)"},
+		},
+		Action: func(c *cli.Context) error {
+			rootStr := c.String("root")
+			if rootStr == "" {
+				return fmt.Errorf("--root is required")
+			}
+			address := c.String("address")
+			if address == "" {
+				return fmt.Errorf("--address is required")
+			}
 
-	cmd := &cobra.Command{
-		Use:   "verifyproof",
-		Short: "Verify a Verkle balance proof from JSON",
-		RunE: func(cmd *cobra.Command, args []string) error {
 			// Parse root
-			rootStr := strings.TrimPrefix(root, "0x")
-			rootBytes, err := hex.DecodeString(rootStr)
+			rootBytes, err := hex.DecodeString(strings.TrimPrefix(rootStr, "0x"))
 			if err != nil {
 				return fmt.Errorf("invalid root: %w", err)
 			}
 
 			// Parse address
-			addrStr := strings.TrimPrefix(address, "0x")
-			addrBytes, err := hex.DecodeString(addrStr)
+			addrBytes, err := hex.DecodeString(strings.TrimPrefix(address, "0x"))
 			if err != nil || len(addrBytes) != 20 {
 				return fmt.Errorf("invalid address: %s", address)
 			}
@@ -42,6 +48,7 @@ func verifyproofCmd() *cobra.Command {
 			copy(addr[:], addrBytes)
 
 			// Read proof JSON
+			proofFile := c.String("proof")
 			var proofJSON []byte
 			if proofFile == "" || proofFile == "-" {
 				proofJSON, err = io.ReadAll(os.Stdin)
@@ -55,14 +62,6 @@ func verifyproofCmd() *cobra.Command {
 			return runVerifyProof(rootBytes, addr, proofJSON)
 		},
 	}
-
-	cmd.Flags().StringVar(&root, "root", "", "State root (0x-prefixed hex)")
-	cmd.Flags().StringVar(&address, "address", "", "Address (0x-prefixed hex)")
-	cmd.Flags().StringVar(&proofFile, "proof", "-", "Path to proof JSON file (or - for stdin)")
-	cmd.MarkFlagRequired("root")
-	cmd.MarkFlagRequired("address")
-
-	return cmd
 }
 
 func runVerifyProof(rootBytes []byte, addr [20]byte, proofJSON []byte) error {

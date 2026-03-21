@@ -11,23 +11,34 @@ import (
 	"github.com/nepal80m/samurai/internal/verkle/proof"
 	"github.com/nepal80m/samurai/internal/verkle/store"
 	verkle "github.com/ethereum/go-verkle"
-	"github.com/spf13/cobra"
+	"github.com/urfave/cli/v2"
 )
 
-func getproofCmd() *cobra.Command {
-	var (
-		dbDir     string
-		block     uint64
-		address   string
-		verify    bool
-		cold      bool
-		dbBackend string
-	)
+func getproofCmd() *cli.Command {
+	return &cli.Command{
+		Name:  "getproof",
+		Usage: "Generate a Verkle balance proof for an address at a block",
+		Flags: []cli.Flag{
+			&cli.StringFlag{Name: "db-dir", Value: "", Usage: "Path to persistent DB directory (required)"},
+			&cli.Uint64Flag{Name: "block", Value: 0, Usage: "Block number (required)"},
+			&cli.StringFlag{Name: "address", Value: "", Usage: "Address (0x-prefixed hex, required)"},
+			&cli.BoolFlag{Name: "verify", Value: false, Usage: "Also verify the proof"},
+			&cli.BoolFlag{Name: "cold", Value: false, Usage: "Cold mode: reopen DB for each operation"},
+			&cli.StringFlag{Name: "db-backend", Value: "pebble", Usage: "DB backend: pebble or leveldb"},
+		},
+		Action: func(c *cli.Context) error {
+			dbDir := c.String("db-dir")
+			if dbDir == "" {
+				return fmt.Errorf("--db-dir is required")
+			}
+			address := c.String("address")
+			if address == "" {
+				return fmt.Errorf("--address is required")
+			}
+			if !c.IsSet("block") {
+				return fmt.Errorf("--block is required")
+			}
 
-	cmd := &cobra.Command{
-		Use:   "getproof",
-		Short: "Generate a Verkle balance proof for an address at a block",
-		RunE: func(cmd *cobra.Command, args []string) error {
 			addrStr := strings.TrimPrefix(address, "0x")
 			addrBytes, err := hex.DecodeString(addrStr)
 			if err != nil || len(addrBytes) != 20 {
@@ -36,21 +47,9 @@ func getproofCmd() *cobra.Command {
 			var addr [20]byte
 			copy(addr[:], addrBytes)
 
-			return runGetProof(dbDir, dbBackend, block, addr, verify, cold)
+			return runGetProof(dbDir, c.String("db-backend"), c.Uint64("block"), addr, c.Bool("verify"), c.Bool("cold"))
 		},
 	}
-
-	cmd.Flags().StringVar(&dbDir, "db-dir", "", "Path to persistent DB directory (required)")
-	cmd.Flags().Uint64Var(&block, "block", 0, "Block number")
-	cmd.Flags().StringVar(&address, "address", "", "Address (0x-prefixed hex)")
-	cmd.Flags().BoolVar(&verify, "verify", false, "Also verify the proof")
-	cmd.Flags().BoolVar(&cold, "cold", false, "Cold mode: reopen DB for each operation")
-	cmd.Flags().StringVar(&dbBackend, "db-backend", "pebble", "DB backend: pebble or leveldb")
-	cmd.MarkFlagRequired("db-dir")
-	cmd.MarkFlagRequired("block")
-	cmd.MarkFlagRequired("address")
-
-	return cmd
 }
 
 func runGetProof(dbDir, dbBackend string, block uint64, addr [20]byte, doVerify, cold bool) error {

@@ -7,34 +7,36 @@ import (
 	"time"
 
 	"github.com/nepal80m/samurai/internal/verkle/ingest"
-	"github.com/spf13/cobra"
+	"github.com/urfave/cli/v2"
 )
 
-func benchIngestCmd() *cobra.Command {
-	var (
-		blocksDir  string
-		dbDir      string
-		dbBackend  string
-		start      uint64
-		end        uint64
-		startSet   bool
-		flushEvery int
-		duration   time.Duration
-		outputDir  string
-	)
+func benchIngestCmd() *cli.Command {
+	return &cli.Command{
+		Name:  "bench-ingest",
+		Usage: "Benchmark block ingestion latency and throughput",
+		Flags: []cli.Flag{
+			&cli.StringFlag{Name: "blocks-dir", Value: "data/blocks", Usage: "Path to dataset block segments"},
+			&cli.StringFlag{Name: "db-dir", Value: "", Usage: "Path to persistent DB directory (required)"},
+			&cli.Uint64Flag{Name: "start", Value: 0, Usage: "Start block number (default: 18908895)"},
+			&cli.Uint64Flag{Name: "end", Value: 0, Usage: "End block number (0 = start + 10M)"},
+			&cli.StringFlag{Name: "db-backend", Value: "pebble", Usage: "DB backend: pebble or leveldb"},
+			&cli.IntFlag{Name: "flush-every", Value: 1000, Usage: "Reload tree every N blocks for memory management"},
+			&cli.DurationFlag{Name: "duration", Value: 5 * time.Minute, Usage: "Benchmark duration (e.g. 5m, 10m, 1h)"},
+			&cli.StringFlag{Name: "output-dir", Value: "benchmark_output", Usage: "Directory for output CSV files"},
+		},
+		Action: func(c *cli.Context) error {
+			dbDir := c.String("db-dir")
+			if dbDir == "" {
+				return fmt.Errorf("--db-dir is required")
+			}
 
-	cmd := &cobra.Command{
-		Use:   "bench-ingest",
-		Short: "Benchmark block ingestion latency and throughput",
-		Long: `Runs block ingestion for a fixed duration, logging per-block
-timestamps (block_number, entries, dirty_nodes, start_ns, end_ns, flush) to a
-CSV file. After the time limit, the current in-flight block completes before
-stopping. Use the companion notebook to visualize windowed latency/throughput.`,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			startSet = cmd.Flags().Changed("start")
+			blocksDir := c.String("blocks-dir")
+			startSet := c.IsSet("start")
+			start := c.Uint64("start")
 			if !startSet {
 				start = defaultStartBlock
 			}
+			end := c.Uint64("end")
 			if end == 0 {
 				end = start + 10_000_000
 			}
@@ -43,6 +45,7 @@ stopping. Use the companion notebook to visualize windowed latency/throughput.`,
 				return fmt.Errorf("blocks directory does not exist: %s", blocksDir)
 			}
 
+			outputDir := c.String("output-dir")
 			if err := os.MkdirAll(outputDir, 0o755); err != nil {
 				return fmt.Errorf("create output dir: %w", err)
 			}
@@ -52,26 +55,14 @@ stopping. Use the companion notebook to visualize windowed latency/throughput.`,
 			return ingest.RunBench(ingest.BenchConfig{
 				BlocksDir:  blocksDir,
 				DBDir:      dbDir,
-				DBBackend:  dbBackend,
+				DBBackend:  c.String("db-backend"),
 				Start:      start,
 				End:        end,
 				StartSet:   startSet,
-				FlushEvery: flushEvery,
-				Duration:   duration,
+				FlushEvery: c.Int("flush-every"),
+				Duration:   c.Duration("duration"),
 				OutputFile: outputFile,
 			})
 		},
 	}
-
-	cmd.Flags().StringVar(&blocksDir, "blocks-dir", "data/blocks", "Path to dataset block segments")
-	cmd.Flags().StringVar(&dbDir, "db-dir", "", "Path to persistent DB directory (required)")
-	cmd.Flags().Uint64Var(&start, "start", defaultStartBlock, "Start block number")
-	cmd.Flags().Uint64Var(&end, "end", 0, "End block number (0 = start + 10M)")
-	cmd.Flags().StringVar(&dbBackend, "db-backend", "pebble", "DB backend: pebble or leveldb")
-	cmd.Flags().IntVar(&flushEvery, "flush-every", 1000, "Reload tree every N blocks for memory management")
-	cmd.Flags().DurationVar(&duration, "duration", 5*time.Minute, "Benchmark duration (e.g. 5m, 10m, 1h)")
-	cmd.Flags().StringVar(&outputDir, "output-dir", "benchmark_output", "Directory for output CSV files")
-	cmd.MarkFlagRequired("db-dir")
-
-	return cmd
 }

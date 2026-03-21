@@ -1,28 +1,26 @@
 package main
 
 import (
-	"fmt"
+	"log"
 	"os"
 
-	"github.com/spf13/cobra"
+	"github.com/urfave/cli/v2"
 )
 
 func main() {
-	rootCmd := &cobra.Command{
-		Use:   "verkle",
-		Short: "Baseline Verkle tree proof benchmarking tool",
-		Long: `A CLI tool for ingesting Ethereum block data into a Verkle tree,
-generating EIP-6800 balance proofs, and benchmarking proof performance.`,
+	app := &cli.App{
+		Name:  "verkle",
+		Usage: "Baseline Verkle tree proof benchmarking tool",
+		Commands: []*cli.Command{
+			ingestCmd(),
+			benchIngestCmd(),
+			getproofCmd(),
+			verifyproofCmd(),
+			serveCmd(),
+		},
 	}
 
-	rootCmd.AddCommand(ingestCmd())
-	rootCmd.AddCommand(benchIngestCmd())
-	rootCmd.AddCommand(getproofCmd())
-	rootCmd.AddCommand(verifyproofCmd())
-	rootCmd.AddCommand(serveCmd())
-
-	if err := rootCmd.Execute(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+	if err := app.Run(os.Args); err != nil {
+		log.Fatal(err)
 	}
 }

@@ -7,9 +7,9 @@ import (
 
 	"github.com/nepal80m/samurai/internal/config"
 	"github.com/nepal80m/samurai/internal/db"
-	"github.com/nepal80m/samurai/internal/server"
 	"github.com/nepal80m/samurai/internal/merkle/meta"
 	st "github.com/nepal80m/samurai/internal/merkle/state"
+	"github.com/nepal80m/samurai/internal/server"
 )
 
 // RunServe starts the gRPC proof server.
@@ -31,7 +31,7 @@ func RunServe(port int, dbs []*db.SamuraiStore, precomputedData *config.Precompu
 		}
 	}
 
-	proofServer := server.NewProofServer(dbs, precomputedData, cfg, mptStore)
+	proofServer := server.NewProofServer(dbs, precomputedData, mptStore)
 
 	log.Printf("Starting Samurai gRPC server on port %d", port)
 	if err := server.ListenAndServe(addr, proofServer); err != nil {

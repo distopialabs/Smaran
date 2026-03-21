@@ -1,12 +1,10 @@
 package proof
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
 	"math"
-	"os"
 	"sync"
 	"time"
 
@@ -82,7 +80,7 @@ func BinarySearchVersionByBlockNumber(blockNumber uint64, searchStart uint64, se
 // It handles edge cases:
 // - If endingBlock < account's first recorded block: returns error (no data available)
 // - If startingBlock < account's first recorded block: clamps to version 0
-func BlockRangeToVersionRange(account common.Address, startingBlock uint64, endingBlock uint64, config *config.Config, db *db.SamuraiStore) (uint64, uint64, error) {
+func BlockRangeToVersionRange(account common.Address, startingBlock uint64, endingBlock uint64, db *db.SamuraiStore) (uint64, uint64, error) {
 
 	cbInfo, err := tree.GetCurrentBalanceInfo(account, db.StateDB)
 	if err != nil {
@@ -392,29 +390,4 @@ func findCoveringNodes(N, L, R int) []int {
 	}
 
 	return out
-}
-
-// DumpNewProofsAndBalances writes proofs and historical balances to JSON files.
-func DumpNewProofsAndBalances(proofs []*RangeProof, balances []*tree.HistoricalBalance) {
-	// Create the storage/proofs directory if it doesn't exist
-	err := os.MkdirAll(fmt.Sprintf("storage/proofs/"), 0755)
-	if err != nil {
-		panic(err)
-	}
-
-	proofFile, err := os.Create(fmt.Sprintf("storage/proofs/proofs.json"))
-	if err != nil {
-		panic(err)
-	}
-	defer proofFile.Close()
-
-	balanceFile, err := os.Create(fmt.Sprintf("storage/proofs/historical_balances.json"))
-	if err != nil {
-		panic(err)
-	}
-	defer balanceFile.Close()
-
-	json.NewEncoder(proofFile).Encode(proofs)
-	json.NewEncoder(balanceFile).Encode(balances)
-
 }

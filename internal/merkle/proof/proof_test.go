@@ -38,7 +38,7 @@ func (e *testEnv) openState(root common.Hash) (*state.StateDB, error) {
 }
 
 func (e *testEnv) commitState(stateDB *state.StateDB, block uint64) (common.Hash, error) {
-	root, err := stateDB.Commit(block, true)
+	root, err := stateDB.Commit(block, true, true)
 	if err != nil {
 		return common.Hash{}, err
 	}

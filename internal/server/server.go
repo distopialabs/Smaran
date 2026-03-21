@@ -13,10 +13,10 @@ import (
 	proofpb "github.com/nepal80m/samurai/api/proto/samurai/v1"
 	"github.com/nepal80m/samurai/internal/config"
 	"github.com/nepal80m/samurai/internal/db"
+	st "github.com/nepal80m/samurai/internal/merkle/state"
 	"github.com/nepal80m/samurai/internal/proof"
 	"github.com/nepal80m/samurai/internal/tree"
 	"github.com/nepal80m/samurai/internal/utils"
-	st "github.com/nepal80m/samurai/internal/merkle/state"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -25,18 +25,17 @@ import (
 // ProofServer implements the ProofServiceServer gRPC interface.
 type ProofServer struct {
 	proofpb.UnimplementedProofServiceServer
+
 	dbs             []*db.SamuraiStore
 	precomputedData *config.PrecomputedData
-	cfg             *config.Config
 	mptStore        *st.MPTStateStore
 }
 
 // NewProofServer creates a new ProofServer instance.
-func NewProofServer(dbs []*db.SamuraiStore, precomputedData *config.PrecomputedData, cfg *config.Config, mptStore *st.MPTStateStore) *ProofServer {
+func NewProofServer(dbs []*db.SamuraiStore, precomputedData *config.PrecomputedData, mptStore *st.MPTStateStore) *ProofServer {
 	return &ProofServer{
 		dbs:             dbs,
 		precomputedData: precomputedData,
-		cfg:             cfg,
 		mptStore:        mptStore,
 	}
 }
@@ -61,14 +60,15 @@ func (s *ProofServer) GetProof(ctx context.Context, req *proofpb.GetProofRequest
 	endBlock := req.EndBlock
 
 	// Get the appropriate shard database
-	shardIdx := utils.AddressToShardIndex(addr, s.cfg.Database.Shards)
+	// shardIdx := utils.AddressToShardIndex(addr, s.cfg.Database.Shards)
+	shardIdx := utils.AddressToShardIndex(addr, len(s.dbs))
 	sdb := s.dbs[shardIdx]
 
 	log.Printf("GetProof request: account=%s, startBlock=%d, endBlock=%d, shard=%d",
 		addr.Hex(), startBlock, endBlock, shardIdx)
 
 	// Convert block range to version range
-	startingVersion, endingVersion, err := proof.BlockRangeToVersionRange(addr, startBlock, endBlock, s.cfg, sdb)
+	startingVersion, endingVersion, err := proof.BlockRangeToVersionRange(addr, startBlock, endBlock, sdb)
 	if err != nil {
 		log.Printf("Error converting block range [%d, %d] to version range for account %s: %v", startBlock, endBlock, addr.Hex(), err)
 		// Check error type using sentinel errors
@@ -151,14 +151,15 @@ func (s *ProofServer) GetProofStream(req *proofpb.GetProofRequest, stream proofp
 	endBlock := req.EndBlock
 
 	// Get the appropriate shard database
-	shardIdx := utils.AddressToShardIndex(addr, s.cfg.Database.Shards)
+	// shardIdx := utils.AddressToShardIndex(addr, s.cfg.Database.Shards)
+	shardIdx := utils.AddressToShardIndex(addr, len(s.dbs))
 	sdb := s.dbs[shardIdx]
 
 	log.Printf("GetProofStream request: account=%s, startBlock=%d, endBlock=%d, shard=%d",
 		addr.Hex(), startBlock, endBlock, shardIdx)
 
 	// Convert block range to version range
-	startingVersion, endingVersion, err := proof.BlockRangeToVersionRange(addr, startBlock, endBlock, s.cfg, sdb)
+	startingVersion, endingVersion, err := proof.BlockRangeToVersionRange(addr, startBlock, endBlock, sdb)
 	if err != nil {
 		log.Printf("Error converting block range [%d, %d] to version range for account %s: %v", startBlock, endBlock, addr.Hex(), err)
 		if errors.Is(err, proof.ErrBlockRangeOutOfBounds) {
