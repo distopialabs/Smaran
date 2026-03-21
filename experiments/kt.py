@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 from itertools import product
 import json
+import math
 import os
 import subprocess
 import sys
@@ -46,6 +47,7 @@ class KtExperimentSettings:
     bench_num_load_clients: int
     bench_num_run_clients: int
     bench_num_versions: int
+    coniks_num_versions_divider: int
     bench_run_duration_secs: int
     bench_protocol: str
     local_logs_dir: str
@@ -84,7 +86,7 @@ def load_experiment_settings(config_path: Path | str) -> KtExperimentSettings:
     if not isinstance(experiment, Mapping):
         raise ValueError("TOML must define an `experiment` table.")
 
-    return KtExperimentSettings(
+    settings = KtExperimentSettings(
         repo_url=str(experiment["repo_url"]),
         remote_base_dir=str(experiment["remote_base_dir"]),
         remote_repo_dir=str(experiment["remote_repo_dir"]),
@@ -104,11 +106,13 @@ def load_experiment_settings(config_path: Path | str) -> KtExperimentSettings:
         bench_num_load_clients=int(experiment["bench_num_load_clients"]),
         bench_num_run_clients=int(experiment["bench_num_run_clients"]),
         bench_num_versions=int(experiment["bench_num_versions"]),
+        coniks_num_versions_divider=int(experiment["coniks_num_versions_divider"]),
         bench_run_duration_secs=int(experiment["bench_run_duration_secs"]),
         bench_protocol=str(experiment["bench_protocol"]),
         local_logs_dir=str(experiment["local_logs_dir"]),
         server_startup_wait_seconds=float(experiment["server_startup_wait_seconds"]),
     )
+    return settings
 
 
 def load_sweeping_parameters(config_path: Path | str) -> Optional[Dict[str, List[object]]]:
@@ -153,6 +157,19 @@ def coerce_sweep_value(current_value: object, sweep_value: object) -> object:
     if isinstance(current_value, str):
         return str(sweep_value)
     return sweep_value
+
+
+def apply_num_versions_divider(settings: KtExperimentSettings) -> KtExperimentSettings:
+    if not is_coniks_protocol(settings):
+        return settings
+    if settings.coniks_num_versions_divider <= 0:
+        raise ValueError("`coniks_num_versions_divider` must be greater than 0.")
+    return replace(
+        settings,
+        bench_num_versions=int(
+            math.ceil(settings.bench_num_versions / settings.coniks_num_versions_divider)
+        ),
+    )
 
 
 def build_sweep_settings(
@@ -390,7 +407,15 @@ def run_experiment_with_settings(
     *,
     experiment_dir: Optional[Path] = None,
     sweep_values: Optional[Mapping[str, object]] = None,
-) -> Path:
+) -> Optional[Path]:
+    if settings.bench_num_versions == 0:
+        print(
+            "Skipping experiment because "
+            "bench_num_versions after applying "
+            f"coniks_num_versions_divider={settings.coniks_num_versions_divider} "
+            "results in 0"
+        )
+        return None
     cluster = RemoteCluster(config_path)
     server_node = cluster.get(settings.server_node)
     commit_hash = get_local_commit_hash()
@@ -484,16 +509,20 @@ def run_experiment_with_settings(
     return experiment_dir
 
 
-def run_experiment(config_path: Path | str) -> Path:
+def run_experiment(config_path: Path | str) -> Optional[Path]:
     settings = load_experiment_settings(config_path)
     sweeping_parameters = load_sweeping_parameters(config_path)
     if not sweeping_parameters:
-        return run_experiment_with_settings(config_path, settings)
+        return run_experiment_with_settings(config_path, apply_num_versions_divider(settings))
 
     sweep_root_dir = create_experiment_dir(settings.local_logs_dir)
 
     for sweep_values in iter_sweep_combinations(sweeping_parameters):
         run_settings = build_sweep_settings(settings, sweep_values)
+        run_settings = apply_num_versions_divider(run_settings)
+        if "bench_num_versions" in sweep_values:
+            sweep_values["bench_num_versions"] = run_settings.bench_num_versions
+
         run_dir = sweep_root_dir / format_sweep_dir_name(sweep_values)
         sweep_description = ", ".join(f"{key}={value}" for key, value in sweep_values.items())
         print(f"Running sweep with {sweep_description}")

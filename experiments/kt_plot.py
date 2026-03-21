@@ -27,6 +27,7 @@ except ImportError as exc:  # pragma: no cover
 PROTOCOL_LABELS = {
     "samurai": "Samurai",
     "optiks": "Optiks",
+    "coniks": "Coniks",
 }
 
 SUMMARY_PATTERNS = {
@@ -36,6 +37,16 @@ SUMMARY_PATTERNS = {
     "avg_generation": re.compile(r"Avg proof-gen latency:\s+([0-9.]+)\s*(ms|us|µs)"),
     "avg_verification": re.compile(r"Avg verify latency:\s+([0-9.]+)\s*(ms|us|µs)"),
     "avg_payload": re.compile(r"Avg payload:\s+([0-9.]+)\s*(bytes|byte|B)"),
+}
+
+CONIKS_PATTERNS = {
+    "run_duration": re.compile(r"Benchmark config: .* d=(\d+) seconds"),
+    "interval_requests": re.compile(r"\[t=\d+s\] Requests:\s+(\d+)\s+\|"),
+    "throughput": re.compile(r"Throughput:\s+([0-9.]+)\s+requests/second"),
+    "avg_latency": re.compile(r"Mean total latency:\s+([0-9.]+|NaN)\s+ms"),
+    "avg_generation": re.compile(r"Mean generation time:\s+([0-9.]+|NaN)\s+ms"),
+    "avg_verification": re.compile(r"Mean verification time:\s+([0-9.]+|NaN)\s+ms"),
+    "avg_response_payload": re.compile(r"Mean response payload:\s+([0-9.]+|NaN)\s+B"),
 }
 
 
@@ -145,6 +156,9 @@ def parse_payload_kib(log_text: str) -> float:
 def parse_client_summary(log_path: Path) -> ClientSummary:
     print(f"Processing file: {log_path}")
     log_text = log_path.read_text(encoding="utf-8", errors="replace")
+    if "Mean total latency:" in log_text and "Throughput:" in log_text:
+        return parse_coniks_client_summary(log_path, log_text)
+
     run_duration_seconds = parse_duration_seconds(
         extract_required_match("run_duration", log_text)
     )
@@ -171,6 +185,54 @@ def parse_client_summary(log_path: Path) -> ClientSummary:
         f"avg_payload_kib={summary.avg_payload_kib:.6f}"
     )
     return summary
+
+
+def parse_coniks_client_summary(log_path: Path, log_text: str) -> ClientSummary:
+    run_duration_match = CONIKS_PATTERNS["run_duration"].search(log_text)
+    if run_duration_match is None:
+        raise ValueError("Could not find coniks run duration in benchmark log.")
+    run_duration_seconds = float(run_duration_match.group(1))
+
+    total_requests = sum(
+        int(match.group(1))
+        for match in CONIKS_PATTERNS["interval_requests"].finditer(log_text)
+    )
+    if total_requests == 0:
+        throughput_match = CONIKS_PATTERNS["throughput"].search(log_text)
+        if throughput_match is None:
+            raise ValueError("Could not find coniks throughput in benchmark log.")
+        total_requests = int(round(float(throughput_match.group(1)) * run_duration_seconds))
+
+    avg_latency_ms = parse_coniks_metric(log_text, "avg_latency")
+    avg_generation_ms = parse_coniks_metric(log_text, "avg_generation")
+    avg_verification_ms = parse_coniks_metric(log_text, "avg_verification")
+    avg_payload_kib = parse_coniks_metric(log_text, "avg_response_payload") / 1024.0
+
+    summary = ClientSummary(
+        total_requests=total_requests,
+        run_duration_seconds=run_duration_seconds,
+        avg_latency_ms=avg_latency_ms,
+        avg_generation_ms=avg_generation_ms,
+        avg_verification_ms=avg_verification_ms,
+        avg_payload_kib=avg_payload_kib,
+    )
+    print(
+        "  Extracted values: "
+        f"total_requests={summary.total_requests}, "
+        f"run_duration_seconds={summary.run_duration_seconds:.6f}, "
+        f"avg_latency_ms={summary.avg_latency_ms:.6f}, "
+        f"avg_generation_ms={summary.avg_generation_ms:.6f}, "
+        f"avg_verification_ms={summary.avg_verification_ms:.6f}, "
+        f"avg_payload_kib={summary.avg_payload_kib:.6f}"
+    )
+    return summary
+
+
+def parse_coniks_metric(log_text: str, pattern_name: str) -> float:
+    match = CONIKS_PATTERNS[pattern_name].search(log_text)
+    if match is None:
+        raise ValueError(f"Could not find coniks `{pattern_name}` in benchmark log.")
+    return float(match.group(1))
 
 
 def is_run_dir(path: Path) -> bool:
@@ -312,10 +374,11 @@ def create_single_plot(
 ) -> None:
     configure_plot_style()
 
-    palette = sns.color_palette("colorblind", n_colors=2)
+    palette = sns.color_palette("colorblind", n_colors=len(PROTOCOL_LABELS))
+    markers = ["o", "s", "^", "D", "P", "X"]
     protocol_styles = {
-        "samurai": {"color": palette[0], "marker": "o"},
-        "optiks": {"color": palette[1], "marker": "s"},
+        protocol: {"color": palette[index], "marker": markers[index % len(markers)]}
+        for index, protocol in enumerate(PROTOCOL_LABELS)
     }
 
     grouped: Dict[str, List[BenchmarkPoint]] = {protocol: [] for protocol in PROTOCOL_LABELS}
@@ -380,16 +443,13 @@ def create_latency_breakdown_plot(
 ) -> None:
     configure_plot_style()
 
-    palette = sns.color_palette("colorblind", n_colors=4)
+    palette = sns.color_palette("colorblind", n_colors=2 * len(PROTOCOL_LABELS))
     protocol_styles = {
-        "samurai": {
-            "generation": palette[0],
-            "verification": palette[1],
-        },
-        "optiks": {
-            "generation": palette[2],
-            "verification": palette[3],
-        },
+        protocol: {
+            "generation": palette[index * 2],
+            "verification": palette[index * 2 + 1],
+        }
+        for index, protocol in enumerate(PROTOCOL_LABELS)
     }
 
     grouped: Dict[str, List[BenchmarkPoint]] = {protocol: [] for protocol in PROTOCOL_LABELS}
@@ -400,8 +460,12 @@ def create_latency_breakdown_plot(
     x_positions = list(range(len(all_versions)))
     version_to_index = {version: index for index, version in enumerate(all_versions)}
     fig, ax = plt.subplots(figsize=(3.35, 2.25))
-    bar_width = 0.36
-    offsets = {"samurai": -bar_width / 2, "optiks": bar_width / 2}
+    protocol_order = list(PROTOCOL_LABELS)
+    bar_width = 0.8 / max(1, len(protocol_order))
+    offsets = {
+        protocol: (index - (len(protocol_order) - 1) / 2) * bar_width
+        for index, protocol in enumerate(protocol_order)
+    }
 
     for protocol, protocol_points in grouped.items():
         if not protocol_points:
@@ -438,7 +502,7 @@ def create_latency_breakdown_plot(
         handles,
         labels,
         loc="upper center",
-        ncol=2,
+        ncol=max(1, min(3, len(labels))),
         frameon=False,
         bbox_to_anchor=(0.5, 1.02),
         columnspacing=0.9,
@@ -458,10 +522,9 @@ def create_payload_plot(
 ) -> None:
     configure_plot_style()
 
-    palette = sns.color_palette("colorblind", n_colors=2)
+    palette = sns.color_palette("colorblind", n_colors=len(PROTOCOL_LABELS))
     protocol_colors = {
-        "samurai": palette[0],
-        "optiks": palette[1],
+        protocol: palette[index] for index, protocol in enumerate(PROTOCOL_LABELS)
     }
 
     grouped: Dict[str, List[BenchmarkPoint]] = {protocol: [] for protocol in PROTOCOL_LABELS}
@@ -472,8 +535,12 @@ def create_payload_plot(
     x_positions = list(range(len(all_versions)))
     version_to_index = {version: index for index, version in enumerate(all_versions)}
     fig, ax = plt.subplots(figsize=(3.35, 2.15))
-    bar_width = 0.36
-    offsets = {"samurai": -bar_width / 2, "optiks": bar_width / 2}
+    protocol_order = list(PROTOCOL_LABELS)
+    bar_width = 0.8 / max(1, len(protocol_order))
+    offsets = {
+        protocol: (index - (len(protocol_order) - 1) / 2) * bar_width
+        for index, protocol in enumerate(protocol_order)
+    }
 
     for protocol, protocol_points in grouped.items():
         if not protocol_points:
@@ -500,7 +567,7 @@ def create_payload_plot(
         handles,
         labels,
         loc="upper center",
-        ncol=2,
+        ncol=max(1, min(3, len(labels))),
         frameon=False,
         bbox_to_anchor=(0.5, 1.02),
         columnspacing=0.9,
