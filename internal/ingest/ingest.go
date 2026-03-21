@@ -11,8 +11,8 @@ import (
 	"github.com/nepal80m/samurai/internal/dataset"
 	"github.com/nepal80m/samurai/internal/storage"
 	"github.com/nepal80m/samurai/internal/utils"
-	"github.com/nepal80m/samurai/mpt/meta"
-	st "github.com/nepal80m/samurai/mpt/state"
+	"github.com/nepal80m/samurai/internal/merkle/meta"
+	st "github.com/nepal80m/samurai/internal/merkle/state"
 )
 
 type UpdateTask struct {

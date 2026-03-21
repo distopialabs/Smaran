@@ -13,8 +13,8 @@ import (
 
 	"github.com/nepal80m/samurai/internal/crypto/hash"
 	"github.com/nepal80m/samurai/internal/tree"
-	"github.com/nepal80m/samurai/mpt/meta"
-	st "github.com/nepal80m/samurai/mpt/state"
+	"github.com/nepal80m/samurai/internal/merkle/meta"
+	st "github.com/nepal80m/samurai/internal/merkle/state"
 )
 
 // GenerateMPTProof generates an MPT membership proof for the given account

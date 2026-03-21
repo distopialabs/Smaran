@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+package baseline.api.v1;
+
+option go_package = "github.com/nepal80m/samurai/api/proto/verkle/v1;verkleproofpb";
+
+// VerkleProofService provides Verkle tree proof generation for account balances.
+service VerkleProofService {
+  // GetRangeProof streams account proofs for each block in the given range.
+  rpc GetRangeProof(GetRangeProofRequest) returns (stream BlockProof);
+}
+
+message GetRangeProofRequest {
+  string account = 1;
+  uint64 start_block = 2;
+  uint64 end_block = 3;
+}
+
+// BlockProof is a single Verkle proof for one block.
+message BlockProof {
+  uint64 block_number = 1;
+  bytes  root_commitment = 2;     // compressed point bytes
+  bytes  verkle_proof = 3;        // JSON-serialized VerkleProof
+  bytes  state_diff = 4;          // JSON-serialized StateDiff
+  bytes  balance = 5;             // big-endian big.Int
+  bool   exists = 6;
+}

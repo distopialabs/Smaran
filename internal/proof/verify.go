@@ -142,7 +142,6 @@ func VerifyNewRangeProofs(account common.Address, startingVersion, endingVersion
 			return fmt.Errorf("commitment %s is not verified", reqCommitKey)
 		}
 
-
 		nodesToInterpolate := findNodesToInterpolate(reqCommit, true)
 		rangeProof := proofHashMap[reqCommitKey]
 

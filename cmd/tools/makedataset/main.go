@@ -14,7 +14,6 @@ import (
 	"github.com/ethereum/go-ethereum/rpc"
 
 	"github.com/nepal80m/samurai/internal/dataset"
-	"github.com/nepal80m/samurai/internal/account"
 )
 
 type blockInfo struct {
@@ -93,7 +92,7 @@ func spawnBlockFetcher(fetchWorkerCount int, startBlock uint64, endBlock uint64,
 					break
 				}
 				// fetch all the modified accounts in this block
-				modifiedAccounts, err := account.GetModifiedAccountsByNumber(bn, client)
+				modifiedAccounts, err := GetModifiedAccountsByNumber(bn, client)
 				if err != nil {
 					panic(fmt.Errorf("failed to get modified accounts by number %d: %w", bn, err))
 				}
@@ -102,7 +101,7 @@ func spawnBlockFetcher(fetchWorkerCount int, startBlock uint64, endBlock uint64,
 				// 	continue
 				// }
 				// ? do not just skip if there are no modified accounts, because orderWorker is waiting for the next block info to be sent to the channel. instead, send an empty block info with empty modified accounts and balances.
-				balances, err := account.BatchMultiUserBalance(modifiedAccounts, bn, client)
+				balances, err := BatchMultiUserBalance(modifiedAccounts, bn, client)
 				if err != nil {
 					panic(fmt.Errorf("failed to get balances for block %d: %w", bn, err))
 				}
@@ -161,11 +160,11 @@ func spawnBlockOrderer(blockInfoCh chan blockInfo, orderedBlockInfoCh chan block
 }
 
 func sanityCheck(testBlock uint64, client *rpc.Client, dataDir string) {
-	actualModifiedAccounts, err := account.GetModifiedAccountsByNumber(testBlock, client)
+	actualModifiedAccounts, err := GetModifiedAccountsByNumber(testBlock, client)
 	if err != nil {
 		panic(fmt.Errorf("failed to get modified accounts by number %d: %w", testBlock, err))
 	}
-	actualBalances, err := account.BatchMultiUserBalance(actualModifiedAccounts, testBlock, client)
+	actualBalances, err := BatchMultiUserBalance(actualModifiedAccounts, testBlock, client)
 	if err != nil {
 		panic(fmt.Errorf("failed to get balances for block %d: %w", testBlock, err))
 	}

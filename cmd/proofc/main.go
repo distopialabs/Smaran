@@ -23,7 +23,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/gogo/protobuf/proto"
-	proofpb "github.com/nepal80m/samurai/api/proto/v1"
+	proofpb "github.com/nepal80m/samurai/api/proto/samurai/v1"
 	"github.com/nepal80m/samurai/internal/config"
 	"github.com/nepal80m/samurai/internal/crypto/kzg"
 	"github.com/nepal80m/samurai/internal/proof"

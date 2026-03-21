@@ -9,7 +9,7 @@ import (
 	"github.com/nepal80m/samurai/internal/crypto/polynomial"
 	"github.com/nepal80m/samurai/internal/db"
 	"github.com/nepal80m/samurai/internal/storage"
-	st "github.com/nepal80m/samurai/mpt/state"
+	st "github.com/nepal80m/samurai/internal/merkle/state"
 )
 
 // type Config struct {

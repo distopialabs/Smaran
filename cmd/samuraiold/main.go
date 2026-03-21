@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/nepal80m/samurai/cmd/samurai/commands"
+	"github.com/nepal80m/samurai/cmd/samuraiold/commands"
 )
 
 func main() {

@@ -10,6 +10,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/tracing"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethdb"
+	"github.com/ethereum/go-ethereum/ethdb/leveldb"
 	"github.com/ethereum/go-ethereum/ethdb/pebble"
 	"github.com/ethereum/go-ethereum/triedb"
 	"github.com/ethereum/go-ethereum/triedb/hashdb"
@@ -31,15 +32,27 @@ type MPTStateStore struct {
 	cachingDB *state.CachingDB
 }
 
-// OpenDB opens (or creates) the ethdb database at the given path.
-// backend should be "pebble" or "leveldb".
+// OpenDB opens (or creates) the ethdb database at the given path using pebble.
 func OpenDB(path string) (*MPTStateStore, error) {
+	return OpenDBWithBackend(path, "pebble")
+}
+
+// OpenDBWithBackend opens (or creates) the ethdb database at the given path.
+// backend must be "pebble" or "leveldb".
+func OpenDBWithBackend(path string, backend string) (*MPTStateStore, error) {
 	var kvStore ethdb.KeyValueStore
 	var err error
 
-	kvStore, err = pebble.New(path, 512, 512, "", false)
+	switch backend {
+	case "pebble":
+		kvStore, err = pebble.New(path, 512, 512, "", false)
+	case "leveldb":
+		kvStore, err = leveldb.New(path, 512, 512, "", false)
+	default:
+		return nil, fmt.Errorf("unsupported db backend: %s (use pebble or leveldb)", backend)
+	}
 	if err != nil {
-		return nil, fmt.Errorf("failed to open pebble db at %s: %w", path, err)
+		return nil, fmt.Errorf("failed to open %s db at %s: %w", backend, path, err)
 	}
 
 	db := rawdb.NewDatabase(kvStore)
