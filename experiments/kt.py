@@ -232,6 +232,8 @@ def rewrite_coniks_client_config(
             updated_lines.append(f'sign_pubkey_path = "{remote_tmp_config_dir}/sign.pub"')
         elif stripped_line.startswith("init_str_path ="):
             updated_lines.append(f'init_str_path = "{remote_tmp_config_dir}/init.str"')
+        elif stripped_line.startswith("registration_address ="):
+            updated_lines.append(f'registration_address = "tcp://{server_ip}:3000"')
         elif stripped_line.startswith("address ="):
             updated_lines.append(f'address = "tcp://{server_ip}:3000"')
         else:
@@ -266,7 +268,7 @@ def sync_coniks_init_str(
         return
 
     remote_client_init_path = os.path.join(
-        settings.remote_tmp_dir, "bin", "coniks-client-config", "init.str"
+        settings.remote_tmp_dir, "bin", "coniks-server-config", "init.str"
     )
     cluster.rsync_to_all(
         {
@@ -458,6 +460,7 @@ def run_experiment_with_settings(
                 [
                     f"pkill -c {settings.server_process_name} || true",
                     "rm -rf /tmp/coniks.sock || true",
+                    f"rm -rf {settings.remote_tmp_dir}/bin/coniks-server-config/init.str || true",
                 ],
                 hide=False,
             )
