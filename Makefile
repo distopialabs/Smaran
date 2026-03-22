@@ -1,4 +1,4 @@
-.PHONY: all build build-samurai build-merkle build-verkle clean \
+.PHONY: all build build-samurai build-merkle build-verkle clean proto \
         bench-ingest-samurai bench-ingest-merkle bench-ingest-verkle bench-ingest \
         bench-proof-samurai bench-proof-merkle bench-proof-verkle bench-proof
 
@@ -36,6 +36,13 @@ build-verkle:
 
 clean:
 	rm -rf $(BUILD_DIR)
+
+proto:
+	protoc --go_out=. --go_opt=paths=source_relative \
+	       --go-grpc_out=. --go-grpc_opt=paths=source_relative \
+	       api/proto/samurai/v1/proof_service.proto \
+	       api/proto/merkle/v1/proof_service.proto \
+	       api/proto/verkle/v1/proof_service.proto
 
 # --- Ingestion benchmark targets ---
 # Output goes to benchmark_output/<protocol>/ingestion_<kUsers>_<timestamp>.csv
