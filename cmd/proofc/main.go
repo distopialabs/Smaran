@@ -59,6 +59,7 @@ func queryCmd() *cli.Command {
 			&cli.Uint64Flag{Name: "end-block", Required: true, Usage: "End block number"},
 			&cli.StringFlag{Name: "params-dir", Value: "./data/params", Usage: "Path to crypto params"},
 			&cli.StringFlag{Name: "state-root", Value: "", Usage: "MPT state root hash (hex) for verification"},
+			&cli.BoolFlag{Name: "old", Value: false, Usage: "Use old (slow) proof generation"},
 		},
 		Action: func(c *cli.Context) error {
 			conn, err := dialGRPC(c.String("server-addr"))
@@ -87,7 +88,7 @@ func queryCmd() *cli.Command {
 			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 			defer cancel()
 
-			resp, err := fetchProofStream(ctx, client, req)
+			resp, err := fetchProofStream(ctx, client, req, c.Bool("old"))
 			if err != nil {
 				return fmt.Errorf("GetProofStream failed: %w", err)
 			}
@@ -113,6 +114,7 @@ func benchCmd() *cli.Command {
 			&cli.BoolFlag{Name: "verify", Value: false, Usage: "Verify proofs (requires --params-dir)"},
 			&cli.StringFlag{Name: "params-dir", Value: "./data/params", Usage: "Path to crypto params (for verification)"},
 			&cli.StringFlag{Name: "state-root", Value: "", Usage: "MPT state root hash (hex) for verification"},
+			&cli.BoolFlag{Name: "old", Value: false, Usage: "Use old (slow) proof generation"},
 		},
 		Action: func(c *cli.Context) error {
 			conn, err := dialGRPC(c.String("server-addr"))
@@ -121,6 +123,8 @@ func benchCmd() *cli.Command {
 			}
 			defer conn.Close()
 			client := proofpb.NewProofServiceClient(conn)
+
+			useOld := c.Bool("old")
 
 			// Call GetInfo to get latest block.
 			info, err := client.GetInfo(context.Background(), &proofpb.GetInfoRequest{})
@@ -198,7 +202,7 @@ func benchCmd() *cli.Command {
 						}
 
 						e2eStart := time.Now()
-						resp, reqErr := fetchProofStream(context.Background(), cl, req)
+						resp, reqErr := fetchProofStream(context.Background(), cl, req, useOld)
 						e2eNs := time.Since(e2eStart).Nanoseconds()
 
 						if reqErr != nil {
@@ -253,8 +257,14 @@ func dialGRPC(addr string) (*grpc.ClientConn, error) {
 	)
 }
 
-func fetchProofStream(ctx context.Context, client proofpb.ProofServiceClient, req *proofpb.GetProofRequest) (*proofpb.GetProofResponse, error) {
-	stream, err := client.GetProofStream(ctx, req)
+func fetchProofStream(ctx context.Context, client proofpb.ProofServiceClient, req *proofpb.GetProofRequest, useOld bool) (*proofpb.GetProofResponse, error) {
+	var stream grpc.ServerStreamingClient[proofpb.GetProofResponse]
+	var err error
+	if useOld {
+		stream, err = client.GetOldProofStream(ctx, req)
+	} else {
+		stream, err = client.GetProofStream(ctx, req)
+	}
 	if err != nil {
 		return nil, err
 	}

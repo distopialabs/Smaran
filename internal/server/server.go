@@ -116,12 +116,12 @@ func (s *ProofServer) GetProof(ctx context.Context, req *proofpb.GetProofRequest
 
 	// Convert to protobuf response
 	resp := &proofpb.GetProofResponse{
-		RangeProofs:      make([]*proofpb.RangeProof, len(rangeProofs)),
-		BalanceInfos:     make([]*proofpb.BalanceInfo, len(balanceInfos)),
+		RangeProofs:        make([]*proofpb.RangeProof, len(rangeProofs)),
+		BalanceInfos:       make([]*proofpb.BalanceInfo, len(balanceInfos)),
 		ProofgenDurationNs: proofgenDurationNs,
-		MptProofNodes:    mptProofNodes,
-		CurrentBalance:   cbInfo.Bytes(),
-		MptBlockNumber:   mptBlockNumber,
+		MptProofNodes:      mptProofNodes,
+		CurrentBalance:     cbInfo.Bytes(),
+		MptBlockNumber:     mptBlockNumber,
 	}
 
 	for i, rp := range rangeProofs {
@@ -216,12 +216,12 @@ func (s *ProofServer) GetProofStream(req *proofpb.GetProofRequest, stream proofp
 	// Handle the case where there are no balance infos but we still want to return a response
 	if len(balanceInfos) == 0 {
 		return stream.Send(&proofpb.GetProofResponse{
-			RangeProofs:      protoRangeProofs,
-			BalanceInfos:     nil,
+			RangeProofs:        protoRangeProofs,
+			BalanceInfos:       nil,
 			ProofgenDurationNs: proofgenDurationNs,
-			MptProofNodes:    mptProofNodes,
-			CurrentBalance:   cbInfo.Bytes(),
-			MptBlockNumber:   mptBlockNumber,
+			MptProofNodes:      mptProofNodes,
+			CurrentBalance:     cbInfo.Bytes(),
+			MptBlockNumber:     mptBlockNumber,
 		})
 	}
 
@@ -232,8 +232,129 @@ func (s *ProofServer) GetProofStream(req *proofpb.GetProofRequest, stream proofp
 		}
 
 		resp := &proofpb.GetProofResponse{
-			RangeProofs:      nil,
-			BalanceInfos:     make([]*proofpb.BalanceInfo, len(balanceInfos[i:balanceEnd])),
+			RangeProofs:        nil,
+			BalanceInfos:       make([]*proofpb.BalanceInfo, len(balanceInfos[i:balanceEnd])),
+			ProofgenDurationNs: 0,
+		}
+
+		if i == 0 {
+			resp.RangeProofs = protoRangeProofs
+			resp.ProofgenDurationNs = proofgenDurationNs
+			resp.MptProofNodes = mptProofNodes
+			resp.CurrentBalance = cbInfo.Bytes()
+			resp.MptBlockNumber = mptBlockNumber
+		}
+
+		for j, bi := range balanceInfos[i:balanceEnd] {
+			resp.BalanceInfos[j] = balanceInfoToProto(bi)
+		}
+
+		if err := stream.Send(resp); err != nil {
+			return status.Errorf(codes.Internal, "failed to stream proof batch: %v", err)
+		}
+	}
+
+	return nil
+}
+
+func (s *ProofServer) GetOldProofStream(req *proofpb.GetProofRequest, stream proofpb.ProofService_GetProofStreamServer) error {
+	// Validate request
+	if req.Account == "" {
+		return status.Error(codes.InvalidArgument, "account address is required")
+	}
+	if req.EndBlock < req.StartBlock {
+		return status.Error(codes.InvalidArgument, "end_block must be >= start_block")
+	}
+
+	// Parse account address
+	addr := common.HexToAddress(req.Account)
+
+	startBlock := req.StartBlock
+	endBlock := req.EndBlock
+
+	// Get the appropriate shard database
+	// shardIdx := utils.AddressToShardIndex(addr, s.cfg.Database.Shards)
+	shardIdx := utils.AddressToShardIndex(addr, len(s.dbs))
+	sdb := s.dbs[shardIdx]
+
+	log.Printf("GetOldProofStream request: account=%s, startBlock=%d, endBlock=%d, shard=%d",
+		addr.Hex(), startBlock, endBlock, shardIdx)
+
+	// Convert block range to version range
+	startingVersion, endingVersion, err := proof.BlockRangeToVersionRange(addr, startBlock, endBlock, sdb)
+	if err != nil {
+		log.Printf("Error converting block range [%d, %d] to version range for account %s: %v", startBlock, endBlock, addr.Hex(), err)
+		if errors.Is(err, proof.ErrBlockRangeOutOfBounds) {
+			return status.Errorf(codes.OutOfRange, "block range outside account's recorded history: %v", err)
+		}
+		if errors.Is(err, proof.ErrAccountNotFound) {
+			return status.Errorf(codes.NotFound, "account not found: %v", err)
+		}
+		if errors.Is(err, proof.ErrVersionNotFound) {
+			return status.Errorf(codes.Internal, "failed to find version: %v", err)
+		}
+		return status.Errorf(codes.Internal, "failed to process block range: %v", err)
+	}
+
+	log.Printf("Resolved version range: startVersion=%d, endVersion=%d", startingVersion, endingVersion)
+
+	// Generate proofs
+	start := time.Now()
+	rangeProofs, balanceInfos := proof.OldGetProofRange(addr, startingVersion, endingVersion, s.precomputedData, sdb)
+	proofgenDurationNs := time.Since(start).Nanoseconds()
+
+	log.Printf("Generated %d range proofs and %d balance infos in %dns. Streaming...",
+		len(rangeProofs), len(balanceInfos), proofgenDurationNs)
+
+	// Get current balance for the account
+	cbInfo, err := tree.GetCurrentBalanceInfo(addr, sdb.StateDB)
+	if err != nil {
+		log.Printf("Error getting current balance for account %s: %v", addr.Hex(), err)
+		return status.Errorf(codes.Internal, "failed to get current balance: %v", err)
+	}
+
+	// Generate MPT proof
+	var mptProofNodes [][]byte
+	var mptBlockNumber uint64
+	if s.mptStore != nil {
+		mptBlockNumber, mptProofNodes, err = proof.GenerateMPTProof(s.mptStore, addr)
+		if err != nil {
+			log.Printf("Error generating MPT proof for account %s: %v", addr.Hex(), err)
+			return status.Errorf(codes.Internal, "failed to generate MPT proof: %v", err)
+		}
+		log.Printf("Generated MPT proof with %d nodes for block %d", len(mptProofNodes), mptBlockNumber)
+	}
+
+	// Range proofs are small (max 7), we can send them all in the first message
+	protoRangeProofs := make([]*proofpb.RangeProof, len(rangeProofs))
+	for i, rp := range rangeProofs {
+		protoRangeProofs[i] = rangeProofToProto(rp)
+	}
+
+	// Send BalanceInfos in chunks
+	const chunkSize = 5000
+
+	// Handle the case where there are no balance infos but we still want to return a response
+	if len(balanceInfos) == 0 {
+		return stream.Send(&proofpb.GetProofResponse{
+			RangeProofs:        protoRangeProofs,
+			BalanceInfos:       nil,
+			ProofgenDurationNs: proofgenDurationNs,
+			MptProofNodes:      mptProofNodes,
+			CurrentBalance:     cbInfo.Bytes(),
+			MptBlockNumber:     mptBlockNumber,
+		})
+	}
+
+	for i := 0; i < len(balanceInfos); i += chunkSize {
+		balanceEnd := i + chunkSize
+		if balanceEnd > len(balanceInfos) {
+			balanceEnd = len(balanceInfos)
+		}
+
+		resp := &proofpb.GetProofResponse{
+			RangeProofs:        nil,
+			BalanceInfos:       make([]*proofpb.BalanceInfo, len(balanceInfos[i:balanceEnd])),
 			ProofgenDurationNs: 0,
 		}
 
