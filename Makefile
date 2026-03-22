@@ -2,8 +2,12 @@
         bench-ingest-samurai bench-ingest-merkle bench-ingest-verkle bench-ingest \
         bench-proof-samurai bench-proof-merkle bench-proof-verkle bench-proof
 
-BUILD_DIR  := bin
-BLOCKS_DIR := data/blocks
+BUILD_DIR      := bin
+BLOCKS_DIR     := data/blocks
+ACCOUNTS_LIST  ?= account_stats_all.csv
+RANGE_SIZE     ?= 50000
+NUM_CLIENTS    ?= 1
+BENCH_DURATION ?= 60s
 
 all: build
 
@@ -54,15 +58,31 @@ bench-ingest-verkle: build-verkle
 
 bench-ingest: bench-ingest-samurai bench-ingest-merkle bench-ingest-verkle
 
-# --- Proof benchmark targets (proof clients, pre-refactor) ---
+# --- Proof benchmark targets ---
+# Output goes to benchmark_output/<protocol>/proof_range<rangeSize>_<timestamp>.txt
 
 bench-proof-samurai: build-samurai
-	./$(BUILD_DIR)/proofc --benchmark --mode range --output-dir ./benchmark_output/samurai
+	./$(BUILD_DIR)/proofc bench \
+		--server-addr localhost:50051 \
+		--range-size $(RANGE_SIZE) \
+		--num-clients $(NUM_CLIENTS) \
+		--accounts-list $(ACCOUNTS_LIST) \
+		--duration $(BENCH_DURATION)
 
 bench-proof-merkle: build-merkle
-	./$(BUILD_DIR)/merkle-proofc --benchmark --mode range --output-dir ./benchmark_output/merkle
+	./$(BUILD_DIR)/merkle-proofc bench \
+		--server-addr localhost:50051 \
+		--range-size $(RANGE_SIZE) \
+		--num-clients $(NUM_CLIENTS) \
+		--accounts-list $(ACCOUNTS_LIST) \
+		--duration $(BENCH_DURATION)
 
 bench-proof-verkle: build-verkle
-	./$(BUILD_DIR)/verkle-proofc --benchmark --mode range --output-dir ./benchmark_output/verkle
+	./$(BUILD_DIR)/verkle-proofc bench \
+		--server-addr localhost:50053 \
+		--range-size $(RANGE_SIZE) \
+		--num-clients $(NUM_CLIENTS) \
+		--accounts-list $(ACCOUNTS_LIST) \
+		--duration $(BENCH_DURATION)
 
 bench-proof: bench-proof-samurai bench-proof-merkle bench-proof-verkle

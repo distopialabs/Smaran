@@ -13,6 +13,7 @@ import (
 	proofpb "github.com/nepal80m/samurai/api/proto/samurai/v1"
 	"github.com/nepal80m/samurai/internal/config"
 	"github.com/nepal80m/samurai/internal/db"
+	"github.com/nepal80m/samurai/internal/merkle/meta"
 	st "github.com/nepal80m/samurai/internal/merkle/state"
 	"github.com/nepal80m/samurai/internal/proof"
 	"github.com/nepal80m/samurai/internal/tree"
@@ -89,10 +90,10 @@ func (s *ProofServer) GetProof(ctx context.Context, req *proofpb.GetProofRequest
 	// Generate proofs
 	start := time.Now()
 	rangeProofs, balanceInfos := proof.GetNewProofRange(addr, startingVersion, endingVersion, s.precomputedData, sdb)
-	generationTimeMs := time.Since(start).Milliseconds()
+	proofgenDurationNs := time.Since(start).Nanoseconds()
 
-	log.Printf("Generated %d range proofs and %d balance infos in %dms",
-		len(rangeProofs), len(balanceInfos), generationTimeMs)
+	log.Printf("Generated %d range proofs and %d balance infos in %dns",
+		len(rangeProofs), len(balanceInfos), proofgenDurationNs)
 
 	// Get current balance for the account
 	cbInfo, err := tree.GetCurrentBalanceInfo(addr, sdb.StateDB)
@@ -117,7 +118,7 @@ func (s *ProofServer) GetProof(ctx context.Context, req *proofpb.GetProofRequest
 	resp := &proofpb.GetProofResponse{
 		RangeProofs:      make([]*proofpb.RangeProof, len(rangeProofs)),
 		BalanceInfos:     make([]*proofpb.BalanceInfo, len(balanceInfos)),
-		GenerationTimeMs: generationTimeMs,
+		ProofgenDurationNs: proofgenDurationNs,
 		MptProofNodes:    mptProofNodes,
 		CurrentBalance:   cbInfo.Bytes(),
 		MptBlockNumber:   mptBlockNumber,
@@ -179,10 +180,10 @@ func (s *ProofServer) GetProofStream(req *proofpb.GetProofRequest, stream proofp
 	// Generate proofs
 	start := time.Now()
 	rangeProofs, balanceInfos := proof.GetNewProofRange(addr, startingVersion, endingVersion, s.precomputedData, sdb)
-	generationTimeMs := time.Since(start).Milliseconds()
+	proofgenDurationNs := time.Since(start).Nanoseconds()
 
-	log.Printf("Generated %d range proofs and %d balance infos in %dms. Streaming...",
-		len(rangeProofs), len(balanceInfos), generationTimeMs)
+	log.Printf("Generated %d range proofs and %d balance infos in %dns. Streaming...",
+		len(rangeProofs), len(balanceInfos), proofgenDurationNs)
 
 	// Get current balance for the account
 	cbInfo, err := tree.GetCurrentBalanceInfo(addr, sdb.StateDB)
@@ -217,7 +218,7 @@ func (s *ProofServer) GetProofStream(req *proofpb.GetProofRequest, stream proofp
 		return stream.Send(&proofpb.GetProofResponse{
 			RangeProofs:      protoRangeProofs,
 			BalanceInfos:     nil,
-			GenerationTimeMs: generationTimeMs,
+			ProofgenDurationNs: proofgenDurationNs,
 			MptProofNodes:    mptProofNodes,
 			CurrentBalance:   cbInfo.Bytes(),
 			MptBlockNumber:   mptBlockNumber,
@@ -233,12 +234,12 @@ func (s *ProofServer) GetProofStream(req *proofpb.GetProofRequest, stream proofp
 		resp := &proofpb.GetProofResponse{
 			RangeProofs:      nil,
 			BalanceInfos:     make([]*proofpb.BalanceInfo, len(balanceInfos[i:balanceEnd])),
-			GenerationTimeMs: 0,
+			ProofgenDurationNs: 0,
 		}
 
 		if i == 0 {
 			resp.RangeProofs = protoRangeProofs
-			resp.GenerationTimeMs = generationTimeMs
+			resp.ProofgenDurationNs = proofgenDurationNs
 			resp.MptProofNodes = mptProofNodes
 			resp.CurrentBalance = cbInfo.Bytes()
 			resp.MptBlockNumber = mptBlockNumber
@@ -254,6 +255,25 @@ func (s *ProofServer) GetProofStream(req *proofpb.GetProofRequest, stream proofp
 	}
 
 	return nil
+}
+
+// GetInfo returns the latest processed block and its state root.
+func (s *ProofServer) GetInfo(ctx context.Context, req *proofpb.GetInfoRequest) (*proofpb.GetInfoResponse, error) {
+	if s.mptStore == nil {
+		return nil, status.Error(codes.FailedPrecondition, "MPT store not configured")
+	}
+	lastBlock, err := meta.GetLast(s.mptStore.DiskDB)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "get last block: %v", err)
+	}
+	root, err := meta.GetRoot(s.mptStore.DiskDB, lastBlock)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "get root for block %d: %v", lastBlock, err)
+	}
+	return &proofpb.GetInfoResponse{
+		LatestBlock: lastBlock,
+		StateRoot:   root.Hex(),
+	}, nil
 }
 
 // ListenAndServe starts the gRPC server on the specified address.

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"math/big"
@@ -64,11 +65,11 @@ func (s *ProofServer) GetRangeProof(req *proofpb.GetRangeProofRequest, stream pr
 		sent++
 	}
 
-	genTimeMs := time.Since(start).Milliseconds()
-	log.Printf("Streamed %d block proofs in %dms", sent, genTimeMs)
+	genTimeNs := time.Since(start).Nanoseconds()
+	log.Printf("Streamed %d block proofs in %dns", sent, genTimeNs)
 
 	// Send generation time as trailing metadata so client can compute network overhead
-	stream.SetTrailer(metadata.Pairs("generation_time_ms", strconv.FormatInt(genTimeMs, 10)))
+	stream.SetTrailer(metadata.Pairs("proofgen_duration_ns", strconv.FormatInt(genTimeNs, 10)))
 	return nil
 }
 
@@ -110,6 +111,22 @@ func (s *ProofServer) generateBlockProof(addr common.Address, blockNum uint64) (
 		Balance:      balBytes,
 		Nonce:        uint64(result.Nonce),
 		Exists:       exists,
+	}, nil
+}
+
+// GetInfo returns the latest processed block and its state root.
+func (s *ProofServer) GetInfo(ctx context.Context, req *proofpb.GetInfoRequest) (*proofpb.GetInfoResponse, error) {
+	lastBlock, err := meta.GetLast(s.store.DiskDB)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "get last block: %v", err)
+	}
+	root, err := meta.GetRoot(s.store.DiskDB, lastBlock)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "get root for block %d: %v", lastBlock, err)
+	}
+	return &proofpb.GetInfoResponse{
+		LatestBlock: lastBlock,
+		StateRoot:   root.Hex(),
 	}, nil
 }
 

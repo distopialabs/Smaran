@@ -79,17 +79,11 @@ func runGetProof(dbDir, dbBackend string, block uint64, addr [20]byte, doVerify,
 	}
 	rootBytes := proof.SerializeCommitment(root)
 
-	bench := &proof.BenchResult{}
-
 	// Generate proof
 	result, metrics, err := proof.GenerateProof(root, addr, rootBytes, resolver)
 	if err != nil {
 		return fmt.Errorf("generate proof: %w", err)
 	}
-
-	bench.ProofGenTime = time.Duration(metrics.ProofGenTimeNs)
-	bench.ProofPayloadSize = metrics.ProofPayloadBytesLen
-	bench.ProofJSONSize = metrics.ProofJSONBytesLen
 
 	// Output JSON to stdout
 	enc := json.NewEncoder(os.Stdout)
@@ -117,18 +111,15 @@ func runGetProof(dbDir, dbBackend string, block uint64, addr [20]byte, doVerify,
 
 		verifyStart := time.Now()
 		verifyErr := proof.VerifyProof(rootBytes, &vp, sd)
-		bench.VerifyTime = time.Since(verifyStart)
+		verifyTime := time.Since(verifyStart)
 
-		fmt.Fprintf(os.Stderr, "verify_time_ns=%d\n", bench.VerifyTime.Nanoseconds())
+		fmt.Fprintf(os.Stderr, "verify_time_ns=%d\n", verifyTime.Nanoseconds())
 		if verifyErr != nil {
 			fmt.Fprintf(os.Stderr, "verification=FAILED: %v\n", verifyErr)
 		} else {
 			fmt.Fprintf(os.Stderr, "verification=PASSED\n")
 		}
 	}
-
-	// Print benchmark summary
-	proof.PrintBenchResult(bench)
 
 	return nil
 }

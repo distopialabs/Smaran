@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -107,11 +108,11 @@ func (s *ProofServer) GetRangeProof(req *proofpb.GetRangeProofRequest, stream pr
 		sent++
 	}
 
-	genTimeMs := time.Since(start).Milliseconds()
-	log.Printf("Streamed %d block proofs in %dms", sent, genTimeMs)
+	genTimeNs := time.Since(start).Nanoseconds()
+	log.Printf("Streamed %d block proofs in %dns", sent, genTimeNs)
 
 	// Send generation time as trailing metadata
-	stream.SetTrailer(metadata.Pairs("generation_time_ms", strconv.FormatInt(genTimeMs, 10)))
+	stream.SetTrailer(metadata.Pairs("proofgen_duration_ns", strconv.FormatInt(genTimeNs, 10)))
 	return nil
 }
 
@@ -184,6 +185,22 @@ func (s *ProofServer) GenerateProofResult(addr [20]byte, blockNum uint64) (*proo
 	rootBytes := proof.SerializeCommitment(root)
 	resolver := s.ns.VersionedNodeResolverFn(blockNum)
 	return proof.GenerateProof(root, addr, rootBytes, resolver)
+}
+
+// GetInfo returns the latest processed block and its root commitment.
+func (s *ProofServer) GetInfo(ctx context.Context, req *proofpb.GetInfoRequest) (*proofpb.GetInfoResponse, error) {
+	lastBlock, ok := s.ns.GetLastProcessed()
+	if !ok {
+		return nil, status.Error(codes.FailedPrecondition, "no blocks processed yet")
+	}
+	rootBytes, err := s.ns.GetRootCommitment(lastBlock)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "get root commitment for block %d: %v", lastBlock, err)
+	}
+	return &proofpb.GetInfoResponse{
+		LatestBlock: lastBlock,
+		StateRoot:   hex.EncodeToString(rootBytes),
+	}, nil
 }
 
 // ListenAndServe starts the gRPC server with graceful shutdown on SIGINT/SIGTERM.

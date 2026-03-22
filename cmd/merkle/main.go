@@ -101,7 +101,7 @@ func benchIngestCmd() *cli.Command {
 		Usage: "Benchmark block ingestion for a fixed duration, write per-block timing CSV",
 		Flags: []cli.Flag{
 			&cli.StringFlag{Name: "blocks-dir", Value: "data/blocks", Usage: "Path to blocks data directory"},
-			&cli.StringFlag{Name: "db-dir", Required: true, Usage: "Path to state database directory"},
+			&cli.StringFlag{Name: "db-dir", Value: "/data/local/tmp/bench-merkle", Usage: "Path to state database directory"},
 			&cli.DurationFlag{Name: "duration", Value: 5 * time.Minute, Usage: "How long to run the benchmark"},
 			&cli.IntFlag{Name: "k-users", Value: 0, Usage: "Top-K hot accounts to include (0 = all, no filtering)"},
 			&cli.StringFlag{Name: "accounts-list", Value: "account_stats_all.csv", Usage: "CSV with hot accounts sorted by update count descending"},
@@ -190,8 +190,6 @@ func getProofCmd() *cli.Command {
 				return fmt.Errorf("no root for block %d: %w", blockNum, err)
 			}
 
-			bench := &proof.BenchResult{}
-
 			// Open state.
 			stateDB, err := store.OpenState(root)
 			if err != nil {
@@ -204,26 +202,28 @@ func getProofCmd() *cli.Command {
 			// Generate proof.
 			genStart := time.Now()
 			result, rawNodes, err := proof.GenerateAccountProof(stateDB, root, addr, stateTrie)
-			bench.ProofGenTime = time.Since(genStart)
+			proofGenTime := time.Since(genStart)
 			if err != nil {
 				return fmt.Errorf("generate proof: %w", err)
 			}
 
-			bench.ProofByteSize = proof.ComputeProofByteSize(rawNodes)
-			bench.ProofNodes = len(rawNodes)
+			var proofByteSize int
+			for _, n := range rawNodes {
+				proofByteSize += len(n)
+			}
 
 			// Marshal JSON.
 			jsonBytes, err := proof.MarshalJSON(result)
 			if err != nil {
 				return fmt.Errorf("marshal JSON: %w", err)
 			}
-			bench.JSONSize = len(jsonBytes)
 
 			// Verify if requested.
+			var verifyTime time.Duration
 			if doVerify {
 				verifyStart := time.Now()
 				exists, bal, err := proof.VerifyAccountProof(root, addr, rawNodes)
-				bench.VerifyTime = time.Since(verifyStart)
+				verifyTime = time.Since(verifyStart)
 				if err != nil {
 					fmt.Fprintf(os.Stderr, "Verification FAILED: %v\n", err)
 				} else if exists {
@@ -233,8 +233,13 @@ func getProofCmd() *cli.Command {
 				}
 			}
 
-			// Print benchmark.
-			proof.PrintBenchResult(bench)
+			// Print metrics.
+			fmt.Fprintf(os.Stderr, "Proof gen:   %v\n", proofGenTime)
+			fmt.Fprintf(os.Stderr, "Proof bytes: %d (%d nodes)\n", proofByteSize, len(rawNodes))
+			fmt.Fprintf(os.Stderr, "JSON size:   %d\n", len(jsonBytes))
+			if doVerify {
+				fmt.Fprintf(os.Stderr, "Verify time: %v\n", verifyTime)
+			}
 
 			// Print JSON to stdout.
 			fmt.Println(string(jsonBytes))

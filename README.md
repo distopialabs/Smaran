@@ -213,13 +213,33 @@ verkle serve --db-dir /data/local/verkle --port 50053
 
 ### Proof Clients (`proofc`, `merkle-proofc`, `verkle-proofc`)
 
-gRPC proof clients for querying range proofs from the corresponding servers. Support single queries and benchmark modes (range, concurrency, stress).
+gRPC proof clients for querying and benchmarking range proofs. Each has two subcommands: `query` (single proof) and `bench` (load benchmark).
+
+**Query a single range proof:**
 
 ```bash
-proofc --server localhost:50051 --account 0x... --start-block 20 --end-block 119
-merkle-proofc --server localhost:50051 --account 0x... --start-block 20 --end-block 119
-verkle-proofc --server localhost:50053 --account 0x... --start-block 20 --end-block 119
+proofc query --server-addr localhost:50051 --account 0x... --start-block 20 --end-block 119 --verify --params-dir ./data/params
+merkle-proofc query --server-addr localhost:50051 --account 0x... --start-block 20 --end-block 119 --verify
+verkle-proofc query --server-addr localhost:50053 --account 0x... --start-block 20 --end-block 119 --verify
 ```
+
+**Run a proof generation benchmark:**
+
+```bash
+proofc bench --server-addr localhost:50051 --range-size 50000 --num-clients 4 --accounts-list account_stats_all.csv --duration 60s
+merkle-proofc bench --server-addr localhost:50051 --range-size 50000 --num-clients 4 --accounts-list account_stats_all.csv --duration 60s
+verkle-proofc bench --server-addr localhost:50053 --range-size 50000 --num-clients 4 --accounts-list account_stats_all.csv --duration 60s
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--server-addr` | `localhost:50051` (verkle: `50053`) | gRPC server address |
+| `--range-size` | `50000` | Block range size per query |
+| `--num-clients` | `1` | Concurrent client goroutines |
+| `--accounts-list` | *(required)* | CSV with accounts sorted by update count desc |
+| `--duration` | `60s` | Benchmark duration |
+| `--verify` | `false` | Verify proofs locally |
+| `--params-dir` | `./data/params` | KZG params directory (samurai only) |
 
 ---
 
@@ -304,9 +324,9 @@ go run ./cmd/tools/debug_version --datadir /data/local/samurai/db/ --account 0x.
 | `make bench-ingest-merkle` | Run merkle ingestion benchmark (5m) |
 | `make bench-ingest-verkle` | Run verkle ingestion benchmark (5m) |
 | `make bench-proof` | Run proof benchmarks for all three protocols |
-| `make bench-proof-samurai` | Run samurai proof range benchmark |
-| `make bench-proof-merkle` | Run merkle proof range benchmark |
-| `make bench-proof-verkle` | Run verkle proof range benchmark |
+| `make bench-proof-samurai` | Run samurai proof benchmark (configurable via `RANGE_SIZE`, `NUM_CLIENTS`, `BENCH_DURATION`) |
+| `make bench-proof-merkle` | Run merkle proof benchmark |
+| `make bench-proof-verkle` | Run verkle proof benchmark |
 
 ---
 

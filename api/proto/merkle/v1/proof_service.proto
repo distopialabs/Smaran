@@ -8,6 +8,9 @@ option go_package = "github.com/nepal80m/samurai/api/proto/merkle/v1;merkleproof
 service ProofService {
   // GetRangeProof streams account proofs for each block in the given range.
   rpc GetRangeProof(GetRangeProofRequest) returns (stream BlockProof);
+
+  // GetInfo returns the latest processed block and state root.
+  rpc GetInfo(GetInfoRequest) returns (GetInfoResponse);
 }
 
 message GetRangeProofRequest {
@@ -24,4 +27,11 @@ message BlockProof {
   bytes balance = 4;                // big-endian big.Int
   uint64 nonce = 5;
   bool exists = 6;
+}
+
+message GetInfoRequest {}
+
+message GetInfoResponse {
+  uint64 latest_block = 1;
+  string state_root = 2;
 }
