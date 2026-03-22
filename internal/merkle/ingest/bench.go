@@ -1,17 +1,16 @@
 package ingest
 
 import (
-	"encoding/csv"
 	"errors"
 	"fmt"
 	"log"
 	"math/big"
-	"os"
 	"strconv"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 
+	"github.com/nepal80m/samurai/internal/benchutil"
 	"github.com/nepal80m/samurai/internal/dataset"
 	"github.com/nepal80m/samurai/internal/merkle/meta"
 	st "github.com/nepal80m/samurai/internal/merkle/state"
@@ -19,37 +18,41 @@ import (
 
 // BenchConfig holds configuration for the ingestion benchmark.
 type BenchConfig struct {
-	BlocksDir string
-	Store     *st.MPTStateStore
-	Start     uint64
-	Duration  time.Duration // run for this long, then stop after current block completes
-	OutCSV    string        // path to write per-block CSV results
+	BlocksDir    string
+	Store        *st.MPTStateStore
+	Start        uint64
+	Duration     time.Duration
+	KUsers       int
+	AccountsList string
+	OutCSV       string
 }
 
 var errDurationExceeded = errors.New("bench: duration exceeded")
 
 // BenchRun performs block ingestion for a fixed duration and writes per-block
 // timing data to a CSV.
-// Each row: block_id, num_entries, start_ns, end_ns
-// where start_ns/end_ns are Unix nanosecond timestamps.
-// After the duration elapses, the current in-progress block is allowed to
-// complete and gets logged before the benchmark stops.
+// CSV columns: block_num,num_raw_updates,num_selected_updates,queued_at_ns,start_at_ns,completed_at_ns
 func BenchRun(cfg BenchConfig) error {
 	reader := dataset.NewDatasetReader(cfg.BlocksDir, dataset.SEGMENT_SIZE)
 	defer reader.Close()
 
-	csvFile, err := os.Create(cfg.OutCSV)
+	// Load hot-account filter if configured.
+	var filter *benchutil.HotAccountFilter
+	if cfg.KUsers > 0 {
+		log.Printf("[bench] loading top %d hot accounts from %s", cfg.KUsers, cfg.AccountsList)
+		var err error
+		filter, err = benchutil.LoadHotAccountFilter(cfg.AccountsList, cfg.KUsers)
+		if err != nil {
+			return fmt.Errorf("load hot account filter: %w", err)
+		}
+		log.Printf("[bench] loaded %d hot accounts", filter.Size())
+	}
+
+	csvWriter, err := benchutil.NewBenchCSVWriter(cfg.OutCSV, benchutil.IngestionCSVHeader)
 	if err != nil {
-		return fmt.Errorf("create CSV %s: %w", cfg.OutCSV, err)
+		return err
 	}
-	defer csvFile.Close()
-
-	w := csv.NewWriter(csvFile)
-	defer w.Flush()
-
-	if err := w.Write([]string{"block_id", "num_entries", "start_ns", "end_ns"}); err != nil {
-		return fmt.Errorf("write CSV header: %w", err)
-	}
+	defer csvWriter.Close()
 
 	start := cfg.Start
 	if meta.HasLast(cfg.Store.DiskDB) {
@@ -92,22 +95,35 @@ func BenchRun(cfg BenchConfig) error {
 	deadline := benchStart.Add(cfg.Duration)
 
 	err = reader.IterateRange(uint32(start), uint32(end), func(blockNum uint32, entries []dataset.Entry) error {
-		// Check deadline *before* starting the next block.
-		// The previous block already completed and was logged.
 		if time.Now().After(deadline) {
 			return errDurationExceeded
 		}
 
 		blk := uint64(blockNum)
+		rawCount := uint64(len(entries))
 
-		t0 := time.Now().UnixNano()
+		// Filter entries if hot-account filter is configured.
+		selected := entries
+		if filter != nil {
+			filtered := make([]dataset.Entry, 0, len(entries))
+			for i := range entries {
+				addr := common.BytesToAddress(entries[i].Address[:])
+				if filter.Contains(addr) {
+					filtered = append(filtered, entries[i])
+				}
+			}
+			selected = filtered
+		}
+		selectedCount := uint64(len(selected))
+
+		startAtNs := time.Now().UnixNano()
 
 		stateDB, err := cfg.Store.OpenState(currentRoot)
 		if err != nil {
 			return fmt.Errorf("block %d: open state: %w", blk, err)
 		}
 
-		for _, e := range entries {
+		for _, e := range selected {
 			addr := common.BytesToAddress(e.Address[:])
 			bal := new(big.Int).SetBytes(e.Balance)
 			st.SetAccountBalance(stateDB, addr, bal)
@@ -132,22 +148,22 @@ func BenchRun(cfg BenchConfig) error {
 			batch.Reset()
 		}
 
-		t1 := time.Now().UnixNano()
+		completedAtNs := time.Now().UnixNano()
 
-		if err := w.Write([]string{
+		// queued_at_ns = start_at_ns for sequential pipeline
+		_ = csvWriter.WriteRow(
 			strconv.FormatUint(blk, 10),
-			strconv.Itoa(len(entries)),
-			strconv.FormatInt(t0, 10),
-			strconv.FormatInt(t1, 10),
-		}); err != nil {
-			return fmt.Errorf("write CSV row: %w", err)
-		}
+			strconv.FormatUint(rawCount, 10),
+			strconv.FormatUint(selectedCount, 10),
+			strconv.FormatInt(startAtNs, 10),
+			strconv.FormatInt(startAtNs, 10),
+			strconv.FormatInt(completedAtNs, 10),
+		)
 
 		currentRoot = newRoot
 		blocksProcessed++
 
 		if blocksProcessed%5000 == 0 {
-			w.Flush()
 			elapsed := time.Since(benchStart)
 			remaining := cfg.Duration - elapsed
 			log.Printf("  block %d  (%d blocks, %.1f blk/s, %s remaining)",
@@ -169,8 +185,6 @@ func BenchRun(cfg BenchConfig) error {
 			return fmt.Errorf("final triedb flush: %w", err)
 		}
 	}
-
-	w.Flush()
 
 	elapsed := time.Since(benchStart)
 	log.Printf("Bench-ingest complete: %d blocks in %s (%.1f blk/s), CSV: %s",

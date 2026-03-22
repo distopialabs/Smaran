@@ -1,7 +1,6 @@
 package ingest
 
 import (
-	"encoding/csv"
 	"errors"
 	"fmt"
 	"log"
@@ -10,6 +9,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/nepal80m/samurai/internal/benchutil"
 	"github.com/nepal80m/samurai/internal/dataset"
 	"github.com/nepal80m/samurai/internal/verkle/keys"
 	"github.com/nepal80m/samurai/internal/verkle/store"
@@ -20,29 +20,40 @@ var errTimeLimitReached = errors.New("time limit reached")
 
 // BenchConfig holds configuration for the ingestion benchmark.
 type BenchConfig struct {
-	BlocksDir  string
-	DBDir      string
-	DBBackend  string
-	Start      uint64
-	End        uint64
-	StartSet   bool
-	FlushEvery int
-	Duration   time.Duration
-	OutputFile string
+	BlocksDir    string
+	DBDir        string
+	DBBackend    string
+	Start        uint64
+	End          uint64
+	FlushEvery   int
+	Duration     time.Duration
+	KUsers       int
+	AccountsList string
+	OutCSV       string
 }
 
 // RunBench runs block ingestion for a fixed duration, logging per-block
 // timestamps to a CSV file. After the deadline, the current in-flight block
 // completes before stopping.
 //
-// CSV columns: block_number, entries, dirty_nodes, start_ns, end_ns, flush
-//   - start_ns/end_ns: wall-clock nanosecond timestamps (time.Now().UnixNano())
-//   - flush: 1 if a periodic full-tree serialize+reload occurred on this block
+// CSV columns: block_num,num_raw_updates,num_selected_updates,queued_at_ns,start_at_ns,completed_at_ns
 func RunBench(cfg BenchConfig) error {
 	logger := log.New(os.Stderr, "[bench-ingest] ", log.LstdFlags)
 
 	if cfg.FlushEvery <= 0 {
 		cfg.FlushEvery = 1000
+	}
+
+	// Load hot-account filter if configured.
+	var filter *benchutil.HotAccountFilter
+	if cfg.KUsers > 0 {
+		logger.Printf("loading top %d hot accounts from %s", cfg.KUsers, cfg.AccountsList)
+		var err error
+		filter, err = benchutil.LoadHotAccountFilter(cfg.AccountsList, cfg.KUsers)
+		if err != nil {
+			return fmt.Errorf("load hot account filter: %w", err)
+		}
+		logger.Printf("loaded %d hot accounts", filter.Size())
 	}
 
 	kv, err := store.OpenKVStore(cfg.DBBackend, cfg.DBDir)
@@ -55,9 +66,10 @@ func RunBench(cfg BenchConfig) error {
 	resolver := ns.NodeResolverFn()
 
 	start := cfg.Start
-	if !cfg.StartSet {
-		if last, ok := ns.GetLastProcessed(); ok {
-			start = last + 1
+	if last, ok := ns.GetLastProcessed(); ok {
+		resume := last + 1
+		if resume > start {
+			start = resume
 			logger.Printf("resuming from block %d (last processed: %d)", start, last)
 		}
 	}
@@ -78,33 +90,41 @@ func RunBench(cfg BenchConfig) error {
 	dr := dataset.NewDatasetReader(cfg.BlocksDir, dataset.SEGMENT_SIZE)
 	defer dr.Close()
 
-	outFile, err := os.Create(cfg.OutputFile)
+	csvWriter, err := benchutil.NewBenchCSVWriter(cfg.OutCSV, benchutil.IngestionCSVHeader)
 	if err != nil {
-		return fmt.Errorf("create output file: %w", err)
+		return err
 	}
-	defer outFile.Close()
-
-	csvW := csv.NewWriter(outFile)
-	defer csvW.Flush()
-
-	if err := csvW.Write([]string{"block_number", "entries", "dirty_nodes", "start_ns", "end_ns", "flush"}); err != nil {
-		return fmt.Errorf("write csv header: %w", err)
-	}
+	defer csvWriter.Close()
 
 	deadline := time.Now().Add(cfg.Duration)
 	totalBlocks := 0
 	blocksSinceFlush := 0
 	benchStart := time.Now()
 
-	logger.Printf("starting benchmark: duration=%s, start_block=%d, end_block=%d, flush_every=%d",
-		cfg.Duration, start, cfg.End, cfg.FlushEvery)
+	logger.Printf("starting benchmark: duration=%s, start_block=%d, end_block=%d, flush_every=%d, output=%s",
+		cfg.Duration, start, cfg.End, cfg.FlushEvery, cfg.OutCSV)
 
 	err = dr.IterateRange(uint32(start), uint32(cfg.End), func(blockNum uint32, entries []dataset.Entry) error {
-		blockStart := time.Now().UnixNano()
+		rawCount := uint64(len(entries))
+
+		// Filter entries if hot-account filter is configured.
+		selected := entries
+		if filter != nil {
+			filtered := make([]dataset.Entry, 0, len(entries))
+			for i := range entries {
+				if filter.ContainsBytes(entries[i].Address) {
+					filtered = append(filtered, entries[i])
+				}
+			}
+			selected = filtered
+		}
+		selectedCount := uint64(len(selected))
+
+		startAtNs := time.Now().UnixNano()
 
 		dirtyStems := make(map[string]struct{})
 
-		for _, entry := range entries {
+		for _, entry := range selected {
 			bal := new(big.Int).SetBytes(entry.Balance)
 			treeKey := keys.GetTreeKeyForBasicData(entry.Address)
 			keySlice := treeKey[:]
@@ -151,7 +171,6 @@ func RunBench(cfg BenchConfig) error {
 		totalBlocks++
 		blocksSinceFlush++
 
-		flushed := 0
 		if blocksSinceFlush >= cfg.FlushEvery {
 			allNodes, err := iroot.BatchSerialize()
 			if err != nil {
@@ -170,24 +189,21 @@ func RunBench(cfg BenchConfig) error {
 			}
 			root = newRoot
 			blocksSinceFlush = 0
-			flushed = 1
 		}
 
-		blockEnd := time.Now().UnixNano()
+		completedAtNs := time.Now().UnixNano()
 
-		if err := csvW.Write([]string{
+		// queued_at_ns = start_at_ns for sequential pipeline
+		_ = csvWriter.WriteRow(
 			strconv.FormatUint(uint64(blockNum), 10),
-			strconv.Itoa(len(entries)),
-			strconv.Itoa(len(dirtyNodes)),
-			strconv.FormatInt(blockStart, 10),
-			strconv.FormatInt(blockEnd, 10),
-			strconv.Itoa(flushed),
-		}); err != nil {
-			return fmt.Errorf("write csv row: %w", err)
-		}
+			strconv.FormatUint(rawCount, 10),
+			strconv.FormatUint(selectedCount, 10),
+			strconv.FormatInt(startAtNs, 10),
+			strconv.FormatInt(startAtNs, 10),
+			strconv.FormatInt(completedAtNs, 10),
+		)
 
 		if totalBlocks%500 == 0 {
-			csvW.Flush()
 			elapsed := time.Since(benchStart)
 			logger.Printf("block %d | %d blocks (%.1f blk/s) | elapsed %s | remaining %s",
 				blockNum, totalBlocks,
@@ -212,13 +228,10 @@ func RunBench(cfg BenchConfig) error {
 	}
 
 	elapsed := time.Since(benchStart)
-	if errors.Is(err, errTimeLimitReached) {
-		logger.Printf("time limit reached after %s", elapsed.Round(time.Second))
-	}
 	logger.Printf("done: %d blocks in %s (%.1f blk/s) → %s",
 		totalBlocks, elapsed.Round(time.Second),
 		float64(totalBlocks)/elapsed.Seconds(),
-		cfg.OutputFile)
+		cfg.OutCSV)
 
 	return nil
 }

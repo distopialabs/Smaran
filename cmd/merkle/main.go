@@ -19,6 +19,7 @@ import (
 	"github.com/ethereum/go-ethereum/trie"
 	"github.com/urfave/cli/v2"
 
+	"github.com/nepal80m/samurai/internal/benchutil"
 	"github.com/nepal80m/samurai/internal/dataset"
 	"github.com/nepal80m/samurai/internal/merkle/ingest"
 	"github.com/nepal80m/samurai/internal/merkle/meta"
@@ -101,14 +102,14 @@ func benchIngestCmd() *cli.Command {
 		Flags: []cli.Flag{
 			&cli.StringFlag{Name: "blocks-dir", Value: "data/blocks", Usage: "Path to blocks data directory"},
 			&cli.StringFlag{Name: "db-dir", Required: true, Usage: "Path to state database directory"},
-			&cli.StringFlag{Name: "db-backend", Value: "pebble", Usage: "Database backend: pebble or leveldb"},
-			&cli.Uint64Flag{Name: "start", Value: defaultStartBlock, Usage: "Start block number"},
 			&cli.DurationFlag{Name: "duration", Value: 5 * time.Minute, Usage: "How long to run the benchmark"},
+			&cli.IntFlag{Name: "k-users", Value: 0, Usage: "Top-K hot accounts to include (0 = all, no filtering)"},
+			&cli.StringFlag{Name: "accounts-list", Value: "account_stats_all.csv", Usage: "CSV with hot accounts sorted by update count descending"},
 			&cli.BoolFlag{Name: "fresh", Value: false, Usage: "Delete existing DB and start from scratch"},
-			&cli.StringFlag{Name: "out", Value: "bench_ingest.csv", Usage: "Output CSV file path"},
 		},
 		Action: func(c *cli.Context) error {
 			dbDir := c.String("db-dir")
+			kUsers := c.Int("k-users")
 
 			if c.Bool("fresh") {
 				if _, err := os.Stat(dbDir); err == nil {
@@ -119,18 +120,25 @@ func benchIngestCmd() *cli.Command {
 				}
 			}
 
-			store, err := st.OpenDBWithBackend(dbDir, c.String("db-backend"))
+			csvPath, err := benchutil.IngestionOutputPath("merkle", kUsers)
+			if err != nil {
+				return err
+			}
+
+			store, err := st.OpenDB(dbDir)
 			if err != nil {
 				return err
 			}
 			defer store.Close()
 
 			cfg := ingest.BenchConfig{
-				BlocksDir: c.String("blocks-dir"),
-				Store:     store,
-				Start:     c.Uint64("start"),
-				Duration:  c.Duration("duration"),
-				OutCSV:    c.String("out"),
+				BlocksDir:    c.String("blocks-dir"),
+				Store:        store,
+				Start:        dataset.FIRST_BLOCK,
+				Duration:     c.Duration("duration"),
+				KUsers:       kUsers,
+				AccountsList: c.String("accounts-list"),
+				OutCSV:       csvPath,
 			}
 			return ingest.BenchRun(cfg)
 		},

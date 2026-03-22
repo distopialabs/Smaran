@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/nepal80m/samurai/internal/benchutil"
 	"github.com/nepal80m/samurai/internal/dataset"
 	"github.com/nepal80m/samurai/internal/utils"
 )
@@ -14,10 +15,9 @@ import (
 // BenchConfig holds user-facing benchmark parameters that are translated into
 // a BenchContext at runtime.
 type BenchConfig struct {
-	Duration        time.Duration
-	NumUsers        int
-	HotAccountsFile string
-	OutputDir       string
+	Duration     time.Duration
+	KUsers       int
+	AccountsList string
 }
 
 // errBenchDeadline is a sentinel returned by the producer when the benchmark
@@ -26,39 +26,37 @@ type BenchConfig struct {
 var errBenchDeadline = errors.New("benchmark deadline reached")
 
 // BenchRun orchestrates a benchmarked samurai+MPT ingestion run. It sets up
-// the hot-account filter, metrics collector, and deadline, then runs the same
+// the hot-account filter, CSV recorder, and deadline, then runs the same
 // pipeline as Run with instrumentation enabled.
-func BenchRun(cfg Config, benchCfg BenchConfig) error {
+func BenchRun(cfg Config, benchCfg BenchConfig, csvPath string) error {
 	// --- load hot-account filter ---
-	var filter *HotAccountFilter
-	if benchCfg.NumUsers > 0 {
-		log.Printf("[bench] loading top %d hot accounts from %s", benchCfg.NumUsers, benchCfg.HotAccountsFile)
+	var filter *benchutil.HotAccountFilter
+	if benchCfg.KUsers > 0 {
+		log.Printf("[bench] loading top %d hot accounts from %s", benchCfg.KUsers, benchCfg.AccountsList)
 		var err error
-		filter, err = LoadHotAccountFilter(benchCfg.HotAccountsFile, benchCfg.NumUsers)
+		filter, err = benchutil.LoadHotAccountFilter(benchCfg.AccountsList, benchCfg.KUsers)
 		if err != nil {
 			return fmt.Errorf("load hot account filter: %w", err)
 		}
 		log.Printf("[bench] loaded %d hot accounts", filter.Size())
 	}
 
-	// --- create metrics collector ---
-	mc, err := NewMetricsCollector(benchCfg.OutputDir, cfg.Blocks.Start, benchCfg.Duration, benchCfg.NumUsers)
+	// --- create CSV writer ---
+	header := append(benchutil.IngestionCSVHeader, "wait_commitments_ns")
+	csvWriter, err := benchutil.NewBenchCSVWriter(csvPath, header)
 	if err != nil {
-		return fmt.Errorf("create metrics collector: %w", err)
+		return fmt.Errorf("create bench CSV writer: %w", err)
 	}
-	defer mc.Close()
+	defer csvWriter.Close()
 
 	// --- configure deadline and block range ---
-	// For duration-based runs we process as many blocks as possible up to
-	// LAST_BLOCK. The deadline check inside the producer stops iteration at
-	// a block boundary.
 	cfg.Blocks.End = dataset.LAST_BLOCK
 	deadline := time.Now().Add(benchCfg.Duration)
 
 	// --- wire BenchContext into Config ---
 	cfg.Bench = &BenchContext{
 		Filter:   filter,
-		Metrics:  mc,
+		CSV:      csvWriter,
 		Deadline: deadline,
 	}
 
@@ -82,12 +80,9 @@ func BenchRun(cfg Config, benchCfg BenchConfig) error {
 		runMPTWorker(cfg, blockInfoCh, commitCh)
 	}()
 
-	// --- start telemetry ---
-	mc.StartTelemetry(5*time.Second, queues, commitCh)
-	mc.BenchStart = time.Now()
-
-	log.Printf("[bench] starting benchmark: duration=%s startBlock=%d numUsers=%d",
-		benchCfg.Duration, cfg.Blocks.Start, benchCfg.NumUsers)
+	benchStart := time.Now()
+	log.Printf("[bench] starting benchmark: duration=%s startBlock=%d kUsers=%d output=%s",
+		benchCfg.Duration, cfg.Blocks.Start, benchCfg.KUsers, csvPath)
 
 	// --- run producer ---
 	prodErr := produceBlocks(cfg, blockInfoCh, queues)
@@ -103,30 +98,17 @@ func BenchRun(cfg Config, benchCfg BenchConfig) error {
 
 	mptWG.Wait()
 
-	mc.BenchEnd = time.Now()
-	mc.StopTelemetry()
-
 	// --- interpret producer result ---
 	if prodErr != nil && !errors.Is(prodErr, errBenchDeadline) {
 		return fmt.Errorf("producer error: %w", prodErr)
 	}
 
 	if prodErr == nil && time.Now().Before(deadline) {
-		return fmt.Errorf("ran out of blocks (reached block %d) before benchmark duration elapsed; increase block range or reduce duration", dataset.LAST_BLOCK)
+		return fmt.Errorf("ran out of blocks (reached block %d) before benchmark duration elapsed", dataset.LAST_BLOCK)
 	}
 
-	// --- write summary ---
-	if err := mc.WriteSummary(); err != nil {
-		return fmt.Errorf("write summary: %w", err)
-	}
-
-	wallSec := mc.BenchEnd.Sub(mc.BenchStart).Seconds()
-	log.Printf("[bench] complete: %.1fs wall-clock, %d blocks, %d selected updates, %d discarded",
-		wallSec,
-		mc.BlocksCommitted.Load(),
-		mc.SelectedUpdates.Load(),
-		mc.DiscardedUpdates.Load(),
-	)
+	wallSec := time.Since(benchStart).Seconds()
+	log.Printf("[bench] complete: %.1fs wall-clock, output=%s", wallSec, csvPath)
 
 	return nil
 }

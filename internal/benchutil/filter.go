@@ -1,4 +1,4 @@
-package ingest
+package benchutil
 
 import (
 	"bufio"
@@ -18,11 +18,11 @@ type HotAccountFilter struct {
 	addrs map[common.Address]struct{}
 }
 
-// LoadHotAccountFilter reads the top numUsers addresses from a CSV file that is
+// LoadHotAccountFilter reads the top k addresses from a CSV file that is
 // sorted by update count descending. Expected header: Address,UpdateCount.
 // Only the Address column is used; the file is read line-by-line so we never
-// load more than numUsers rows into memory even if the file has millions.
-func LoadHotAccountFilter(csvPath string, numUsers int) (*HotAccountFilter, error) {
+// load more than k rows into memory even if the file has millions.
+func LoadHotAccountFilter(csvPath string, k int) (*HotAccountFilter, error) {
 	f, err := os.Open(csvPath)
 	if err != nil {
 		return nil, fmt.Errorf("open hot accounts file: %w", err)
@@ -47,8 +47,8 @@ func LoadHotAccountFilter(csvPath string, numUsers int) (*HotAccountFilter, erro
 		return nil, fmt.Errorf("CSV missing 'Address' column; header: %v", header)
 	}
 
-	addrs := make(map[common.Address]struct{}, numUsers)
-	for loaded := 0; loaded < numUsers; loaded++ {
+	addrs := make(map[common.Address]struct{}, k)
+	for loaded := 0; loaded < k; loaded++ {
 		record, err := r.Read()
 		if err == io.EOF {
 			break
@@ -66,6 +66,12 @@ func LoadHotAccountFilter(csvPath string, numUsers int) (*HotAccountFilter, erro
 // Contains returns true if addr is in the selected hot-account set.
 func (f *HotAccountFilter) Contains(addr common.Address) bool {
 	_, ok := f.addrs[addr]
+	return ok
+}
+
+// ContainsBytes returns true if the 20-byte address is in the selected set.
+func (f *HotAccountFilter) ContainsBytes(addr [20]byte) bool {
+	_, ok := f.addrs[common.Address(addr)]
 	return ok
 }
 

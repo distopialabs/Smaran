@@ -33,7 +33,7 @@ func main() {
 
 	// Setup databases (clean only if explicitly requested with --clean)
 	cleanOnCommit := flags.Mode == "commit" && cfg.Clean
-	dbs, pebbleDbs, err := SetupDatabases(cfg, cleanOnCommit)
+	dbs, _, err := SetupDatabases(cfg, cleanOnCommit)
 	if err != nil {
 		log.Fatalf("failed to setup databases: %v", err)
 	}
@@ -52,7 +52,8 @@ func main() {
 	case "commit":
 		log.Fatalf("this mode is deprecated, use the samurai ingest command instead")
 		if cfg.Benchmark.Enabled {
-			commands.RunCommitBenchmark(cfg, caches, pebbleDbs)
+			log.Fatalf("benchmark mode is not supported for this mode")
+			// commands.RunCommitBenchmark(cfg, caches, pebbleDbs)
 		} else {
 			commands.RunCommit(cfg, caches)
 		}

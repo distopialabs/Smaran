@@ -3,6 +3,7 @@ package ingest
 import (
 	"fmt"
 	"math/big"
+	"strconv"
 	"sync"
 	"time"
 
@@ -19,15 +20,13 @@ type UpdateTask struct {
 	BlockNumber uint64
 	Account     common.Address
 	Balance     *big.Int
-	EnqueuedAt  int64 // UnixNano timestamp; 0 when not benchmarking
 }
 
 type mptBlockInfo struct {
 	blockNumber    uint64
 	updateCount    uint64 // selected updates (after filtering)
 	rawUpdateCount uint64 // raw updates (before filtering)
-	discardedCount uint64 // discarded by filter
-	emittedAt      int64  // UnixNano timestamp; 0 when not benchmarking
+	queuedAtNs     int64  // UnixNano timestamp when queued; 0 when not benchmarking
 }
 
 type mptUpdateCommitmentInfo struct {
@@ -39,12 +38,7 @@ type mptUpdateCommitmentInfo struct {
 // startCommitWorkers spawns one goroutine per shard that pops UpdateTasks,
 // computes the Samurai commitment, and optionally forwards the result to commitCh.
 // If commitCh is nil, commitment results are discarded (samurai-only mode).
-//
-// When cfg.Bench is set each worker additionally records:
-//   - queue wait latency  (time from enqueue to dequeue)
-//   - commitment latency  (time inside CreateOrUpdateAccountInfo)
 func startCommitWorkers(cfg Config, queues []*utils.BoundedQueue[UpdateTask], commitCh chan<- mptUpdateCommitmentInfo, wg *sync.WaitGroup) {
-	bench := cfg.Bench // may be nil
 	for i := 0; i < cfg.Workers.CommitWorkerCount; i++ {
 		i := i
 		wg.Add(1)
@@ -56,16 +50,6 @@ func startCommitWorkers(cfg Config, queues []*utils.BoundedQueue[UpdateTask], co
 					return
 				}
 
-				if bench != nil && task.EnqueuedAt != 0 {
-					queueWaitNs := time.Now().UnixNano() - task.EnqueuedAt
-					bench.Metrics.RecordQueueWait(task.BlockNumber, queueWaitNs)
-				}
-
-				var commitStart time.Time
-				if bench != nil {
-					commitStart = time.Now()
-				}
-
 				commitmentHash, err := storage.CreateOrUpdateAccountInfo(
 					task.Account,
 					task.Balance,
@@ -74,10 +58,6 @@ func startCommitWorkers(cfg Config, queues []*utils.BoundedQueue[UpdateTask], co
 				)
 				if err != nil {
 					panic(err)
-				}
-
-				if bench != nil {
-					bench.Metrics.RecordCommitLatency(task.BlockNumber, time.Since(commitStart).Nanoseconds())
 				}
 
 				if commitCh != nil {
@@ -95,10 +75,6 @@ func startCommitWorkers(cfg Config, queues []*utils.BoundedQueue[UpdateTask], co
 // runMPTWorker sequentially processes one block at a time: collects all
 // commitment updates for the block, applies them to the StateTrie, and
 // commits + flushes the result to disk (archive mode).
-//
-// Always prints a per-phase timing summary every 1000 blocks so that
-// bottlenecks are visible even in non-benchmark runs. When cfg.Bench is set,
-// the worker additionally writes detailed per-block rows to blocks.csv.
 func runMPTWorker(cfg Config, blockInfoCh <-chan mptBlockInfo, commitCh <-chan mptUpdateCommitmentInfo) {
 	currentRoot, err := meta.GetRoot(cfg.MPTStore.DiskDB, cfg.Blocks.Start-1)
 	if err != nil {
@@ -113,38 +89,20 @@ func runMPTWorker(cfg Config, blockInfoCh <-chan mptBlockInfo, commitCh <-chan m
 	batch := cfg.MPTStore.DiskDB.NewBatch()
 	blocksProcessed := uint64(0)
 	var lastBlockNumber uint64
-
-	// Rolling accumulators for periodic log summary.
-	var (
-		logWaitNs   int64
-		logOpenNs   int64
-		logApplyNs  int64
-		logCommitNs int64
-		logFlushNs  int64
-		logUpdates  uint64
-		logBlocks   uint64
-		logStart    = time.Now()
-	)
+	logStart := time.Now()
 
 	for blockInfo := range blockInfoCh {
 		pending := blockInfo.updateCount
 
-		var mptStartNs int64
-		if bench != nil {
-			mptStartNs = time.Now().UnixNano()
-		}
+		startAtNs := time.Now().UnixNano()
 
 		// --- Phase: OpenStateTrie ---
-		t0 := time.Now()
 		tr, err := cfg.MPTStore.OpenState(currentRoot)
 		if err != nil {
 			panic(err)
 		}
-		openNs := time.Since(t0).Nanoseconds()
 
 		// --- Phase: Apply buffered + drain commitCh ---
-		tApply := time.Now()
-		// Apply any already-buffered commitments for this block.
 		if buf, ok := buffered[blockInfo.blockNumber]; ok {
 			for _, u := range buf {
 				st.SetAccountCommitmentAsBalance(tr, u.address, u.commitment)
@@ -152,11 +110,10 @@ func runMPTWorker(cfg Config, blockInfoCh <-chan mptBlockInfo, commitCh <-chan m
 			}
 			delete(buffered, blockInfo.blockNumber)
 		}
-		applyBufferedNs := time.Since(tApply).Nanoseconds()
 
 		// Drain commitCh until we have all pending updates for this block.
+		// Track time spent blocked waiting for commitments.
 		var waitCommitmentsNs int64
-		var applyCommitmentsNs int64
 		for pending > 0 {
 			tWait := time.Now()
 			u := <-commitCh
@@ -165,57 +122,37 @@ func runMPTWorker(cfg Config, blockInfoCh <-chan mptBlockInfo, commitCh <-chan m
 			if u.blockNumber != blockInfo.blockNumber {
 				buffered[u.blockNumber] = append(buffered[u.blockNumber], u)
 			} else {
-				tA := time.Now()
 				st.SetAccountCommitmentAsBalance(tr, u.address, u.commitment)
-				applyCommitmentsNs += time.Since(tA).Nanoseconds()
 				pending--
 			}
 		}
-		totalApplyNs := applyBufferedNs + applyCommitmentsNs
 
 		// --- Phase: CommitStateTrie ---
-		tCommit := time.Now()
 		newRoot, err := cfg.MPTStore.CommitState(tr, currentRoot, blockInfo.blockNumber)
 		if err != nil {
 			panic(fmt.Sprintf("commit state for block %d: %v", blockInfo.blockNumber, err))
 		}
 		meta.PutRootBatch(batch, blockInfo.blockNumber, newRoot)
-		commitNs := time.Since(tCommit).Nanoseconds()
 
 		// --- Phase: FlushTrieDB ---
-		tFlush := time.Now()
 		if err := cfg.MPTStore.FlushTrieDB(newRoot); err != nil {
 			panic(err)
 		}
-		flushNs := time.Since(tFlush).Nanoseconds()
+
+		completedAtNs := time.Now().UnixNano()
 
 		// --- record per-block metrics (bench mode) ---
 		if bench != nil {
-			completedAtNs := time.Now().UnixNano()
-			mptPhaseNs := completedAtNs - mptStartNs
-			bench.Metrics.WriteBlockRow(
-				blockInfo.blockNumber,
-				blockInfo.rawUpdateCount,
-				blockInfo.updateCount,
-				blockInfo.discardedCount,
-				blockInfo.emittedAt,
-				mptStartNs,
-				completedAtNs,
-				mptPhaseNs,
-				waitCommitmentsNs,
-				commitNs,
-				flushNs,
+			_ = bench.CSV.WriteRow(
+				strconv.FormatUint(blockInfo.blockNumber, 10),
+				strconv.FormatUint(blockInfo.rawUpdateCount, 10),
+				strconv.FormatUint(blockInfo.updateCount, 10),
+				strconv.FormatInt(blockInfo.queuedAtNs, 10),
+				strconv.FormatInt(startAtNs, 10),
+				strconv.FormatInt(completedAtNs, 10),
+				strconv.FormatInt(waitCommitmentsNs, 10),
 			)
 		}
-
-		// --- accumulate for periodic log ---
-		logWaitNs += waitCommitmentsNs
-		logOpenNs += openNs
-		logApplyNs += totalApplyNs
-		logCommitNs += commitNs
-		logFlushNs += flushNs
-		logUpdates += blockInfo.updateCount
-		logBlocks++
 
 		currentRoot = newRoot
 		lastBlockNumber = blockInfo.blockNumber
@@ -228,23 +165,13 @@ func runMPTWorker(cfg Config, blockInfoCh <-chan mptBlockInfo, commitCh <-chan m
 			batch.Reset()
 		}
 
-		// --- periodic log summary ---
-		if logBlocks > 0 && blocksProcessed%logInterval == 0 {
-			n := float64(logBlocks)
-			fmt.Printf("[MPT] blk=%d elapsed=%s upd/blk=%.0f wait=%.2fms open=%.2fms apply=%.2fms commit=%.2fms flush=%.2fms total=%.2fms buffered=%d\n",
+		// --- periodic log ---
+		if blocksProcessed%logInterval == 0 {
+			fmt.Printf("[MPT] blk=%d elapsed=%s buffered=%d\n",
 				blockInfo.blockNumber,
 				time.Since(logStart).Truncate(time.Millisecond),
-				float64(logUpdates)/n,
-				float64(logWaitNs)/n/1e6,
-				float64(logOpenNs)/n/1e6,
-				float64(logApplyNs)/n/1e6,
-				float64(logCommitNs)/n/1e6,
-				float64(logFlushNs)/n/1e6,
-				float64(logWaitNs+logOpenNs+logApplyNs+logCommitNs+logFlushNs)/n/1e6,
 				len(buffered),
 			)
-			logWaitNs, logOpenNs, logApplyNs, logCommitNs, logFlushNs = 0, 0, 0, 0, 0
-			logUpdates, logBlocks = 0, 0
 			logStart = time.Now()
 		}
 	}
@@ -301,14 +228,6 @@ func produceBlocks(cfg Config, blockInfoCh chan<- mptBlockInfo, queues []*utils.
 				selected = filtered
 			}
 			selectedCount := uint64(len(selected))
-			discardedCount := rawCount - selectedCount
-
-			// --- update global atomic counters ---
-			if bench != nil {
-				bench.Metrics.RawUpdates.Add(rawCount)
-				bench.Metrics.SelectedUpdates.Add(selectedCount)
-				bench.Metrics.DiscardedUpdates.Add(discardedCount)
-			}
 
 			// --- emit block metadata ---
 			if blockInfoCh != nil {
@@ -316,10 +235,9 @@ func produceBlocks(cfg Config, blockInfoCh chan<- mptBlockInfo, queues []*utils.
 					blockNumber:    uint64(n),
 					updateCount:    selectedCount,
 					rawUpdateCount: rawCount,
-					discardedCount: discardedCount,
 				}
 				if bench != nil {
-					info.emittedAt = time.Now().UnixNano()
+					info.queuedAtNs = time.Now().UnixNano()
 				}
 				blockInfoCh <- info
 			}
@@ -331,9 +249,6 @@ func produceBlocks(cfg Config, blockInfoCh chan<- mptBlockInfo, queues []*utils.
 					BlockNumber: uint64(n),
 					Account:     common.BytesToAddress(entry.Address[:]),
 					Balance:     new(big.Int).SetBytes(entry.Balance),
-				}
-				if bench != nil {
-					task.EnqueuedAt = time.Now().UnixNano()
 				}
 				if err := queues[idx].Push(task); err != nil {
 					return fmt.Errorf("push to shard queue %d: %w", idx, err)

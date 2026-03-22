@@ -5,6 +5,7 @@ import (
 
 	bls "github.com/consensys/gnark-crypto/ecc/bls12-381"
 	"github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
+	"github.com/nepal80m/samurai/internal/benchutil"
 	"github.com/nepal80m/samurai/internal/crypto/kzg"
 	"github.com/nepal80m/samurai/internal/crypto/polynomial"
 	"github.com/nepal80m/samurai/internal/db"
@@ -27,8 +28,7 @@ type Config struct {
 	Workers WorkersConfig
 	// Database  DatabaseConfig
 	// Cache     CacheConfig
-	Queue     QueueConfig
-	Benchmark Benchmark
+	Queue QueueConfig
 
 	Caches        []*storage.Cache
 	SamuraiStores []*db.SamuraiStore
@@ -43,19 +43,9 @@ type Config struct {
 // BenchContext carries all benchmark-specific runtime state. Stored as a
 // pointer in Config so that a nil check gates all instrumentation.
 type BenchContext struct {
-	Filter   *HotAccountFilter
-	Metrics  *MetricsCollector
+	Filter   *benchutil.HotAccountFilter
+	CSV      *benchutil.BenchCSVWriter
 	Deadline time.Time
-}
-
-// Benchmark holds configuration for benchmark mode.
-type Benchmark struct {
-	Enabled              bool
-	DurationSecs         int    // How long to run the benchmark (seconds)
-	OutputDir            string // Directory to write benchmark CSV files
-	CollectDBMetrics     bool   // Collect Pebble DB metrics (compaction, L0 files, etc.)
-	CollectPipelineSizes bool   // Collect queue and channel sizes per shard
-	CollectCacheMetrics  bool   // Collect Ristretto cache metrics (hits, misses, size)
 }
 
 // BlocksConfig specifies the block range to process.

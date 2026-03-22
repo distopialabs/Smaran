@@ -11,10 +11,17 @@ go mod tidy
 make build
 ```
 
-This produces three binaries in `bin/`:
-- `samurai` — main server for committing blocks, generating proofs, and serving gRPC queries
-- `proofc` — gRPC proof client for single queries and benchmarks
-- `makedataset` — dataset builder (extracts modified accounts from Erigon)
+This produces six binaries in `bin/`:
+
+| Binary | Description |
+|--------|-------------|
+| `samurai` | Samurai (KZG + MPT) — ingest blocks, generate proofs, serve gRPC |
+| `merkle` | Baseline MPT — ingest, proof gen, gRPC server |
+| `verkle` | Baseline Verkle tree — ingest, proof gen, gRPC server |
+| `proofc` | gRPC proof client for samurai |
+| `merkle-proofc` | gRPC proof client for merkle |
+| `verkle-proofc` | gRPC proof client for verkle |
+| `makedataset` | Extract modified accounts from Erigon into a flat dataset |
 
 ---
 
@@ -22,124 +29,233 @@ This produces three binaries in `bin/`:
 
 ### `samurai`
 
-The main binary. Operates in one of four modes: **commit**, **proof**, **verify**, or **serve**.
+Subcommand-based CLI for the Samurai (KZG commitment + MPT) system.
 
-```bash
-./bin/samurai [flags]
+```
+samurai <command> [flags]
 ```
 
-#### Flags
+| Command | Description |
+|---------|-------------|
+| `ingest` | Ingest blocks into the Samurai+MPT pipeline |
+| `build-mpt` | Build MPT from already-processed Samurai data |
+| `bench-ingest` | Duration-based ingestion benchmark with optional hot-account filtering |
+| `proof` | Generate range proofs for an account |
+| `serve` | Start the gRPC proof server |
 
-| Flag | Type | Default | Description |
-|------|------|---------|-------------|
-| `--mode` | string | `"commit"` | Operating mode: `commit`, `proof`, `verify`, `serve` |
-| `--datadir` | string | `"samurai-data"` | Data directory for DB, profiles, and benchmarks |
-| `--n` | int | `10000` | Number of blocks to process |
-| `--clean` | bool | `false` | Wipe the database and start fresh |
-| `--port` | int | `50051` | gRPC server port (serve mode) |
-| `--p` | bool | `false` | Enable CPU profiling |
-| `--profilePath` | string | `<datadir>/profiles` | Profile output path |
-| `--queryStartBlock` | int | `18908915` | Start block for proof/verify mode |
-| `--queryEndBlock` | int | `18909914` | End block for proof/verify mode |
-| `--queryAccount` | string | `"0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"` | Account address for proof/verify mode |
-| `--bench` | bool | `false` | Enable benchmarking during commit |
-| `--benchDuration` | int | `300` | Benchmark duration in seconds |
-| `--benchOutputDir` | string | `<datadir>/benchmarks` | Benchmark CSV output directory |
-| `--benchDBMetrics` | bool | `false` | Collect Pebble DB metrics during benchmark |
-| `--benchPipeline` | bool | `false` | Collect pipeline sizes per shard during benchmark |
-| `--benchCacheMetrics` | bool | `true` | Collect Ristretto cache metrics during benchmark |
+#### `samurai ingest`
 
-#### Examples
-
-Commit 100 blocks:
 ```bash
-./bin/samurai --mode commit --n 100
+samurai ingest --db-dir /data/local/tmp/samurai --blocks-dir data/blocks --n 100000
 ```
 
-Commit all blocks with a clean database:
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--db-dir` | `tmp-samurai-db-dir` | Root directory for all databases |
+| `--blocks-dir` | `data/blocks` | Path to block dataset directory |
+| `--n` | `10000` | Number of blocks to process |
+| `--clean` | `false` | Wipe the database and start fresh |
+| `--cpuprofile` | | Write CPU profile to file |
+
+#### `samurai bench-ingest`
+
 ```bash
-./bin/samurai --datadir /data/local/samurai --n 2616996 --clean
+samurai bench-ingest --duration 5m --k-users 1000 --accounts-list account_stats_all.csv
 ```
 
-Start the gRPC server:
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--db-dir` | `/data/local/tmp/bench-samurai` | Root directory for databases (wiped on each run) |
+| `--blocks-dir` | `data/blocks` | Path to block dataset directory |
+| `--duration` | `5m` | How long to run the benchmark |
+| `--k-users` | `0` | Top-K hot accounts (0 = all, no filtering) |
+| `--accounts-list` | `account_stats_all.csv` | CSV with accounts sorted by update count desc |
+| `--cpuprofile` | | Write CPU profile to file |
+
+Output: `benchmark_output/samurai/ingestion_{kUsers}_{timestamp}.csv`
+
+#### `samurai serve`
+
 ```bash
-./bin/samurai --mode serve --datadir /data/local/samurai --port 50051
+samurai serve --db-dir /data/local/tmp/samurai --port 50051
 ```
 
-Generate a proof:
-```bash
-./bin/samurai --mode proof --queryAccount 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2 --queryStartBlock 18908915 --queryEndBlock 18909914
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--db-dir` | | Database directory |
+| `--host` | `0.0.0.0` | gRPC server host |
+| `--port` | `50051` | gRPC server port |
+
+---
+
+### `merkle`
+
+Subcommand-based CLI for the baseline Merkle Patricia Trie system.
+
+```
+merkle <command> [flags]
 ```
 
-Run a commit benchmark with DB metrics:
+| Command | Description |
+|---------|-------------|
+| `ingest` | Ingest block data into the MPT |
+| `bench-ingest` | Duration-based ingestion benchmark |
+| `getproof` | Generate an eth_getProof-style account proof |
+| `verifyproof` | Verify an account proof offline from JSON |
+| `serve` | Start the gRPC range proof server |
+
+#### `merkle ingest`
+
 ```bash
-./bin/samurai --bench --benchDuration 300 --benchOutputDir ./benchmark_output --benchDBMetrics
+merkle ingest --db-dir /data/local/merkle --blocks-dir data/blocks --n 100000
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--db-dir` | *(required)* | Path to state database directory |
+| `--blocks-dir` | `data/blocks` | Path to blocks data directory |
+| `--n` | `1000` | Number of blocks to ingest |
+| `--fresh` | `false` | Delete existing DB and start from scratch |
+
+#### `merkle bench-ingest`
+
+```bash
+merkle bench-ingest --db-dir /data/local/tmp/bench-merkle --duration 5m --k-users 1000 --fresh
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--db-dir` | *(required)* | Path to state database directory |
+| `--blocks-dir` | `data/blocks` | Path to blocks data directory |
+| `--duration` | `5m` | How long to run the benchmark |
+| `--k-users` | `0` | Top-K hot accounts (0 = all, no filtering) |
+| `--accounts-list` | `account_stats_all.csv` | CSV with accounts sorted by update count desc |
+| `--fresh` | `false` | Delete existing DB and start from scratch |
+
+Output: `benchmark_output/merkle/ingestion_{kUsers}_{timestamp}.csv`
+
+#### `merkle getproof`
+
+```bash
+merkle getproof --db-dir /data/local/merkle --block 18908900 --address 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--db-dir` | *(required)* | Path to state database directory |
+| `--db-backend` | `pebble` | Database backend: pebble or leveldb |
+| `--block` | *(required)* | Block number to query |
+| `--address` | *(required)* | Account address (0x hex) |
+| `--verify` | `true` | Verify proof after generation |
+| `--cold` | `false` | Reopen DB to simulate cold reads |
+
+#### `merkle serve`
+
+```bash
+merkle serve --db-dir /data/local/merkle --port 50051
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--db-dir` | *(required)* | Path to state database directory |
+| `--host` | `0.0.0.0` | gRPC server host |
+| `--port` | `50051` | gRPC server port |
+
+---
+
+### `verkle`
+
+Subcommand-based CLI for the baseline Verkle tree system.
+
+```
+verkle <command> [flags]
+```
+
+| Command | Description |
+|---------|-------------|
+| `ingest` | Ingest block data into the Verkle tree |
+| `bench-ingest` | Duration-based ingestion benchmark |
+| `getproof` | Generate a Verkle proof for an account |
+| `verifyproof` | Verify a Verkle proof |
+| `serve` | Start the gRPC range proof server |
+
+#### `verkle ingest`
+
+```bash
+verkle ingest --db-dir /data/local/verkle --blocks-dir data/blocks --n 100000
+```
+
+#### `verkle bench-ingest`
+
+```bash
+verkle bench-ingest --db-dir /data/local/tmp/bench-verkle --duration 5m --k-users 1000
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--db-dir` | `/data/local/tmp/bench-verkle` | Path to persistent DB directory |
+| `--blocks-dir` | `data/blocks` | Path to block dataset directory |
+| `--db-backend` | `pebble` | DB backend: pebble or leveldb |
+| `--flush-every` | `1000` | Reload tree every N blocks for memory management |
+| `--duration` | `5m` | Benchmark duration |
+| `--k-users` | `0` | Top-K hot accounts (0 = all, no filtering) |
+| `--accounts-list` | `account_stats_all.csv` | CSV with accounts sorted by update count desc |
+
+Output: `benchmark_output/verkle/ingestion_{kUsers}_{timestamp}.csv`
+
+#### `verkle serve`
+
+```bash
+verkle serve --db-dir /data/local/verkle --port 50053
 ```
 
 ---
 
-### `proofc`
+### Proof Clients (`proofc`, `merkle-proofc`, `verkle-proofc`)
 
-gRPC proof client. Supports single proof queries and three benchmark modes: **range**, **concurrency**, and **stress**.
+gRPC proof clients for querying range proofs from the corresponding servers. Support single queries and benchmark modes (range, concurrency, stress).
 
 ```bash
-./bin/proofc [flags]
-```
-
-#### Common Flags
-
-| Flag | Type | Default | Description |
-|------|------|---------|-------------|
-| `--server` | string | `"localhost:50051"` | gRPC server address |
-| `--account` | string | `"0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"` | Account address to query |
-| `--start-block` | uint64 | `20` | Start block (relative to data start) |
-| `--end-block` | uint64 | `119` | End block (relative to data start) |
-| `--params-dir` | string | `"./data/params"` | Path to cryptographic parameters |
-| `--dump-json` | string | `""` | Dump response to a JSON file |
-| `--dump-bin` | string | `""` | Dump response as binary protobuf |
-
-#### Benchmark Flags
-
-| Flag | Type | Default | Description |
-|------|------|---------|-------------|
-| `--benchmark` | bool | `false` | Enable benchmark mode |
-| `--mode` | string | `"range"` | Benchmark mode: `range`, `concurrency`, `stress` |
-| `--output-dir` | string | `"./benchmark_output"` | Benchmark output directory |
-| `--accounts-file` | string | `"cmd/proofc/top_1k_accounts_all_blocks.csv"` | CSV of accounts for benchmarks |
-| `--verify` | bool | `false` | Include verification time (range mode) |
-| `--range-size` | uint64 | `50000` | Block range size (range mode) |
-| `--levels` | string | `"1,5,10,20,50,100"` | Comma-separated concurrency levels (concurrency mode) |
-| `--stress-duration` | duration | `5m` | Duration of stress test |
-| `--stress-clients` | int | `10` | Number of concurrent clients (stress mode) |
-
-#### Examples
-
-Single proof query with verification:
-```bash
-./bin/proofc --server localhost:50051 --account 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2 --start-block 20 --end-block 119
-```
-
-Range benchmark:
-```bash
-./bin/proofc --benchmark --mode range --range-size 50000 --output-dir ./benchmark_output
-```
-
-Range benchmark with verification:
-```bash
-./bin/proofc --benchmark --mode range --range-size 50000 --verify --params-dir ./data/params
-```
-
-Concurrency benchmark:
-```bash
-./bin/proofc --benchmark --mode concurrency --levels 1,5,10,50,100 --accounts-file ./cmd/proofc/top_1k_accounts_200k_blocks.csv
-```
-
-Stress test:
-```bash
-./bin/proofc --benchmark --mode stress --stress-duration 5m --stress-clients 50
+proofc --server localhost:50051 --account 0x... --start-block 20 --end-block 119
+merkle-proofc --server localhost:50051 --account 0x... --start-block 20 --end-block 119
+verkle-proofc --server localhost:50053 --account 0x... --start-block 20 --end-block 119
 ```
 
 ---
+
+## Benchmark Output
+
+All benchmark output is written under `benchmark_output/<protocol>/`:
+
+| Type | File pattern | Example |
+|------|-------------|---------|
+| Ingestion | `ingestion_{kUsers}_{timestamp}.csv` | `benchmark_output/samurai/ingestion_1000_20260321_143022.csv` |
+| Proof | `proof_range{rangeSize}_{timestamp}.txt` | `benchmark_output/merkle/proof_range50000_20260321_150000.txt` |
+
+### Ingestion CSV columns
+
+All three protocols share a common set of columns:
+
+| Column | Description |
+|--------|-------------|
+| `block_num` | Block number |
+| `num_raw_updates` | Total account updates in the block |
+| `num_selected_updates` | Updates after hot-account filtering (equals raw if no filter) |
+| `queued_at_ns` | Timestamp when block was queued (ns since epoch) |
+| `start_at_ns` | Timestamp when block processing started |
+| `completed_at_ns` | Timestamp when block processing completed |
+
+Samurai adds one extra column for its parallel pipeline:
+
+| Column | Description |
+|--------|-------------|
+| `wait_commitments_ns` | Time spent waiting for KZG commitment workers |
+
+---
+
+## Auxiliary Tools
+
+Located under `cmd/tools/` and built with `go run`.
 
 ### `makedataset`
 
@@ -149,102 +265,28 @@ Extracts modified-account data from an Erigon node into a flat dataset.
 ./bin/makedataset [flags]
 ```
 
-#### Flags
-
-| Flag | Type | Default | Description |
-|------|------|---------|-------------|
-| `--startBlock` | int | `20600000` | Starting block number |
-| `--endBlock` | int | `21600000` | Ending block number |
-| `--dataDir` | string | `"/data/local/dataset/modified_accounts"` | Output dataset directory |
-| `--testMode` | bool | `false` | Run in test/sanity-check mode |
-
----
-
-## Auxiliary Tools
-
-Located under `cmd/tools/` and built with `go run`.
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--startBlock` | `20600000` | Starting block number |
+| `--endBlock` | `21600000` | Ending block number |
+| `--dataDir` | `/data/local/dataset/modified_accounts` | Output dataset directory |
+| `--testMode` | `false` | Run in test/sanity-check mode |
 
 ### `count_account_updates`
 
 Scans a block dataset and produces a CSV of per-account update counts.
 
 ```bash
-go run ./cmd/tools/count_account_updates [flags]
+go run ./cmd/tools/count_account_updates --n 10000 --dataset ./data/blocks --o account_stats.csv
 ```
-
-| Flag | Type | Default | Description |
-|------|------|---------|-------------|
-| `--n` | int | `10000` | Number of blocks to process |
-| `--start` | int | `18908895` | Starting block number |
-| `--o` | string | `"account_stats.csv"` | Output CSV path |
-| `--dataset` | string | `"./data/blocks"` | Blocks dataset directory |
 
 ### `debug_version`
 
 Inspects account version entries across database shards.
 
 ```bash
-go run ./cmd/tools/debug_version [flags]
+go run ./cmd/tools/debug_version --datadir /data/local/samurai/db/ --account 0x... --shards 32
 ```
-
-| Flag | Type | Default | Description |
-|------|------|---------|-------------|
-| `--datadir` | string | `"/data/local/samurai/db/"` | Data directory containing shard DBs |
-| `--account` | string | *(required)* | Account address (hex) |
-| `--shards` | int | `32` | Number of database shards |
-
-### `stress`
-
-Stress-tests dataset reads.
-
-```bash
-go run ./cmd/stress [flags]
-```
-
-| Flag | Type | Default | Description |
-|------|------|---------|-------------|
-| `--n` | int | `100` | Number of blocks to fetch |
-| `--dataDir` | string | `"/data/local/dataset/modified_accounts"` | Dataset path |
-
-### `mptproofs`
-
-Fetches, extracts, and verifies Merkle Patricia Trie proofs from an Alchemy/RPC endpoint.
-
-```bash
-go run ./cmd/tools/mptproofs [flags]
-```
-
-#### Main Flag
-
-| Flag | Type | Default | Description |
-|------|------|---------|-------------|
-| `--mode` | string | `"extract_proofs"` | Mode: `fetch_proofs`, `extract_proofs`, `verify_proofs` |
-
-#### `fetch_proofs` Mode
-
-| Flag | Type | Default | Description |
-|------|------|---------|-------------|
-| `--alchemy` | string | *(Alchemy URL)* | Alchemy HTTPS JSON-RPC endpoint |
-| `--addr` | string | `"0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"` | Account address |
-| `--start` | uint64 | `18908895` | Start block (inclusive) |
-| `--end` | uint64 | `19108895` | End block (inclusive) |
-| `--out` | string | `"/mydata/samurai/exp1/"` | Output directory |
-| `--rps` | int | `20` | Requests per second (max 25 for Alchemy) |
-
-#### `verify_proofs` Mode
-
-| Flag | Type | Default | Description |
-|------|------|---------|-------------|
-| `--account` | string | `"0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"` | Account address |
-| `--start` | uint64 | `18908895` | Start block (inclusive) |
-| `--end` | uint64 | `19108894` | End block (inclusive) |
-| `--dir` | string | `"/mydata/samurai/exp1/proofs"` | Directory containing `.proof` files |
-| `--rpc` | string | `"/mydata/erigon/mainnet/erigon.ipc"` | RPC endpoint (HTTP, WebSocket, or IPC) |
-| `--concurrency` | int | `1` | Number of concurrent verifications |
-
-#### `extract_proofs` Mode
-
-No CLI flags. Uses hardcoded paths in `extract_proofs.go`.
 
 ---
 
@@ -252,18 +294,19 @@ No CLI flags. Uses hardcoded paths in `extract_proofs.go`.
 
 | Target | Description |
 |--------|-------------|
-| `make build` | Build `samurai`, `proofc`, and `makedataset` into `bin/` |
+| `make build` | Build all binaries into `bin/` |
+| `make build-samurai` | Build `samurai`, `proofc`, `makedataset` |
+| `make build-merkle` | Build `merkle`, `merkle-proofc` |
+| `make build-verkle` | Build `verkle`, `verkle-proofc` |
 | `make clean` | Remove build artifacts |
-| `make commit` | Run samurai commit (1 block, background) |
-| `make commit-clean` | Run samurai commit with `--clean` (full dataset, background) |
-| `make serve` | Start the gRPC proof server |
-| `make run-bench` | Run a commit benchmark (300s, with DB metrics) |
-| `make bench-range` | Run a proof-server range benchmark |
-| `make bench-range-verify` | Run a proof-server range benchmark with verification |
-| `make bench-concurrency` | Run a proof-server concurrency benchmark |
-| `make bench-stress` | Run a proof-server stress test (5m, 50 clients) |
-| `make bench-proof-all` | Run range + concurrency benchmarks |
-| `make plot-graphs` | Plot benchmark results (requires Python + matplotlib) |
+| `make bench-ingest` | Run ingestion benchmarks for all three protocols |
+| `make bench-ingest-samurai` | Run samurai ingestion benchmark (5m) |
+| `make bench-ingest-merkle` | Run merkle ingestion benchmark (5m) |
+| `make bench-ingest-verkle` | Run verkle ingestion benchmark (5m) |
+| `make bench-proof` | Run proof benchmarks for all three protocols |
+| `make bench-proof-samurai` | Run samurai proof range benchmark |
+| `make bench-proof-merkle` | Run merkle proof range benchmark |
+| `make bench-proof-verkle` | Run verkle proof range benchmark |
 
 ---
 
@@ -279,6 +322,6 @@ protoc --go_out=. --go_opt=paths=source_relative internal/tree/pb/segmenttree.pr
 go install github.com/google/pprof@latest
 sudo apt-get install -y graphviz
 
-./bin/samurai --p --profilePath ./profiles
+./bin/samurai ingest --cpuprofile ./profiles/cpu.prof --db-dir /data/local/tmp/samurai
 go tool pprof -http=:8080 ./bin/samurai ./profiles/cpu.prof
 ```
