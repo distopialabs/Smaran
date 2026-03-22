@@ -2,7 +2,6 @@ package proof
 
 import (
 	"fmt"
-	"slices"
 	"strconv"
 	"time"
 
@@ -15,93 +14,142 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 )
 
-// rebuilds the whole segment tree
-// uses stored commitments to fill the commitHash part of the batch trees
-// in this process, stores only the involved batch trees and returns them
-func RebuildSegmentTreeForProof(account common.Address, lxRequiredBatchIdxs map[uint64][]uint64, startingVersion uint64, endingVersion uint64, db *db.SamuraiStore, precomputedData *config.PrecomputedData) (map[string]tree.BatchTree, []*tree.HistoricalBalance) {
+// RebuildSegmentTreeForProof builds only the required batch trees from stored data.
+//
+// Layer 1: fetches historical balances (leaves) from DB for each required batch,
+//
+//	inserts them as leaves, and computes intermediary nodes.
+//
+// Layer 2+: fetches stored batch roots from DB as leaf values,
+//
+//	computes intermediary nodes, and fills commitment hashes from stored commitments.
+func RebuildSegmentTreeForProof(account common.Address, lxRequiredBatchIdxs map[uint64][]uint64, startingVersion uint64, endingVersion uint64, sdb *db.SamuraiStore, precomputedData *config.PrecomputedData) (map[string]tree.BatchTree, []*tree.HistoricalBalance) {
 
-	cbInfo, err := tree.GetCurrentBalanceInfo(account, db.StateDB)
+	cbInfo, err := tree.GetCurrentBalanceInfo(account, sdb.StateDB)
 	if err != nil {
 		panic(err)
 	}
-	accountInfo := tree.NewAccountInfo(account, precomputedData)
-
-	// # current balance info
-	// TODO: do we need this value?
-	// accountInfo.CurrentBalanceInfo = cbInfo
-
-	// # batch tree data
-	// initialize empty tree
-	// var tree = new(tree.LXBatchTree)
-	// for i := range tree.MaxLayer {
-	// 	tree[i] = tree.BatchTree{}
-	// }
-	// accountInfo.CurrentLXBatchTree = new(tree.LXBatchTree)
-	// add all historical balance info as leaf nodes
 
 	requiredTreeBatchesMap := make(map[string]tree.BatchTree)
-	requiredHBInfos := make([]*tree.HistoricalBalance, 0)
 
 	start := time.Now()
 
-	dbFetchTime := time.Duration(0)
-	leadAddTime := time.Duration(0)
-	extraTime := time.Duration(0)
-
-	for version := uint64(0); version < cbInfo.Version; version++ {
-		fetchStart := time.Now()
-		hbInfo := tree.GetHistoricalBalance(account, version, db.HistoryDB)
-		dbFetchTime += time.Since(fetchStart)
-
-		leafAddStart := time.Now()
-		AddLeafNode(accountInfo, hbInfo.Version, hbInfo.Hash())
-		leadAddTime += time.Since(leafAddStart)
-
-		extraStart := time.Now()
-
-		// check if this historical balance info is required
-		if hbInfo.Version >= startingVersion && hbInfo.Version <= endingVersion {
-			requiredHBInfos = append(requiredHBInfos, hbInfo)
-		}
-
-		// check if this batch is required; if yes, add to the requiredTreeBatchesMap
-		nextVersion := version + 1
-		for layer := uint64(1); layer <= MaxLayer; layer++ {
-			batchSize := L1BatchSize * utils.PowUint64(L2BatchSize, layer-1)
-			currentBatchIdx := version / batchSize
-			nextBatchIdx := nextVersion / batchSize
-			// copy only at the last version of this batch, or if this is the last version of the loop
-			isLastInBatch := nextVersion >= cbInfo.Version || (nextBatchIdx != currentBatchIdx)
-			if isLastInBatch && slices.Contains(lxRequiredBatchIdxs[layer], currentBatchIdx) {
-				key := fmt.Sprintf("%d:%d", layer, currentBatchIdx)
-				requiredTreeBatchesMap[key] = accountInfo.CurrentLXBatchTree[layer-1]
-			}
-
-		}
-
-		extraTime += time.Since(extraStart)
+	// --- Collect ALL historical balances in [startingVersion, endingVersion] for the verify path ---
+	// This must be independent of which L1 batches are required for tree building,
+	// because some L1 batches are fully covered by upper-layer commitments and won't
+	// be in lxRequiredBatchIdxs[1], but the verify path still needs their balance data.
+	requiredHBInfos := make([]*tree.HistoricalBalance, 0, endingVersion-startingVersion+1)
+	for version := startingVersion; version <= endingVersion; version++ {
+		hbInfo := tree.GetHistoricalBalance(account, version, sdb.HistoryDB)
+		requiredHBInfos = append(requiredHBInfos, hbInfo)
 	}
 
-	fmt.Printf("Time taken to add leaf nodes to segment tree: %v with %v db fetch time and %v leaf add time and %v extra time\n", time.Since(start), dbFetchTime, leadAddTime, extraTime)
-
+	fmt.Printf("Time taken to fetch required HB infos: %v\n", time.Since(start))
 	start = time.Now()
 
-	// fill in the commitHash part of the batch trees with stored commitments
+	// --- Layer 1: build each required L1 batch tree from historical balances ---
+	for _, batchIdx := range lxRequiredBatchIdxs[1] {
+		var batchTree tree.BatchTree
+
+		versionStart := batchIdx * L1BatchSize
+		versionEnd := (batchIdx+1)*L1BatchSize - 1
+		// Clamp to the latest historical version
+		if versionEnd >= cbInfo.Version {
+			versionEnd = cbInfo.Version - 1
+		}
+
+		for version := versionStart; version <= versionEnd; version++ {
+			hbInfo := tree.GetHistoricalBalance(account, version, sdb.HistoryDB)
+
+			// Insert leaf at the correct offset position
+			leafIdx := L1BatchSize - 1 + int(version%L1BatchSize)
+			hbHash := hbInfo.Hash()
+			updateBatchTree(&batchTree, uint64(leafIdx), hbHash)
+		}
+
+		key := fmt.Sprintf("1:%d", batchIdx)
+		requiredTreeBatchesMap[key] = batchTree
+	}
+
+	fmt.Printf("Time taken to build L1 batch trees: %v\n", time.Since(start))
+
+	// --- Layer 2+: build each required upper-layer batch tree from stored roots ---
+	start = time.Now()
 	for layer := uint64(2); layer <= MaxLayer; layer++ {
+		// Latest batch index at the lower layer
+		latestLowerBatchIdx := (cbInfo.Version - 1) / (L1BatchSize * utils.PowUint64(L2BatchSize, layer-2))
+
 		for _, batchIdx := range lxRequiredBatchIdxs[layer] {
+			var batchTree tree.BatchTree
+
+			// Determine range of lower-layer batches covered by this upper-layer batch
+			lowerBatchStart := batchIdx * L2BatchSize
+			lowerBatchEnd := lowerBatchStart + L2BatchSize - 1
+			if lowerBatchEnd > latestLowerBatchIdx {
+				lowerBatchEnd = latestLowerBatchIdx
+			}
+
+			// Fill leaf positions with stored batch roots from the lower layer
+			for lowerBatchIdx := lowerBatchStart; lowerBatchIdx <= lowerBatchEnd; lowerBatchIdx++ {
+				// Leaf offset in the segment tree for this lower-layer batch
+				leafIdx := L2BatchSize - 1 + int(lowerBatchIdx%L2BatchSize)
+				root := tree.GetBatchRoot(account, layer-1, lowerBatchIdx, sdb.StateDB)
+				updateBatchTree(&batchTree, uint64(leafIdx), root)
+			}
+
+			// Fill commitment hash positions
+			InsertCommitmentHashes(layer, batchIdx, &batchTree, account, cbInfo.Version, sdb)
+
 			key := fmt.Sprintf("%d:%d", layer, batchIdx)
-			treeBatch := requiredTreeBatchesMap[key]
-			// fmt.Println("inserting commitment hashes for layer", layer, "batchIdx", batchIdx)
-			InsertCommitmentHashes(layer, batchIdx, &treeBatch, account, cbInfo.Version, db)
-			requiredTreeBatchesMap[key] = treeBatch
+			requiredTreeBatchesMap[key] = batchTree
 		}
 	}
 
-	fmt.Println("Time taken to insert commitment hashes into segment tree: ", time.Since(start))
+	fmt.Printf("Time taken to build upper layer batch trees: %v\n", time.Since(start))
 
 	return requiredTreeBatchesMap, requiredHBInfos
 }
 
+// updateBatchTree inserts a value at the given leaf index and propagates parent hashes upward.
+func updateBatchTree(batchTree *tree.BatchTree, idx uint64, val common.Hash) {
+	if (val == common.Hash{}) {
+		return
+	}
+	batchTree[idx] = val
+	for idx > 0 {
+		parentIdx := tree.GetParent(idx)
+		lChild := batchTree[2*parentIdx+1]
+		rChild := batchTree[2*parentIdx+2]
+		if (lChild == common.Hash{} || rChild == common.Hash{}) {
+			break
+		}
+		batchTree[parentIdx] = hash.BytesToHash(lChild.Bytes(), rChild.Bytes())
+		idx = parentIdx
+	}
+}
+
+func InsertCommitmentHashes(layer uint64, batchIdx uint64, batchTree *tree.BatchTree, account common.Address, latestVersion uint64, sdb *db.SamuraiStore) {
+	if layer <= 1 || layer > MaxLayer {
+		panic("layer" + fmt.Sprintf("%d", layer) + " is invalid")
+	}
+	latestLxBatchIdx := func(layer uint64) uint64 {
+		if layer == 0 || layer > MaxLayer {
+			panic("layer" + fmt.Sprintf("%d", layer) + " is not supported")
+		}
+		return latestVersion / (L1BatchSize * utils.PowUint64(L2BatchSize, layer-1))
+	}
+
+	lxm1BatchIdxStart := batchIdx * L2BatchSize
+	lxm1BatchIdxEnd := min(lxm1BatchIdxStart+L2BatchSize-1, latestLxBatchIdx(layer-1))
+	for bIdx := lxm1BatchIdxStart; bIdx <= lxm1BatchIdxEnd; bIdx++ {
+		commitment := tree.GetBatchCommitment(account, layer-1, bIdx, sdb.StateDB)
+		commitmentHash := hash.CommitmentToHash(commitment)
+		treeIdx := bIdx - lxm1BatchIdxStart + (2 * L2BatchSize) - 1
+		batchTree[treeIdx] = commitmentHash
+	}
+}
+
+// AddLeafNode adds a leaf to the multi-layer tree (used by the verify path).
 func AddLeafNode(accountInfo *tree.AccountInfo, leafNodeIdx uint64, leafNodeHash common.Hash) {
 
 	// find which index to update for each layer
@@ -129,38 +177,17 @@ func AddLeafNode(accountInfo *tree.AccountInfo, leafNodeIdx uint64, leafNodeHash
 	for layer := 1; layer <= MaxLayer; layer++ {
 		if (leafNodeIdx % (L1BatchSize * utils.PowUint64(L2BatchSize, uint64(layer)-1))) == 0 {
 			accountInfo.CurrentLXBatchTree[layer-1] = tree.BatchTree{}
-			// accountInfo.CurrentLXBatchCommitment[layer-1] = gnark_kzg.Digest{}
 		}
 	}
-	// TODO: uncomment this and replace the below code with this.
 	lXm1RootHash := leafNodeHash
 	for layer := uint64(1); layer <= MaxLayer; layer++ {
 		UpdateLXTree(accountInfo, lxBatchLeafNodeOffsetIdx(layer), lXm1RootHash, layer)
 		lxRootHash := accountInfo.CurrentLXBatchTree[layer-1][0]
 		lXm1RootHash = lxRootHash
 	}
-
-	// // updating layer 1 tree of current batch and calculate its commitment
-	// UpdateLXTree(accountInfo, L1BatchSize-1+lxModIdx(1), leafNodeHash, 1)
-	// l1RootHash := accountInfo.CurrentBatchTree[0][0]
-
-	// // updating layer 2
-
-	// UpdateLXTree(accountInfo, L2BatchSize-1+lxModIdx(2), l1RootHash, 2)
-	// l2RootHash := accountInfo.CurrentBatchTree[1][0]
-
-	// // updating layer 3
-
-	// UpdateLXTree(accountInfo, L2BatchSize-1+lxModIdx(3), l2RootHash, 3)
-	// l3RootHash := accountInfo.CurrentBatchTree[2][0]
-
-	// // updating layer 4
-	// UpdateLXTree(accountInfo, L2BatchSize-1+lxModIdx(4), l3RootHash, 4)
-	// l4RootHash := accountInfo.CurrentBatchTree[3][0]
-	// _ = l4RootHash
-
 }
 
+// UpdateLXTree updates a single layer of the batch tree (used by the verify path).
 func UpdateLXTree(accountInfo *tree.AccountInfo, idx uint64, val common.Hash, layer uint64) {
 
 	batchTree := &accountInfo.CurrentLXBatchTree[layer-1]
@@ -176,33 +203,9 @@ func UpdateLXTree(accountInfo *tree.AccountInfo, idx uint64, val common.Hash, la
 			if (lChild == common.Hash{} || rChild == common.Hash{}) {
 				break
 			}
-			// batchTree[parentIdx] = hash.BytesToPoseidonHash(lChild.Bytes(), rChild.Bytes())
 			batchTree[parentIdx] = hash.BytesToHash(lChild.Bytes(), rChild.Bytes())
 
 			idx = parentIdx
 		}
-	}
-}
-
-func InsertCommitmentHashes(layer uint64, batchIdx uint64, batchTree *tree.BatchTree, account common.Address, latestVersion uint64, sdb *db.SamuraiStore) {
-	if layer <= 1 || layer > MaxLayer {
-		panic("layer" + strconv.Itoa(int(layer)) + " is invalid")
-	}
-	latestLxBatchIdx := func(layer uint64) uint64 {
-		if layer == 0 || layer > MaxLayer {
-			panic("layer" + strconv.Itoa(int(layer)) + " is not supported")
-		}
-		return latestVersion / (L1BatchSize * utils.PowUint64(L2BatchSize, layer-1))
-	}
-
-	lxm1BatchIdxStart := batchIdx * L2BatchSize
-	lxm1BatchIdxEnd := min(lxm1BatchIdxStart+L2BatchSize-1, latestLxBatchIdx(layer-1))
-	for bIdx := lxm1BatchIdxStart; bIdx <= lxm1BatchIdxEnd; bIdx++ {
-		// fmt.Println("fetching commitment for layer", layer-1, "batchIdx", bIdx, "latestLxBatchIdx", latestLxBatchIdx(layer-1))
-		commitment := tree.GetBatchCommitment(account, layer-1, bIdx, sdb.StateDB)
-		// commitmentHash := hash.CommitmentToHash(commitment)
-		commitmentHash := hash.CommitmentToHash(commitment)
-		treeIdx := bIdx - lxm1BatchIdxStart + (2 * L2BatchSize) - 1
-		batchTree[treeIdx] = commitmentHash
 	}
 }
