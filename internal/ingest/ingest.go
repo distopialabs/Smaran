@@ -10,10 +10,10 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 
 	"github.com/nepal80m/samurai/internal/dataset"
-	"github.com/nepal80m/samurai/internal/storage"
-	"github.com/nepal80m/samurai/internal/utils"
 	"github.com/nepal80m/samurai/internal/merkle/meta"
 	st "github.com/nepal80m/samurai/internal/merkle/state"
+	"github.com/nepal80m/samurai/internal/storage"
+	"github.com/nepal80m/samurai/internal/utils"
 )
 
 type UpdateTask struct {
@@ -40,7 +40,7 @@ type mptUpdateCommitmentInfo struct {
 // If commitCh is nil, commitment results are discarded (samurai-only mode).
 func startCommitWorkers(cfg Config, queues []*utils.BoundedQueue[UpdateTask], commitCh chan<- mptUpdateCommitmentInfo, wg *sync.WaitGroup) {
 	// Capture update-level metrics collector (may be nil when not benchmarking).
-	var updateMetrics = cfg.Bench != nil && cfg.Bench.UpdateMetrics != nil
+	updateMetrics := cfg.Bench != nil && cfg.Bench.UpdateMetrics != nil
 
 	for i := 0; i < cfg.Workers.CommitWorkerCount; i++ {
 		i := i
@@ -202,7 +202,7 @@ func runMPTWorker(cfg Config, blockInfoCh <-chan mptBlockInfo, commitCh <-chan m
 // per-block commitment completions, and writes CSV timing rows — but performs
 // no trie operations.
 func runMetricsCollector(cfg Config, blockInfoCh <-chan mptBlockInfo, commitCh <-chan mptUpdateCommitmentInfo) {
-	bench := cfg.Bench // guaranteed non-nil in bench mode
+	bench := cfg.Bench                  // guaranteed non-nil in bench mode
 	buffered := make(map[uint64]uint64) // blockNumber -> count of pre-arrived commitments
 
 	const logInterval = 1000

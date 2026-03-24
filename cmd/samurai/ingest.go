@@ -115,7 +115,7 @@ func IngestCmd() *cli.Command {
 				},
 				Workers: ingest.WorkersConfig{
 					CommitWorkerCount:       shardsNum,
-					CommitWorkerQueueSize:   1_000_000,
+					CommitWorkerQueueSize:   1_000, // 1_000_000,
 					CommitWorkerChannelSize: 5_000,
 				},
 				// Database: ingest.DatabaseConfig{
@@ -170,7 +170,6 @@ func SetupSamuraiStores(dbDir string) ([]*db.SamuraiStore, error) {
 		return nil, fmt.Errorf("failed to setup databases: %v", err)
 	}
 	return shardedSamuraiStores, nil
-
 }
 
 func OpenMPTStore(dbDir string) (*st.MPTStateStore, error) {
@@ -180,5 +179,4 @@ func OpenMPTStore(dbDir string) (*st.MPTStateStore, error) {
 		return nil, fmt.Errorf("failed to open MPT database: %v", err)
 	}
 	return mptStore, nil
-
 }
