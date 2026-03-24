@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
+	verkle "github.com/ethereum/go-verkle"
 	"github.com/nepal80m/samurai/internal/verkle/proof"
 	"github.com/nepal80m/samurai/internal/verkle/store"
-	verkle "github.com/ethereum/go-verkle"
 	"github.com/urfave/cli/v2"
 )
 
@@ -19,7 +19,7 @@ func getproofCmd() *cli.Command {
 		Name:  "getproof",
 		Usage: "Generate a Verkle balance proof for an address at a block",
 		Flags: []cli.Flag{
-			&cli.StringFlag{Name: "db-dir", Value: "", Usage: "Path to persistent DB directory (required)"},
+			&cli.StringFlag{Name: "db-dir", Required: true, Usage: "Path to persistent DB directory (required)"},
 			&cli.Uint64Flag{Name: "block", Value: 0, Usage: "Block number (required)"},
 			&cli.StringFlag{Name: "address", Value: "", Usage: "Address (0x-prefixed hex, required)"},
 			&cli.BoolFlag{Name: "verify", Value: false, Usage: "Also verify the proof"},

@@ -55,7 +55,7 @@ func ingestCmd() *cli.Command {
 		Name:  "ingest",
 		Usage: "Ingest block data into the Merkle Patricia Trie",
 		Flags: []cli.Flag{
-			&cli.StringFlag{Name: "db-dir", Required: true, Usage: "Path to state database directory"},
+			&cli.StringFlag{Name: "db-dir", Value: "/data/local/tmp/merkle", Usage: "Path to state database directory"},
 			&cli.StringFlag{Name: "blocks-dir", Value: "data/blocks", Usage: "Path to blocks data directory"},
 			&cli.Uint64Flag{Name: "n", Value: 1000, Usage: "Number of blocks to ingest"},
 			&cli.BoolFlag{Name: "fresh", Value: false, Usage: "Delete existing DB and start from scratch"},
@@ -105,11 +105,13 @@ func benchIngestCmd() *cli.Command {
 			&cli.DurationFlag{Name: "duration", Value: 5 * time.Minute, Usage: "How long to run the benchmark"},
 			&cli.IntFlag{Name: "k-users", Value: 0, Usage: "Top-K hot accounts to include (0 = all, no filtering)"},
 			&cli.StringFlag{Name: "accounts-list", Value: "account_stats_all.csv", Usage: "CSV with hot accounts sorted by update count descending"},
-			&cli.BoolFlag{Name: "fresh", Value: false, Usage: "Delete existing DB and start from scratch"},
+			&cli.BoolFlag{Name: "fresh", Value: true, Usage: "Delete existing DB and start from scratch"},
+			&cli.StringFlag{Name: "output-dir", Value: benchutil.DefaultOutputDir, Usage: "Root directory for benchmark output"},
 		},
 		Action: func(c *cli.Context) error {
 			dbDir := c.String("db-dir")
 			kUsers := c.Int("k-users")
+			outputDir := c.String("output-dir")
 
 			if c.Bool("fresh") {
 				if _, err := os.Stat(dbDir); err == nil {
@@ -120,7 +122,11 @@ func benchIngestCmd() *cli.Command {
 				}
 			}
 
-			csvPath, err := benchutil.IngestionOutputPath("merkle", kUsers)
+			csvPath, err := benchutil.IngestionOutputPath(outputDir, "merkle", kUsers)
+			if err != nil {
+				return err
+			}
+			updateMetricsPath, err := benchutil.UpdateMetricsOutputPath(outputDir, "merkle", kUsers)
 			if err != nil {
 				return err
 			}
@@ -132,13 +138,14 @@ func benchIngestCmd() *cli.Command {
 			defer store.Close()
 
 			cfg := ingest.BenchConfig{
-				BlocksDir:    c.String("blocks-dir"),
-				Store:        store,
-				Start:        dataset.FIRST_BLOCK,
-				Duration:     c.Duration("duration"),
-				KUsers:       kUsers,
-				AccountsList: c.String("accounts-list"),
-				OutCSV:       csvPath,
+				BlocksDir:         c.String("blocks-dir"),
+				Store:             store,
+				Start:             dataset.FIRST_BLOCK,
+				Duration:          c.Duration("duration"),
+				KUsers:            kUsers,
+				AccountsList:      c.String("accounts-list"),
+				OutCSV:            csvPath,
+				UpdateMetricsPath: updateMetricsPath,
 			}
 			return ingest.BenchRun(cfg)
 		},

@@ -43,9 +43,10 @@ type Config struct {
 // BenchContext carries all benchmark-specific runtime state. Stored as a
 // pointer in Config so that a nil check gates all instrumentation.
 type BenchContext struct {
-	Filter   *benchutil.HotAccountFilter
-	CSV      *benchutil.BenchCSVWriter
-	Deadline time.Time
+	Filter        *benchutil.HotAccountFilter
+	CSV           *benchutil.BenchCSVWriter
+	Deadline      time.Time
+	UpdateMetrics *benchutil.UpdateMetricsCollector
 }
 
 // BlocksConfig specifies the block range to process.

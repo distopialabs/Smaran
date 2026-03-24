@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"os"
 
 	"github.com/nepal80m/samurai/internal/dataset"
@@ -16,16 +17,26 @@ func ingestCmd() *cli.Command {
 		Name:  "ingest",
 		Usage: "Ingest block data into a Verkle tree",
 		Flags: []cli.Flag{
-			&cli.StringFlag{Name: "db-dir", Value: "", Usage: "Path to persistent DB directory (required)"},
+			&cli.StringFlag{Name: "db-dir", Value: "/data/local/tmp/verkle", Usage: "Path to persistent DB directory (required)"},
 			&cli.StringFlag{Name: "blocks-dir", Value: "data/blocks", Usage: "Path to dataset block segments"},
 			&cli.Uint64Flag{Name: "n", Value: 1000, Usage: "Number of blocks to ingest"},
 			&cli.StringFlag{Name: "db-backend", Value: "pebble", Usage: "DB backend: pebble or leveldb"},
 			&cli.IntFlag{Name: "flush-every", Value: 1000, Usage: "Reload tree from DB every N blocks for memory management"},
+			&cli.BoolFlag{Name: "fresh", Value: false, Usage: "Delete existing DB and start from scratch"},
 		},
 		Action: func(c *cli.Context) error {
 			dbDir := c.String("db-dir")
 			if dbDir == "" {
 				return fmt.Errorf("--db-dir is required")
+			}
+
+			if c.Bool("fresh") {
+				if _, err := os.Stat(dbDir); err == nil {
+					log.Printf("--fresh: removing existing database at %s", dbDir)
+					if err := os.RemoveAll(dbDir); err != nil {
+						return fmt.Errorf("--fresh: failed to remove %s: %w", dbDir, err)
+					}
+				}
 			}
 
 			blocksDir := c.String("blocks-dir")

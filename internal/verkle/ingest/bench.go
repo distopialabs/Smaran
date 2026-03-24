@@ -20,16 +20,17 @@ var errTimeLimitReached = errors.New("time limit reached")
 
 // BenchConfig holds configuration for the ingestion benchmark.
 type BenchConfig struct {
-	BlocksDir    string
-	DBDir        string
-	DBBackend    string
-	Start        uint64
-	End          uint64
-	FlushEvery   int
-	Duration     time.Duration
-	KUsers       int
-	AccountsList string
-	OutCSV       string
+	BlocksDir         string
+	DBDir             string
+	DBBackend         string
+	Start             uint64
+	End               uint64
+	FlushEvery        int
+	Duration          time.Duration
+	KUsers            int
+	AccountsList      string
+	OutCSV            string
+	UpdateMetricsPath string
 }
 
 // RunBench runs block ingestion for a fixed duration, logging per-block
@@ -95,6 +96,18 @@ func RunBench(cfg BenchConfig) error {
 		return err
 	}
 	defer csvWriter.Close()
+
+	// Setup update-level metrics collector.
+	var updateMetrics *benchutil.UpdateMetricsCollector
+	if cfg.UpdateMetricsPath != "" {
+		var umErr error
+		updateMetrics, umErr = benchutil.NewUpdateMetricsCollector(cfg.UpdateMetricsPath, time.Second)
+		if umErr != nil {
+			return fmt.Errorf("create update metrics collector: %w", umErr)
+		}
+		go updateMetrics.Run()
+		defer updateMetrics.Stop()
+	}
 
 	deadline := time.Now().Add(cfg.Duration)
 	totalBlocks := 0
@@ -192,6 +205,10 @@ func RunBench(cfg BenchConfig) error {
 		}
 
 		completedAtNs := time.Now().UnixNano()
+
+		if updateMetrics != nil && selectedCount > 0 {
+			updateMetrics.RecordN(selectedCount, completedAtNs-startAtNs)
+		}
 
 		// queued_at_ns = start_at_ns for sequential pipeline
 		_ = csvWriter.WriteRow(

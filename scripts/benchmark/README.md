@@ -13,6 +13,7 @@ Generates benchmark graphs from ingestion CSV files and proof summary text files
 | `ingestion-timeseries` | G1–G6 | One or more ingestion CSVs |
 | `ingestion-summary` | G7–G9 | Per-protocol sets of ingestion CSVs across k-user scales |
 | `proof-summary` | G10–G13 | Per-protocol sets of `proof_bench_summary.txt` files across range sizes |
+| `update-timeseries` | G14–G15 | One or more update metrics CSVs |
 
 ---
 
@@ -203,6 +204,58 @@ python scripts/benchmark/plot_bench.py proof-summary \
 
 ---
 
+## Subcommand 4: `update-timeseries`
+
+Plots update-level throughput and latency from update metrics CSVs. Multiple inputs are overlaid for protocol comparison. These metrics are recorded using time-windowed atomic counters (1-second windows) and capture true update-level performance.
+
+```
+python plot_bench.py update-timeseries \
+  --input LABEL:CSV_PATH \
+  [--input LABEL:CSV_PATH ...] \
+  [options]
+```
+
+### Additional Options
+
+| Flag | Default | Description |
+|---|---|---|
+| `--input` | required, repeatable | `label:csv_path` pair — label identifies the protocol/run in the legend |
+| `--window` | `5.0` | Rolling window size in seconds for smoothing (the underlying data has 1-second resolution) |
+| `--graphs` | `all` | Comma-separated subset to produce, e.g. `G14,G15`, or `all` |
+
+### Expected CSV Format
+
+```
+window_end_ns,updates_completed,sum_compute_ns
+```
+
+Produced by `UpdateMetricsCollector` in `internal/benchutil/update_metrics.go`.
+
+### Graphs Produced
+
+| Graph | File | Y-axis | Derivation |
+|---|---|---|---|
+| **G14** | `G14_update_throughput_measured` | Throughput (updates/s) | `updates_completed / window_seconds` per row |
+| **G15** | `G15_update_latency_measured` | Latency (ms) | `(sum_compute_ns / updates_completed) / 1e6` per row |
+
+### Examples
+
+```bash
+# Single protocol
+python scripts/benchmark/plot_bench.py update-timeseries \
+  --input "samurai:benchmark_output/samurai/update_metrics_10000_20260322_010608.csv" \
+  --output-dir benchmark_output/plots --format png
+
+# Multi-protocol overlay
+python scripts/benchmark/plot_bench.py update-timeseries \
+  --input "samurai:benchmark_output/samurai/update_metrics_10000_20260322_010608.csv" \
+  --input "merkle:benchmark_output/merkle/update_metrics_10000_20260322_020805.csv" \
+  --warmup 5 --cooldown 5 \
+  --output-dir benchmark_output/plots --format pdf
+```
+
+---
+
 ## Output File Names
 
 | Graph | Filename |
@@ -220,6 +273,8 @@ python scripts/benchmark/plot_bench.py proof-summary \
 | G11 | `G11_e2e_vs_range.{ext}` |
 | G12 | `G12_verify_vs_range.{ext}` |
 | G13 | `G13_throughput_vs_range.{ext}` |
+| G14 | `G14_update_throughput_measured.{ext}` |
+| G15 | `G15_update_latency_measured.{ext}` |
 
 ---
 
@@ -230,10 +285,11 @@ Consistent across all graphs.
 | Protocol | Color | Marker |
 |---|---|---|
 | `samurai` | `#2166ac` (blue) | circle `o` |
+| `samuraimpt` | `#4393c3` (steel blue) | diamond `D` |
 | `merkle` | `#b2182b` (red) | triangle `^` |
 | `verkle` | `#1b7837` (green) | square `s` |
 | Unknown | auto-assigned | diamond `D` |
 
-Time-series graphs (G1–G6) use lines only (no markers) to keep dense plots readable. Summary graphs (G7–G13) use markers to distinguish data points.
+Time-series graphs (G1–G6, G14–G15) use lines only (no markers) to keep dense plots readable. Summary graphs (G7–G13) use markers to distinguish data points.
 
 ---

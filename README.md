@@ -60,7 +60,11 @@ samurai ingest --db-dir /data/local/tmp/samurai --blocks-dir data/blocks --n 100
 #### `samurai bench-ingest`
 
 ```bash
+# Full pipeline (samurai + MPT)
 samurai bench-ingest --duration 5m --k-users 1000 --accounts-list account_stats_all.csv
+
+# Samurai-only (KZG commitments, no MPT bottleneck)
+samurai bench-ingest --skip-mpt --duration 5m --k-users 1000 --accounts-list account_stats_all.csv
 ```
 
 | Flag | Default | Description |
@@ -71,8 +75,10 @@ samurai bench-ingest --duration 5m --k-users 1000 --accounts-list account_stats_
 | `--k-users` | `0` | Top-K hot accounts (0 = all, no filtering) |
 | `--accounts-list` | `account_stats_all.csv` | CSV with accounts sorted by update count desc |
 | `--cpuprofile` | | Write CPU profile to file |
+| `--skip-mpt` | `false` | Skip MPT and run samurai-only (KZG) benchmark |
+| `--output-dir` | `/data/local/benchmark_output` | Root directory for benchmark output |
 
-Output: `benchmark_output/samurai/ingestion_{kUsers}_{timestamp}.csv`
+Output: `{output-dir}/samuraimpt/ingestion_{kUsers}_{timestamp}.csv` (default), or `{output-dir}/samurai/...` with `--skip-mpt`
 
 #### `samurai serve`
 
@@ -131,8 +137,9 @@ merkle bench-ingest --db-dir /data/local/tmp/bench-merkle --duration 5m --k-user
 | `--k-users` | `0` | Top-K hot accounts (0 = all, no filtering) |
 | `--accounts-list` | `account_stats_all.csv` | CSV with accounts sorted by update count desc |
 | `--fresh` | `false` | Delete existing DB and start from scratch |
+| `--output-dir` | `/data/local/benchmark_output` | Root directory for benchmark output |
 
-Output: `benchmark_output/merkle/ingestion_{kUsers}_{timestamp}.csv`
+Output: `{output-dir}/merkle/ingestion_{kUsers}_{timestamp}.csv`
 
 #### `merkle getproof`
 
@@ -200,8 +207,9 @@ verkle bench-ingest --db-dir /data/local/tmp/bench-verkle --duration 5m --k-user
 | `--duration` | `5m` | Benchmark duration |
 | `--k-users` | `0` | Top-K hot accounts (0 = all, no filtering) |
 | `--accounts-list` | `account_stats_all.csv` | CSV with accounts sorted by update count desc |
+| `--output-dir` | `/data/local/benchmark_output` | Root directory for benchmark output |
 
-Output: `benchmark_output/verkle/ingestion_{kUsers}_{timestamp}.csv`
+Output: `{output-dir}/verkle/ingestion_{kUsers}_{timestamp}.csv`
 
 #### `verkle serve`
 
@@ -240,17 +248,27 @@ verkle-proofc bench --server-addr localhost:50053 --range-size 50000 --num-clien
 | `--duration` | `60s` | Benchmark duration |
 | `--verify` | `false` | Verify proofs locally |
 | `--params-dir` | `./data/params` | KZG params directory (samurai only) |
+| `--output-dir` | `/data/local/benchmark_output` | Root directory for benchmark output |
 
 ---
 
 ## Benchmark Output
 
-All benchmark output is written under `benchmark_output/<protocol>/`:
+All benchmark output is written under `{output-dir}/<protocol>/` (default `output-dir` is `/data/local/benchmark_output`):
+
+| Protocol | Directory | Description |
+|----------|-----------|-------------|
+| `samurai` | `{output-dir}/samurai/` | Samurai KZG-only (`--skip-mpt`) |
+| `samuraimpt` | `{output-dir}/samuraimpt/` | Samurai + MPT (default) |
+| `merkle` | `{output-dir}/merkle/` | Baseline MPT |
+| `verkle` | `{output-dir}/verkle/` | Baseline Verkle tree |
 
 | Type | File pattern | Example |
 |------|-------------|---------|
-| Ingestion | `ingestion_{kUsers}_{timestamp}.csv` | `benchmark_output/samurai/ingestion_1000_20260321_143022.csv` |
-| Proof | `proof_range{rangeSize}_{timestamp}.txt` | `benchmark_output/merkle/proof_range50000_20260321_150000.txt` |
+| Ingestion | `ingestion_{kUsers}_{timestamp}.csv` | `samuraimpt/ingestion_1000_20260321_143022.csv` |
+| Ingestion (samurai-only) | `ingestion_{kUsers}_{timestamp}.csv` | `samurai/ingestion_1000_20260321_143022.csv` |
+| Update metrics | `update_metrics_{kUsers}_{timestamp}.csv` | `samurai/update_metrics_1000_20260321_143022.csv` |
+| Proof | `proof_range{rangeSize}_{timestamp}.txt` | `merkle/proof_range50000_20260321_150000.txt` |
 
 ### Ingestion CSV columns
 
@@ -270,6 +288,22 @@ Samurai adds one extra column for its parallel pipeline:
 | Column | Description |
 |--------|-------------|
 | `wait_commitments_ns` | Time spent waiting for KZG commitment workers |
+
+### Update Metrics CSV columns
+
+All protocols produce update-level metrics in a separate CSV using time-windowed atomic counters (1-second windows). This captures true update throughput without the overhead of per-update CSV rows.
+
+| Column | Description |
+|--------|-------------|
+| `window_end_ns` | Timestamp at end of the 1-second window (ns since epoch) |
+| `updates_completed` | Number of updates completed in this window |
+| `sum_compute_ns` | Total compute nanoseconds across all updates in this window |
+
+Derived metrics (computed in post-processing):
+- `update_throughput = updates_completed / window_seconds`
+- `avg_update_latency_ms = (sum_compute_ns / updates_completed) / 1e6`
+
+For Samurai, `sum_compute_ns` captures actual per-update KZG compute time. For Merkle/Verkle, it captures amortized block processing time distributed across the block's updates.
 
 ---
 

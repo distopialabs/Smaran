@@ -39,6 +39,9 @@ type mptUpdateCommitmentInfo struct {
 // computes the Samurai commitment, and optionally forwards the result to commitCh.
 // If commitCh is nil, commitment results are discarded (samurai-only mode).
 func startCommitWorkers(cfg Config, queues []*utils.BoundedQueue[UpdateTask], commitCh chan<- mptUpdateCommitmentInfo, wg *sync.WaitGroup) {
+	// Capture update-level metrics collector (may be nil when not benchmarking).
+	var updateMetrics = cfg.Bench != nil && cfg.Bench.UpdateMetrics != nil
+
 	for i := 0; i < cfg.Workers.CommitWorkerCount; i++ {
 		i := i
 		wg.Add(1)
@@ -50,6 +53,11 @@ func startCommitWorkers(cfg Config, queues []*utils.BoundedQueue[UpdateTask], co
 					return
 				}
 
+				var computeStart time.Time
+				if updateMetrics {
+					computeStart = time.Now()
+				}
+
 				commitmentHash, err := storage.CreateOrUpdateAccountInfo(
 					task.Account,
 					task.Balance,
@@ -58,6 +66,10 @@ func startCommitWorkers(cfg Config, queues []*utils.BoundedQueue[UpdateTask], co
 				)
 				if err != nil {
 					panic(err)
+				}
+
+				if updateMetrics {
+					cfg.Bench.UpdateMetrics.Record(time.Since(computeStart).Nanoseconds())
 				}
 
 				if commitCh != nil {
@@ -182,6 +194,67 @@ func runMPTWorker(cfg Config, blockInfoCh <-chan mptBlockInfo, commitCh <-chan m
 	}
 	if err := batch.Write(); err != nil {
 		panic(fmt.Sprintf("final batch write: %v", err))
+	}
+}
+
+// runMetricsCollector is a lightweight replacement for runMPTWorker used in
+// samurai-only benchmark mode. It drains blockInfoCh and commitCh, counts
+// per-block commitment completions, and writes CSV timing rows — but performs
+// no trie operations.
+func runMetricsCollector(cfg Config, blockInfoCh <-chan mptBlockInfo, commitCh <-chan mptUpdateCommitmentInfo) {
+	bench := cfg.Bench // guaranteed non-nil in bench mode
+	buffered := make(map[uint64]uint64) // blockNumber -> count of pre-arrived commitments
+
+	const logInterval = 1000
+	blocksProcessed := uint64(0)
+	logStart := time.Now()
+
+	for blockInfo := range blockInfoCh {
+		pending := blockInfo.updateCount
+
+		startAtNs := time.Now().UnixNano()
+
+		// Apply pre-buffered commitment counts.
+		if n, ok := buffered[blockInfo.blockNumber]; ok {
+			pending -= n
+			delete(buffered, blockInfo.blockNumber)
+		}
+
+		// Drain commitCh until all commitments for this block arrive.
+		var waitCommitmentsNs int64
+		for pending > 0 {
+			tWait := time.Now()
+			u := <-commitCh
+			waitCommitmentsNs += time.Since(tWait).Nanoseconds()
+
+			if u.blockNumber != blockInfo.blockNumber {
+				buffered[u.blockNumber]++
+			} else {
+				pending--
+			}
+		}
+
+		completedAtNs := time.Now().UnixNano()
+
+		_ = bench.CSV.WriteRow(
+			strconv.FormatUint(blockInfo.blockNumber, 10),
+			strconv.FormatUint(blockInfo.rawUpdateCount, 10),
+			strconv.FormatUint(blockInfo.updateCount, 10),
+			strconv.FormatInt(blockInfo.queuedAtNs, 10),
+			strconv.FormatInt(startAtNs, 10),
+			strconv.FormatInt(completedAtNs, 10),
+			strconv.FormatInt(waitCommitmentsNs, 10),
+		)
+
+		blocksProcessed++
+		if blocksProcessed%logInterval == 0 {
+			fmt.Printf("[MetricsCollector] blk=%d elapsed=%s buffered=%d\n",
+				blockInfo.blockNumber,
+				time.Since(logStart).Truncate(time.Millisecond),
+				len(buffered),
+			)
+			logStart = time.Now()
+		}
 	}
 }
 

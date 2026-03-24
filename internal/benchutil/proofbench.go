@@ -181,8 +181,8 @@ func PrintSummary(w io.Writer, cfg ProofBenchConfig, stats ClientStats, wallDura
 }
 
 // WriteSummaryFile writes the summary to the standard output path for proof benchmarks.
-func WriteSummaryFile(protocol string, cfg ProofBenchConfig, stats ClientStats, wallDuration time.Duration) error {
-	path, err := ProofOutputPath(protocol, cfg.RangeSize)
+func WriteSummaryFile(baseDir, protocol string, cfg ProofBenchConfig, stats ClientStats, wallDuration time.Duration) error {
+	path, err := ProofOutputPath(baseDir, protocol, cfg.RangeSize)
 	if err != nil {
 		return err
 	}

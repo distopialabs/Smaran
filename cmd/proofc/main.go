@@ -7,7 +7,6 @@ import (
 	"io"
 	"log"
 	"math"
-	"math/rand"
 	"os"
 	"sync"
 	"time"
@@ -54,9 +53,9 @@ func queryCmd() *cli.Command {
 		Usage: "Query a single range proof and verify it",
 		Flags: []cli.Flag{
 			&cli.StringFlag{Name: "server-addr", Value: "localhost:50051", Usage: "gRPC server address"},
-			&cli.StringFlag{Name: "account", Required: true, Usage: "Account address (0x hex)"},
-			&cli.Uint64Flag{Name: "start-block", Required: true, Usage: "Start block number"},
-			&cli.Uint64Flag{Name: "end-block", Required: true, Usage: "End block number"},
+			&cli.StringFlag{Name: "account", Value: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", Usage: "Account address (0x hex)"},
+			&cli.Uint64Flag{Name: "start-block", Value: dataset.FIRST_BLOCK, Usage: "Start block number"},
+			&cli.Uint64Flag{Name: "end-block", Value: dataset.FIRST_BLOCK + 1000 - 1, Usage: "End block number"},
 			&cli.StringFlag{Name: "params-dir", Value: "./data/params", Usage: "Path to crypto params"},
 			&cli.StringFlag{Name: "state-root", Value: "", Usage: "MPT state root hash (hex) for verification"},
 			&cli.BoolFlag{Name: "old", Value: false, Usage: "Use old (slow) proof generation"},
@@ -79,22 +78,79 @@ func queryCmd() *cli.Command {
 				stateRoot = common.HexToHash(s)
 			}
 
+			account := c.String("account")
+			startBlock := c.Uint64("start-block")
+			endBlock := c.Uint64("end-block")
+
 			req := &proofpb.GetProofRequest{
-				Account:    c.String("account"),
-				StartBlock: c.Uint64("start-block"),
-				EndBlock:   c.Uint64("end-block"),
+				Account:    account,
+				StartBlock: startBlock,
+				EndBlock:   endBlock,
 			}
 
 			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 			defer cancel()
 
-			resp, err := fetchProofStream(ctx, client, req, c.Bool("old"))
-			if err != nil {
-				return fmt.Errorf("GetProofStream failed: %w", err)
+			e2eStart := time.Now()
+			resp, fetchErr := fetchProofStream(ctx, client, req, c.Bool("old"))
+			e2eDur := time.Since(e2eStart)
+
+			if fetchErr != nil {
+				s := samuraiQuerySummary{
+					Account:    account,
+					StartBlock: startBlock,
+					EndBlock:   endBlock,
+					E2EDur:     e2eDur,
+				}
+				if isClientError(fetchErr) {
+					s.ClientErr = fetchErr.Error()
+				} else {
+					s.ServerErr = fetchErr.Error()
+				}
+				printSamuraiQuerySummary(os.Stderr, s)
+				return fmt.Errorf("GetProofStream failed: %w", fetchErr)
 			}
 
-			addr := common.HexToAddress(c.String("account"))
-			return verifyResponse(resp, addr, precomputed, stateRoot)
+			// Extract version range from balance infos.
+			var startVersion uint64 = math.MaxUint64
+			var endVersion uint64
+			for _, bi := range resp.BalanceInfos {
+				if bi.Version < startVersion {
+					startVersion = bi.Version
+				}
+				if bi.Version > endVersion {
+					endVersion = bi.Version
+				}
+			}
+			if len(resp.BalanceInfos) == 0 {
+				startVersion = 0
+			}
+
+			payloadBytes := int64(proto.Size(resp))
+
+			// Verify.
+			addr := common.HexToAddress(account)
+			verifyStart := time.Now()
+			verifyErr := verifyResponse(resp, addr, precomputed, stateRoot)
+			verifyDur := time.Since(verifyStart)
+
+			printSamuraiQuerySummary(os.Stderr, samuraiQuerySummary{
+				Account:      account,
+				StartBlock:   startBlock,
+				EndBlock:     endBlock,
+				StartVersion: startVersion,
+				EndVersion:   endVersion,
+				ProofgenDur:  time.Duration(resp.ProofgenDurationNs),
+				E2EDur:       e2eDur,
+				VerifyDur:    verifyDur,
+				Verified:     true,
+				VerifyOK:     verifyErr == nil,
+				PayloadBytes: payloadBytes,
+				RangeProofs:  len(resp.RangeProofs),
+				BalanceInfos: len(resp.BalanceInfos),
+			})
+
+			return verifyErr
 		},
 	}
 }
@@ -111,10 +167,11 @@ func benchCmd() *cli.Command {
 			&cli.IntFlag{Name: "num-clients", Value: 1, Usage: "Number of concurrent client goroutines"},
 			&cli.StringFlag{Name: "accounts-list", Required: true, Usage: "CSV with accounts sorted by update count desc"},
 			&cli.DurationFlag{Name: "duration", Value: 60 * time.Second, Usage: "Benchmark duration"},
-			&cli.BoolFlag{Name: "verify", Value: false, Usage: "Verify proofs (requires --params-dir)"},
+			&cli.BoolFlag{Name: "verify", Value: true, Usage: "Verify proofs (requires --params-dir)"},
 			&cli.StringFlag{Name: "params-dir", Value: "./data/params", Usage: "Path to crypto params (for verification)"},
 			&cli.StringFlag{Name: "state-root", Value: "", Usage: "MPT state root hash (hex) for verification"},
 			&cli.BoolFlag{Name: "old", Value: false, Usage: "Use old (slow) proof generation"},
+			&cli.StringFlag{Name: "output-dir", Value: benchutil.DefaultOutputDir, Usage: "Root directory for benchmark output"},
 		},
 		Action: func(c *cli.Context) error {
 			conn, err := dialGRPC(c.String("server-addr"))
@@ -187,13 +244,12 @@ func benchCmd() *cli.Command {
 					defer clientConn.Close()
 					cl := proofpb.NewProofServiceClient(clientConn)
 
-					rng := rand.New(rand.NewSource(time.Now().UnixNano() + int64(clientID)))
 					var stats benchutil.ClientStats
 
 					for time.Now().Before(deadline) {
 						account := selector.Pick()
-						startBlock := benchutil.RandomStartBlock(rng, firstBlock, info.LatestBlock, rangeSize)
-						endBlock := startBlock + uint64(rangeSize) - 1
+						endBlock := info.LatestBlock
+						startBlock := endBlock - uint64(rangeSize) + 1
 
 						req := &proofpb.GetProofRequest{
 							Account:    account,
@@ -239,7 +295,7 @@ func benchCmd() *cli.Command {
 			agg := benchutil.AggregateStats(allStats)
 			benchutil.PrintSummary(os.Stdout, cfg, agg, wallDuration)
 
-			if err := benchutil.WriteSummaryFile("samurai", cfg, agg, wallDuration); err != nil {
+			if err := benchutil.WriteSummaryFile(c.String("output-dir"), "samuraimpt", cfg, agg, wallDuration); err != nil {
 				log.Printf("warning: failed to write summary file: %v", err)
 			}
 
@@ -346,6 +402,83 @@ func isClientError(err error) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+type samuraiQuerySummary struct {
+	Account      string
+	StartBlock   uint64
+	EndBlock     uint64
+	StartVersion uint64
+	EndVersion   uint64
+	ProofgenDur  time.Duration
+	E2EDur       time.Duration
+	VerifyDur    time.Duration
+	Verified     bool
+	VerifyOK     bool
+	PayloadBytes int64
+	RangeProofs  int
+	BalanceInfos int
+	ServerErr    string
+	ClientErr    string
+}
+
+func printSamuraiQuerySummary(w io.Writer, s samuraiQuerySummary) {
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "─── Samurai Query Summary ───────────────────────────")
+	fmt.Fprintln(w)
+	fmt.Fprintf(w, "  %-20s %s\n", "Account:", truncateAddr(s.Account))
+	fmt.Fprintf(w, "  %-20s %d\n", "Starting Block:", s.StartBlock)
+	fmt.Fprintf(w, "  %-20s %d\n", "Ending Block:", s.EndBlock)
+	fmt.Fprintf(w, "  %-20s %d blocks\n", "Range:", s.EndBlock-s.StartBlock+1)
+	if s.BalanceInfos > 0 {
+		fmt.Fprintf(w, "  %-20s %d → %d (%d total)\n", "Versions:", s.StartVersion, s.EndVersion, s.EndVersion-s.StartVersion+1)
+	}
+	fmt.Fprintln(w)
+	if s.ProofgenDur > 0 {
+		fmt.Fprintf(w, "  %-20s %s\n", "Proofgen Latency:", s.ProofgenDur.Round(100*time.Microsecond))
+	}
+	fmt.Fprintf(w, "  %-20s %s\n", "E2E Latency:", s.E2EDur.Round(100*time.Microsecond))
+	if s.Verified {
+		fmt.Fprintf(w, "  %-20s %s\n", "Verify Latency:", s.VerifyDur.Round(100*time.Microsecond))
+		if s.VerifyOK {
+			fmt.Fprintf(w, "  %-20s ✓ PASSED\n", "Verify Result:")
+		} else {
+			fmt.Fprintf(w, "  %-20s ✗ FAILED\n", "Verify Result:")
+		}
+	}
+	fmt.Fprintln(w)
+	fmt.Fprintf(w, "  %-20s %s\n", "Payload Size:", humanBytes(s.PayloadBytes))
+	fmt.Fprintf(w, "  %-20s %d\n", "Range Proofs:", s.RangeProofs)
+	fmt.Fprintf(w, "  %-20s %d\n", "Balance Infos:", s.BalanceInfos)
+	if s.ServerErr != "" {
+		fmt.Fprintf(w, "  %-20s %s\n", "Server Error:", s.ServerErr)
+	}
+	if s.ClientErr != "" {
+		fmt.Fprintf(w, "  %-20s %s\n", "Client Error:", s.ClientErr)
+	}
+	if s.ServerErr == "" && s.ClientErr == "" {
+		fmt.Fprintf(w, "  %-20s none\n", "Errors:")
+	}
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "─────────────────────────────────────────────────────")
+}
+
+func truncateAddr(addr string) string {
+	if len(addr) <= 12 {
+		return addr
+	}
+	return addr[:6] + "..." + addr[len(addr)-4:]
+}
+
+func humanBytes(b int64) string {
+	switch {
+	case b < 1024:
+		return fmt.Sprintf("%d B", b)
+	case b < 1024*1024:
+		return fmt.Sprintf("%.1f KB", float64(b)/1024)
+	default:
+		return fmt.Sprintf("%.1f MB", float64(b)/(1024*1024))
 	}
 }
 

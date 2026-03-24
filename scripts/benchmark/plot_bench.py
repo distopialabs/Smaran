@@ -24,9 +24,10 @@ import pandas as pd
 # ---------------------------------------------------------------------------
 
 PROTOCOL_STYLE = {
-    "samurai": {"color": "#2166ac", "marker": "o", "label": "Samurai"},
-    "merkle":  {"color": "#b2182b", "marker": "^", "label": "Merkle"},
-    "verkle":  {"color": "#1b7837", "marker": "s", "label": "Verkle"},
+    "samurai":    {"color": "#2166ac", "marker": "o", "label": "Samurai"},
+    "samuraimpt": {"color": "#4393c3", "marker": "D", "label": "Samurai+MPT"},
+    "merkle":     {"color": "#b2182b", "marker": "^", "label": "Merkle"},
+    "verkle":     {"color": "#1b7837", "marker": "s", "label": "Verkle"},
 }
 _AUTO_COLORS = [
     "#7b3294", "#e66101", "#4dac26", "#d01c8b", "#f1b6da",
@@ -411,6 +412,93 @@ def cmd_proof_summary(args):
 
 
 # ---------------------------------------------------------------------------
+# Subcommand 4: update-timeseries  (G14–G15)
+# ---------------------------------------------------------------------------
+
+UPDATE_METRICS_REQUIRED_COLS = {"window_end_ns", "updates_completed", "sum_compute_ns"}
+
+
+def load_update_metrics_csv(path: str) -> pd.DataFrame:
+    df = pd.read_csv(path)
+    df.columns = [c.strip() for c in df.columns]
+    missing = UPDATE_METRICS_REQUIRED_COLS - set(df.columns)
+    if missing:
+        sys.exit(f"ERROR: {path} is missing columns: {missing}")
+    return df
+
+
+def process_update_metrics(df: pd.DataFrame, warmup: float, cooldown: float) -> pd.DataFrame:
+    """Compute per-window throughput and latency from update metrics CSV."""
+    df = df.copy()
+    # Compute relative time from the first window.
+    df["rel_time"] = (df["window_end_ns"] - df["window_end_ns"].min()) / 1e9
+
+    # Trim warmup/cooldown.
+    max_t = df["rel_time"].max()
+    mask = (df["rel_time"] >= warmup) & (df["rel_time"] <= (max_t - cooldown))
+    df = df[mask].reset_index(drop=True)
+
+    # Derive per-window metrics.  Assume 1s windows (delta between consecutive
+    # window_end_ns values).  Fall back to 1.0s when only one row.
+    dt = df["window_end_ns"].diff() / 1e9
+    dt.iloc[0] = dt.iloc[1] if len(dt) > 1 else 1.0
+    df["update_throughput"] = df["updates_completed"] / dt
+    nu = df["updates_completed"].replace(0, np.nan)
+    df["avg_update_latency_ms"] = (df["sum_compute_ns"] / nu) / 1e6
+    return df
+
+
+_UPDATE_TS_GRAPHS = {
+    "G14": ("update_throughput",      "Throughput (updates/s)", "G14_update_throughput_measured", "Update Throughput (Measured)"),
+    "G15": ("avg_update_latency_ms",  "Latency (ms)",          "G15_update_latency_measured",    "Avg Update Latency (Measured)"),
+}
+
+
+def smooth_update_metrics(df: pd.DataFrame, window_sec: float) -> pd.DataFrame:
+    """Apply a rolling mean over 1-second update-metric rows."""
+    if window_sec <= 1.0 or len(df) < 2:
+        return df
+    # Rows are ~1s apart; window_sec rows ≈ window_sec seconds.
+    win = max(1, int(round(window_sec)))
+    out = df.copy()
+    out["update_throughput"] = df["update_throughput"].rolling(win, min_periods=1, center=True).mean()
+    out["avg_update_latency_ms"] = df["avg_update_latency_ms"].rolling(win, min_periods=1, center=True).mean()
+    return out
+
+
+def cmd_update_timeseries(args):
+    inputs = _parse_input_args(args.input)
+    graphs_to_plot = (
+        set(_UPDATE_TS_GRAPHS.keys())
+        if args.graphs == "all"
+        else {g.strip().upper() for g in args.graphs.split(",")}
+    )
+
+    processed = []
+    for label, path in inputs:
+        df = load_update_metrics_csv(path)
+        df = process_update_metrics(df, args.warmup, args.cooldown)
+        df = smooth_update_metrics(df, args.window)
+        processed.append((label, df))
+
+    title_suffix = " — " + ", ".join(lbl for lbl, _ in inputs) if len(inputs) == 1 else ""
+
+    for gid, (col, ylabel, fname, gtitle) in _UPDATE_TS_GRAPHS.items():
+        if gid not in graphs_to_plot:
+            continue
+        fig, ax = _make_fig()
+        for label, df in processed:
+            sty = _protocol_style(label)
+            x = df["rel_time"].values
+            y = df[col].values
+            ax.plot(x, y, color=sty["color"], linewidth=1, label=sty["label"])
+        _finalize_ax(ax, "Time (s)", ylabel,
+                     f"{gtitle}{title_suffix}",
+                     [lbl for lbl, _ in inputs])
+        save_figure(fig, args.output_dir, fname, args.format, args.dpi)
+
+
+# ---------------------------------------------------------------------------
 # Argument parsing
 # ---------------------------------------------------------------------------
 
@@ -469,6 +557,18 @@ def main():
     p3.add_argument("--log-x", action="store_true",
                     help="Force log scale on x-axis (auto-detected otherwise)")
     p3.set_defaults(func=cmd_proof_summary)
+
+    # update-timeseries
+    p4 = sub.add_parser("update-timeseries",
+                         help="Update-level time-series graphs G14–G15 from update metrics CSVs")
+    _add_global_opts(p4)
+    p4.add_argument("--input", action="append", required=True, metavar="LABEL:PATH",
+                    help="'label:csv_path' (repeatable for multi-protocol overlay)")
+    p4.add_argument("--window", type=float, default=5.0,
+                    help="Rolling window size in seconds for smoothing (default: 5.0)")
+    p4.add_argument("--graphs", default="all",
+                    help="Graphs to produce: 'all' or comma-separated G14,G15 (default: all)")
+    p4.set_defaults(func=cmd_update_timeseries)
 
     args = parser.parse_args()
     args.func(args)

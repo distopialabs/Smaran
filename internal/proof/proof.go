@@ -88,7 +88,7 @@ func BlockRangeToVersionRange(account common.Address, startingBlock uint64, endi
 	}
 
 	if cbInfo.Version == 0 {
-		return 0, 0, fmt.Errorf("no historical balances available to prove for this account")
+		return 0, 0, fmt.Errorf("%w: no historical balances available", ErrAccountNotFound)
 	}
 
 	// Get the first recorded version to check bounds
@@ -116,7 +116,7 @@ func BlockRangeToVersionRange(account common.Address, startingBlock uint64, endi
 	if startingBlock < firstHbInfo.StartBlock {
 		startingVersion = 0
 	} else if startingBlock >= cbInfo.StartBlock {
-		return 0, 0, fmt.Errorf("starting block %d is beyond the latest historical version", startingBlock)
+		return 0, 0, fmt.Errorf("%w: starting block %d is at or beyond the latest historical version (block %d)", ErrBlockRangeOutOfBounds, startingBlock, cbInfo.StartBlock)
 	} else {
 		startingVersion, err = BinarySearchVersionByBlockNumber(startingBlock, 0, endingVersion, account, db)
 		if err != nil {

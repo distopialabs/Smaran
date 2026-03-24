@@ -2,6 +2,8 @@
         bench-ingest-samurai bench-ingest-merkle bench-ingest-verkle bench-ingest \
         bench-proof-samurai bench-proof-merkle bench-proof-verkle bench-proof
 
+export PATH := $(HOME)/go/bin:$(PATH)
+
 BUILD_DIR      := bin
 BLOCKS_DIR     := data/blocks
 ACCOUNTS_LIST  ?= account_stats_all.csv
@@ -40,8 +42,12 @@ clean:
 proto:
 	protoc --go_out=. --go_opt=paths=source_relative \
 	       --go-grpc_out=. --go-grpc_opt=paths=source_relative \
-	       api/proto/samurai/v1/proof_service.proto \
-	       api/proto/merkle/v1/proof_service.proto \
+	       api/proto/samurai/v1/proof_service.proto
+	protoc --go_out=. --go_opt=paths=source_relative \
+	       --go-grpc_out=. --go-grpc_opt=paths=source_relative \
+	       api/proto/merkle/v1/proof_service.proto
+	protoc --go_out=. --go_opt=paths=source_relative \
+	       --go-grpc_out=. --go-grpc_opt=paths=source_relative \
 	       api/proto/verkle/v1/proof_service.proto
 
 # --- Ingestion benchmark targets ---

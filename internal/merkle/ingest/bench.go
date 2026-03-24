@@ -18,13 +18,14 @@ import (
 
 // BenchConfig holds configuration for the ingestion benchmark.
 type BenchConfig struct {
-	BlocksDir    string
-	Store        *st.MPTStateStore
-	Start        uint64
-	Duration     time.Duration
-	KUsers       int
-	AccountsList string
-	OutCSV       string
+	BlocksDir         string
+	Store             *st.MPTStateStore
+	Start             uint64
+	Duration          time.Duration
+	KUsers            int
+	AccountsList      string
+	OutCSV            string
+	UpdateMetricsPath string
 }
 
 var errDurationExceeded = errors.New("bench: duration exceeded")
@@ -53,6 +54,18 @@ func BenchRun(cfg BenchConfig) error {
 		return err
 	}
 	defer csvWriter.Close()
+
+	// Setup update-level metrics collector.
+	var updateMetrics *benchutil.UpdateMetricsCollector
+	if cfg.UpdateMetricsPath != "" {
+		var umErr error
+		updateMetrics, umErr = benchutil.NewUpdateMetricsCollector(cfg.UpdateMetricsPath, time.Second)
+		if umErr != nil {
+			return fmt.Errorf("create update metrics collector: %w", umErr)
+		}
+		go updateMetrics.Run()
+		defer updateMetrics.Stop()
+	}
 
 	start := cfg.Start
 	if meta.HasLast(cfg.Store.DiskDB) {
@@ -149,6 +162,10 @@ func BenchRun(cfg BenchConfig) error {
 		}
 
 		completedAtNs := time.Now().UnixNano()
+
+		if updateMetrics != nil && selectedCount > 0 {
+			updateMetrics.RecordN(selectedCount, completedAtNs-startAtNs)
+		}
 
 		// queued_at_ns = start_at_ns for sequential pipeline
 		_ = csvWriter.WriteRow(

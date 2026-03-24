@@ -85,7 +85,10 @@ func (s *ProofServer) generateBlockProof(addr common.Address, blockNum uint64) (
 		return nil, fmt.Errorf("open state: %w", err)
 	}
 
-	stateTrie := stateDB.GetTrie()
+	stateTrie, err := s.store.OpenTrie(root)
+	if err != nil {
+		return nil, fmt.Errorf("open trie: %w", err)
+	}
 	result, rawNodes, err := proof.GenerateAccountProof(stateDB, root, addr, stateTrie)
 	if err != nil {
 		return nil, fmt.Errorf("generate proof: %w", err)

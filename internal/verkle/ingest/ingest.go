@@ -30,8 +30,7 @@ type Config struct {
 	DBBackend  string
 	Start      uint64
 	End        uint64
-	StartSet   bool // true if --start was explicitly provided
-	FlushEvery int  // reload tree every N blocks for memory management (default 1000)
+	FlushEvery int // reload tree every N blocks for memory management (default 1000)
 }
 
 // Run performs the ingestion of blocks into the Verkle tree.
@@ -52,11 +51,12 @@ func Run(cfg Config) error {
 	ns := store.NewNodeStore(kv)
 	resolver := ns.NodeResolverFn()
 
-	// Determine start block
+	// Determine start block (resume if DB has progress)
 	start := cfg.Start
-	if !cfg.StartSet {
-		if last, ok := ns.GetLastProcessed(); ok {
-			start = last + 1
+	if last, ok := ns.GetLastProcessed(); ok {
+		resume := last + 1
+		if resume > start {
+			start = resume
 			logger.Printf("resuming from block %d (last processed: %d)", start, last)
 		}
 	}
