@@ -1,6 +1,8 @@
 package polynomial
 
 import (
+	"math/big"
+
 	fr "github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
 	"github.com/consensys/gnark-crypto/ecc/bls12-381/fr/polynomial"
 	"github.com/ethereum/go-ethereum/common"
@@ -73,22 +75,41 @@ func Interpolate(xValues []int, yValues []fr.Element, V Polynomial, weights []fr
 	return poly
 }
 
-// VanishingPolynomial returns Z(X) = ∏(X - xs[i])
-func VanishingPolynomial(xs []int) Polynomial {
+// // VanishingPolynomial returns Z(X) = ∏(X - xs[i])
+// func VanishingPolynomial(xs []int) Polynomial {
+// 	z := []fr.Element{{}}
+// 	// z := make([]fr.Element, len(xs))
+// 	z[0].SetOne()
+// 	for _, x := range xs {
+// 		newZ := make([]fr.Element, len(z)+1)
+// 		for i := range z {
+// 			newZ[i+1].Add(&newZ[i+1], &z[i])
+// 			var tmp fr.Element
+// 			xFr := fr.NewElement(uint64(x))
+// 			tmp.Mul(&z[i], &xFr).Neg(&tmp)
+// 			newZ[i].Add(&newZ[i], &tmp)
+// 		}
+// 		z = newZ
+
+// 	}
+// 	return z
+// }
+
+// VanishingPolynomial returns Z(X) = ∏(X - ω^xs[i])
+func VanishingPolynomial(xs []int, omega *fr.Element) Polynomial {
 	z := []fr.Element{{}}
-	// z := make([]fr.Element, len(xs))
 	z[0].SetOne()
 	for _, x := range xs {
 		newZ := make([]fr.Element, len(z)+1)
+		var omegaX fr.Element
+		omegaX.Exp(*omega, new(big.Int).SetInt64(int64(x)))
 		for i := range z {
 			newZ[i+1].Add(&newZ[i+1], &z[i])
 			var tmp fr.Element
-			xFr := fr.NewElement(uint64(x))
-			tmp.Mul(&z[i], &xFr).Neg(&tmp)
+			tmp.Mul(&z[i], &omegaX).Neg(&tmp)
 			newZ[i].Add(&newZ[i], &tmp)
 		}
 		z = newZ
-
 	}
 	return z
 }

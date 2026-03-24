@@ -10,6 +10,7 @@ import (
 
 	// Added safe import
 	fr "github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
+	"github.com/consensys/gnark-crypto/ecc/bls12-381/fr/fft"
 	gnark_kzg "github.com/consensys/gnark-crypto/ecc/bls12-381/kzg"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/nepal80m/samurai/internal/config"
@@ -81,7 +82,6 @@ func BinarySearchVersionByBlockNumber(blockNumber uint64, searchStart uint64, se
 // - If endingBlock < account's first recorded block: returns error (no data available)
 // - If startingBlock < account's first recorded block: clamps to version 0
 func BlockRangeToVersionRange(account common.Address, startingBlock uint64, endingBlock uint64, db *db.SamuraiStore) (uint64, uint64, error) {
-
 	cbInfo, err := tree.GetCurrentBalanceInfo(account, db.StateDB)
 	if err != nil {
 		return 0, 0, fmt.Errorf("%w: %v", ErrAccountNotFound, err)
@@ -168,6 +168,7 @@ func GetNewProofRange(account common.Address, startingVersion, endingVersion uin
 
 			treeKey := fmt.Sprintf("%d:%d", layer, idx)
 			batchTree := requiredTreeBatchesMap[treeKey]
+			domain := fft.NewDomain(uint64(len(batchTree)))
 
 			xs1 := make([]int, len(batchTree))
 			ys1 := make([]fr.Element, len(batchTree))
@@ -180,7 +181,10 @@ func GetNewProofRange(account common.Address, startingVersion, endingVersion uin
 				}
 				ys1[i] = polynomial.HashToFieldElement(v)
 			}
-			P := polynomial.Interpolate(xs1, ys1, precomputedData.V, precomputedData.Weights)
+			// P := polynomial.Interpolate(xs1, ys1, precomputedData.V, precomputedData.Weights)
+			domain.FFTInverse(ys1, fft.DIF)
+			fft.BitReverse(ys1)
+			P := polynomial.Polynomial(ys1)
 
 			// Use cached commitment from tree rebuild instead of re-fetching from DB
 			commitKey := fmt.Sprintf("%d:%d", layer, idx)
@@ -190,16 +194,23 @@ func GetNewProofRange(account common.Address, startingVersion, endingVersion uin
 				storedCommitment = tree.GetBatchCommitment(account, uint64(layer), uint64(idx), db.StateDB)
 			}
 
-			Z := polynomial.VanishingPolynomial(nodesToInterpolate)
+			Z := polynomial.VanishingPolynomial(nodesToInterpolate, &domain.Generator)
 
-			xs := make([]fr.Element, len(nodesToInterpolate))
-			ys := make([]fr.Element, len(nodesToInterpolate))
-			for i, v := range nodesToInterpolate {
-				xs[i] = fr.NewElement(uint64(v))
-				ys[i] = polynomial.HashToFieldElement(batchTree[v])
+			// xs := make([]fr.Element, len(nodesToInterpolate))
+			// ys := make([]fr.Element, len(nodesToInterpolate))
+			// for i, v := range nodesToInterpolate {
+			// 	xs[i] = fr.NewElement(uint64(v))
+			// 	ys[i] = polynomial.HashToFieldElement(batchTree[v])
+			// }
+
+			// I := kzg.Interpolate(xs, ys)
+			I := make([]fr.Element, int(domain.Cardinality))
+			for _, v := range nodesToInterpolate {
+				I[v] = polynomial.HashToFieldElement(batchTree[v])
 			}
-
-			I := kzg.Interpolate(xs, ys)
+			// fft.BitReverse(I)
+			domain.FFTInverse(I, fft.DIF)
+			fft.BitReverse(I)
 
 			diff := kzg.SubtractPolys(P, I)
 			Q := kzg.PolyDiv(diff, Z)
@@ -230,12 +241,10 @@ func findCommitmentsCoveringRange(sb, eb int) []RangeCommitment {
 	reqCommitments := addDepencencyCommitments(rcCommitments)
 
 	return reqCommitments
-
 }
 
 // addDepencencyCommitments adds dependency commitments for upper layers.
 func addDepencencyCommitments(dependentCommitments []RangeCommitment) []RangeCommitment {
-
 	commitHashMap := make(map[string]*RangeCommitment)
 
 	depQueue := Queue[RangeCommitment]{}
@@ -334,12 +343,10 @@ func findRangeCoveringCommitments(sb, eb int, layer int) []RangeCommitment {
 	}
 
 	return reqCommitments
-
 }
 
 // findNodesToInterpolate finds the tree nodes that need to be interpolated for a commitment.
 func findNodesToInterpolate(commitment RangeCommitment, includeDependentCommitments bool) []int {
-
 	layer := commitment.layer
 	idx := commitment.idx
 
@@ -385,12 +392,10 @@ func findNodesToInterpolate(commitment RangeCommitment, includeDependentCommitme
 	nodesToInterpolate = append(nodesToInterpolate, coveringNodes...)
 
 	return nodesToInterpolate
-
 }
 
 // findCoveringNodes finds the segment tree nodes that cover a range [L, R] in a tree of N leaves.
 func findCoveringNodes(N, L, R int) []int {
-
 	base := N - 1
 	l := L + base
 	r := R + base

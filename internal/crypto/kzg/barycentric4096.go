@@ -3,11 +3,13 @@ package kzg
 import (
 	"errors"
 	"fmt"
+	"math/big"
 	"os"
 	"path/filepath"
 	"time"
 
 	fr "github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
+	"github.com/consensys/gnark-crypto/ecc/bls12-381/fr/fft"
 	"github.com/consensys/gnark-crypto/ecc/bls12-381/fr/polynomial"
 	gnark_kzg "github.com/consensys/gnark-crypto/ecc/bls12-381/kzg"
 )
@@ -29,14 +31,17 @@ const (
 // Computes the vanishing polynomial and the barycentric weights
 // and stores them as raw binary files (32 bytes per field element).
 func PrecomputeBarycentricData(domainSize int, wPath string, vPath string) error {
-	fmt.Println("[barycentric] precomputing vanishing polynomial and weights …")
+	// log.Infof("[barycentric] precomputing vanishing polynomial and weights …")
+
+	domain := fft.NewDomain(uint64(domainSize))
+	omega := domain.Generator
 
 	// Build vanishing polynomial V(x) incrementally.
 	V := make(polynomial.Polynomial, 1)
 	V[0].SetOne()
 
 	for i := range domainSize {
-		// multiply V by (X - i)
+		// multiply V by (X - ω^i)
 		deg := len(V)
 		tmpV := make(polynomial.Polynomial, deg+1)
 
@@ -44,14 +49,15 @@ func PrecomputeBarycentricData(domainSize int, wPath string, vPath string) error
 		// tmpV[k+1] = V[k]
 		copy(tmpV[1:], V)
 
-		// negI = -i
-		var negI fr.Element
-		negI.SetInt64(int64(-i))
+		// omegaI = -ω^i
+		var omegaI fr.Element
+		omegaI.Exp(omega, new(big.Int).SetInt64(int64(i)))
+		omegaI.Neg(&omegaI)
 
-		// tmpV[k] += -i * V[k]
+		// tmpV[k] += -ω^i * V[k]
 		for k := range deg {
 			var t fr.Element
-			t.Mul(&V[k], &negI)
+			t.Mul(&V[k], &omegaI)
 			tmpV[k].Add(&tmpV[k], &t)
 		}
 		V = tmpV
@@ -67,10 +73,10 @@ func PrecomputeBarycentricData(domainSize int, wPath string, vPath string) error
 
 	// Compute weights.
 	weights := make([]fr.Element, domainSize)
-	var xi fr.Element
+	var omegaI fr.Element
 	for i := range domainSize {
-		xi.SetInt64(int64(i))
-		weights[i] = Vprime.Eval(&xi)
+		omegaI.Exp(omega, new(big.Int).SetInt64(int64(i)))
+		weights[i] = Vprime.Eval(&omegaI)
 	}
 	weights = fr.BatchInvert(weights)
 
@@ -81,13 +87,31 @@ func PrecomputeBarycentricData(domainSize int, wPath string, vPath string) error
 	if err := dumpFieldSlice(vPath, V); err != nil {
 		return err
 	}
-	fmt.Println("[barycentric] precomputation done, data saved to", wPath, vPath)
+	// log.Infof("[barycentric] precomputation done, data saved to %s %s", wPath, vPath)
 	return nil
 }
 
-func PrecomputeBarycentricCommits(domainSize int, wcPath string, srs *MultiSRS) error {
+// SyntheticDivide computes quotient = P / (X - a) where a is an fr.Element.
+// P degree N, quotient length N. P is unchanged.
+func SyntheticDivide(quot, P polynomial.Polynomial, a *fr.Element) {
+	deg := len(P) - 1
+	if len(quot) != deg {
+		panic("quot slice has wrong length")
+	}
 
-	fmt.Println("[barycentric] precomputing vanishing polynomial and weights …")
+	quot[deg-1] = P[deg]
+	for i := deg - 2; i >= 0; i-- {
+		var tmp fr.Element
+		tmp.Mul(&quot[i+1], a)
+		quot[i].Add(&P[i+1], &tmp)
+	}
+}
+
+func PrecomputeBarycentricCommits(domainSize int, wcPath string, srs *MultiSRS) error {
+	// log.Infof("[barycentric] precomputing weight commits over roots-of-unity domain …")
+
+	domain := fft.NewDomain(uint64(domainSize))
+	omega := domain.Generator
 
 	// Build vanishing polynomial V(x) incrementally.
 	V := make(polynomial.Polynomial, 1)
@@ -103,13 +127,14 @@ func PrecomputeBarycentricCommits(domainSize int, wcPath string, srs *MultiSRS) 
 		copy(tmpV[1:], V)
 
 		// negI = -i
-		var negI fr.Element
-		negI.SetInt64(int64(-i))
+		var omegaI fr.Element
+		omegaI.Exp(omega, new(big.Int).SetInt64(int64(i)))
+		omegaI.Neg(&omegaI)
 
 		// tmpV[k] += -i * V[k]
 		for k := range deg {
 			var t fr.Element
-			t.Mul(&V[k], &negI)
+			t.Mul(&V[k], &omegaI)
 			tmpV[k].Add(&tmpV[k], &t)
 		}
 		V = tmpV
@@ -125,10 +150,10 @@ func PrecomputeBarycentricCommits(domainSize int, wcPath string, srs *MultiSRS) 
 
 	// Compute weights.
 	weights := make([]fr.Element, domainSize)
-	var xi fr.Element
+	var omegaI fr.Element
 	for i := range domainSize {
-		xi.SetInt64(int64(i))
-		weights[i] = Vprime.Eval(&xi)
+		omegaI.Exp(omega, new(big.Int).SetInt64(int64(i)))
+		weights[i] = Vprime.Eval(&omegaI)
 	}
 	weights = fr.BatchInvert(weights)
 
@@ -136,19 +161,20 @@ func PrecomputeBarycentricCommits(domainSize int, wcPath string, srs *MultiSRS) 
 
 	quot := make(polynomial.Polynomial, domainSize)
 	for i := range domainSize {
-		SyntheticDivideInt(quot, V, i)
+		omegaI.Exp(omega, new(big.Int).SetInt64(int64(i)))
+		SyntheticDivide(quot, V, &omegaI)
 		for k := range domainSize {
 			quot[k].Mul(&quot[k], &weights[i])
 		}
+
 		weightCommits[i], _ = gnark_kzg.Commit(quot, srs.Inner.Pk)
 
 	}
-
 	// Write to files.
 	if err := dumpDigestSlice(wcPath, weightCommits); err != nil {
 		return err
 	}
-	fmt.Println("[barycentric] precomputation done, data saved to", wcPath)
+	// log.Infof("[barycentric] precomputation done, data saved to %s", wcPath)
 	return nil
 }
 
@@ -272,7 +298,7 @@ func SyntheticDivideInt(quot, P polynomial.Polynomial, a int) {
 
 func dumpFieldSlice(path string, s []fr.Element) error {
 	// create directory if it doesn't exist
-	os.MkdirAll(filepath.Dir(path), 0755)
+	os.MkdirAll(filepath.Dir(path), 0o755)
 
 	f, err := os.Create(path)
 	if err != nil {
@@ -291,6 +317,7 @@ func dumpFieldSlice(path string, s []fr.Element) error {
 	}
 	return nil
 }
+
 func readFieldSlice(path string, count int) []fr.Element {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -306,9 +333,10 @@ func readFieldSlice(path string, count int) []fr.Element {
 	}
 	return out
 }
+
 func dumpDigestSlice(path string, s []gnark_kzg.Digest) error {
 	// create directory if it doesn't exist
-	os.MkdirAll(filepath.Dir(path), 0755)
+	os.MkdirAll(filepath.Dir(path), 0o755)
 
 	f, err := os.Create(path)
 	if err != nil {

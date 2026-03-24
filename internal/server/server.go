@@ -300,7 +300,7 @@ func (s *ProofServer) GetOldProofStream(req *proofpb.GetProofRequest, stream pro
 
 	// Generate proofs
 	start := time.Now()
-	rangeProofs, balanceInfos := proof.OldGetProofRange(addr, startingVersion, endingVersion, s.precomputedData, sdb)
+	rangeProofs, balanceInfos := proof.GetNewProofRange(addr, startingVersion, endingVersion, s.precomputedData, sdb)
 	proofgenDurationNs := time.Since(start).Nanoseconds()
 
 	log.Printf("Generated %d range proofs and %d balance infos in %dns. Streaming...",

@@ -7,8 +7,8 @@ import (
 	"time"
 
 	bls "github.com/consensys/gnark-crypto/ecc/bls12-381"
+	"github.com/consensys/gnark-crypto/ecc/bls12-381/fr/fft"
 
-	fr "github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
 	gnark_kzg "github.com/consensys/gnark-crypto/ecc/bls12-381/kzg"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/nepal80m/samurai/internal/config"
@@ -147,9 +147,12 @@ func VerifyNewRangeProofs(account common.Address, startingVersion, endingVersion
 		// TODO: reconstruct tree using given balance values
 		// tree := lxTrees[reqCommit.layer][reqCommit.idx]
 
-		Z := polynomial.VanishingPolynomial(nodesToInterpolate)
-		// ZCommit, err := gnark_kzg.Commit(Z, srs.Inner.Pk)
+		// Z := polynomial.VanishingPolynomial(nodesToInterpolate)
+		domain := fft.NewDomain(uint64(len(precomputedData.V) - 1))
+		Z := polynomial.VanishingPolynomial(nodesToInterpolate, &domain.Generator)
 		ZCommit, _ := kzg.CommitG2(Z, precomputedData.SRS.G2Powers)
+		// ZCommit, err := gnark_kzg.Commit(Z, srs.Inner.Pk)
+		// ZCommit, _ := kzg.CommitG2(Z, precomputedData.SRS.G2Powers)
 
 		// zCommitBytes := ZCommit.Bytes()
 		// zCommitHash := common.BytesToHash(zCommitBytes[:])
@@ -160,17 +163,19 @@ func VerifyNewRangeProofs(account common.Address, startingVersion, endingVersion
 		// 	panic(err)
 		// }
 
-		xs := make([]fr.Element, len(nodesToInterpolate))
-		ys := make([]fr.Element, len(nodesToInterpolate))
-		for i, nodeIdx := range nodesToInterpolate {
-			xs[i] = fr.NewElement(uint64(nodeIdx))
-			key := fmt.Sprintf("%d:%d", reqCommit.layer, reqCommit.idx)
-			ys[i] = polynomial.HashToFieldElement(requiredTreeBatchesMap[key][nodeIdx])
+		key := fmt.Sprintf("%d:%d", reqCommit.layer, reqCommit.idx)
+		I := make(polynomial.Polynomial, int(domain.Cardinality))
+		for _, nodeIdx := range nodesToInterpolate {
+			I[nodeIdx] = polynomial.HashToFieldElement(requiredTreeBatchesMap[key][nodeIdx])
 		}
+		// fft.BitReverse(I)
+		domain.FFTInverse(I, fft.DIF)
+		fft.BitReverse(I)
 
-		// I := polynomial.Interpolate(nodesToInterpolate, ys, V, weights)
-		I := kzg.Interpolate(xs, ys)
 		ICommit, err := gnark_kzg.Commit(I, precomputedData.SRS.Inner.Pk)
+		if err != nil {
+			panic(err)
+		}
 		if err != nil {
 			return fmt.Errorf("commit I polynomial for layer %d idx %d: %w", reqCommit.layer, reqCommit.idx, err)
 		}
@@ -216,7 +221,6 @@ func VerifyNewRangeProofs(account common.Address, startingVersion, endingVersion
 }
 
 func PairingCheck(commit bls.G1Affine, proof bls.G1Affine, iCommit bls.G1Affine, zCommit bls.G2Affine, srs *kzg.MultiSRS) (bool, error) {
-
 	var lhsG1 bls.G1Affine
 	lhsG1.Sub(&commit, &iCommit)
 
