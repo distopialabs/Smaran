@@ -95,7 +95,7 @@ func startCommitWorkers(cfg Config, queues []*utils.BoundedQueue[UpdateTask], co
 				}
 
 				for _, t := range times {
-					if t > 2*time.Millisecond {
+					if t > 10*time.Millisecond {
 						fmt.Println("Times:", times)
 						break
 					}
@@ -124,14 +124,27 @@ func (d *defaultDict) Delete(key uint64) {
 	delete(d.internal, key)
 }
 
+func mayHang(blockInfoCh *<-chan mptBlockInfo, hangChan *<-chan mptBlockInfo, currLen int, maxLen int) *<-chan mptBlockInfo {
+	if currLen > maxLen {
+		return hangChan
+	}
+	return blockInfoCh
+}
+
+const MAX_HANG_LEN = 1
+
 func runMPTWorker(cfg Config, blockInfoCh <-chan mptBlockInfo, commitCh <-chan mptUpdateCommitmentInfo) {
 	currentRoot, err := meta.GetRoot(cfg.MPTStore.DiskDB, cfg.Blocks.Start-1)
 	if err != nil {
 		panic(err)
 	}
 
+	var hangChan chan mptBlockInfo
+	_hangChan := (<-chan mptBlockInfo)(hangChan)
+
 	bench := cfg.Bench // may be nil
 	buffered := make(map[uint64][]mptUpdateCommitmentInfo)
+	bufferedFirstTime := make(map[uint64]time.Time)
 	blockInfoBuffered := make(map[uint64]mptBlockInfo)
 	pendingCount := defaultDict{internal: make(map[uint64]uint64)}
 
@@ -147,11 +160,18 @@ func runMPTWorker(cfg Config, blockInfoCh <-chan mptBlockInfo, commitCh <-chan m
 outerLoop:
 	for {
 		select {
-		case blockInfo, ok := <-blockInfoCh:
+		case blockInfo, ok := <-*mayHang(&blockInfoCh, &_hangChan, len(blockInfoBuffered), MAX_HANG_LEN):
 			// fmt.Println("############## blockInfo:", blockInfo.blockNumber, blockInfo.blockNumber-cfg.Blocks.Start)
 			if !ok {
 				break outerLoop
 			}
+
+			dequeuTime := time.Now().UnixNano()
+			if (dequeuTime-blockInfo.queuedAtNs)/1e6 > 10 {
+				fmt.Println("Time taken to dequeue:", (dequeuTime-blockInfo.queuedAtNs)/1e6, "ms", "Channel Length:", len(blockInfoCh), "Channel Cap:", cap(blockInfoCh))
+			}
+
+			// blockInfo.queuedAtNs = time.Now().UnixNano()
 
 			pending := blockInfo.updateCount
 			pendingCount.Set(blockInfo.blockNumber, pending)
@@ -171,11 +191,15 @@ outerLoop:
 			} else {
 				buffered[commit.blockNumber] = []mptUpdateCommitmentInfo{commit}
 			}
+
+			if _, ok := bufferedFirstTime[commit.blockNumber]; !ok {
+				bufferedFirstTime[commit.blockNumber] = time.Now()
+			}
 		}
 
 		// Can I make a new block?
 		for {
-			newBlockCreated := maybeCreateNewBlock(currentBlock, &pendingCount, &buffered, &blockInfoBuffered, &currentRoot, &cfg, bench, &blocksProcessed, &lastBlockNumber, flushInterval, logInterval, &logStart, &batch)
+			newBlockCreated := maybeCreateNewBlock(currentBlock, &pendingCount, &buffered, &blockInfoBuffered, &currentRoot, &cfg, bench, &blocksProcessed, &lastBlockNumber, flushInterval, logInterval, &logStart, &batch, &bufferedFirstTime)
 			if !newBlockCreated {
 				break
 			}
@@ -191,6 +215,7 @@ func maybeCreateNewBlock(
 	blocksProcessed *uint64, lastBlockNumber *uint64,
 	flushInterval uint64, logInterval uint64, logStart *time.Time,
 	batch *ethdb.Batch,
+	bufferedFirstTime *map[uint64]time.Time,
 ) bool {
 	// fmt.Printf("maybeCreateNewBlock:%d, currentBlock:%d, pending:%d\n", len(pendingCount.internal), currentBlock, pendingCount.Get(currentBlock))
 	if _, ok := (*buffered)[currentBlock]; !ok {
@@ -213,6 +238,12 @@ func maybeCreateNewBlock(
 	defer pendingCount.Delete(currentBlock)
 	defer delete(*buffered, currentBlock)
 	defer delete(*blockInfoBuffered, currentBlock)
+	if _bufferedFirstTime, ok := (*bufferedFirstTime)[currentBlock]; ok {
+		if time.Since(_bufferedFirstTime) > 10*time.Millisecond {
+			fmt.Println("Time taken to buffer first time:", time.Since(_bufferedFirstTime))
+		}
+		defer delete(*bufferedFirstTime, currentBlock)
+	}
 
 	startAtNs := time.Now().UnixNano()
 	var waitCommitmentsNs int64
@@ -254,10 +285,11 @@ func maybeCreateNewBlock(
 
 	// --- periodic log ---
 	if (*blocksProcessed)%logInterval == 0 {
-		fmt.Printf("[MPT] blk=%d elapsed=%s buffered=%d\n",
+		fmt.Printf("[MPT] blk=%d elapsed=%s buffered=%d elapsed2=%dms\n",
 			blockInfo.blockNumber,
 			time.Since(*logStart).Truncate(time.Millisecond),
 			len(*buffered),
+			(completedAtNs-startAtNs)/1e6, // milliseconds
 		)
 		*logStart = time.Now()
 	}
@@ -538,6 +570,7 @@ func produceBlocks(cfg Config, blockInfoCh chan<- mptBlockInfo, queues []*utils.
 					return fmt.Errorf("push to shard queue %d: %w", idx, err)
 				}
 			}
+
 			return nil
 		},
 	)
@@ -553,7 +586,7 @@ func Run(cfg Config) error {
 	}
 
 	blockInfoCh := make(chan mptBlockInfo, 10)
-	commitCh := make(chan mptUpdateCommitmentInfo, 10000)
+	commitCh := make(chan mptUpdateCommitmentInfo, 1000)
 
 	var commitWG sync.WaitGroup
 	var mptWG sync.WaitGroup
