@@ -80,7 +80,7 @@ func BenchRun(cfg Config, benchCfg BenchConfig, csvPath string) error {
 		queues[i] = utils.NewBoundedQueue[UpdateTask](1024, cfg.Workers.CommitWorkerQueueSize)
 	}
 
-	blockInfoCh := make(chan mptBlockInfo, 10)
+	blockInfoCh := make(chan mptBlockInfo, 10000)
 	commitCh := make(chan mptUpdateCommitmentInfo, 10000)
 
 	var commitWG sync.WaitGroup
