@@ -48,6 +48,15 @@ func (p *PebbleDB) Set(key []byte, value []byte, sync bool) error {
 	return p.db.Set(key, value, writeOpts)
 }
 
+// Delete removes a key from the database.
+func (p *PebbleDB) Delete(key []byte, sync bool) error {
+	writeOpts := pebble.NoSync
+	if sync {
+		writeOpts = pebble.Sync
+	}
+	return p.db.Delete(key, writeOpts)
+}
+
 // Close closes the database.
 func (p *PebbleDB) Close() error {
 	// Flush memtables to disk before closing (important with DisableWAL)
@@ -79,6 +88,15 @@ func (b *PebbleBatch) Set(key []byte, value []byte, sync bool) {
 		writeOpts = pebble.Sync
 	}
 	b.batch.Set(key, value, writeOpts)
+}
+
+// Delete removes a key in the batch.
+func (b *PebbleBatch) Delete(key []byte, sync bool) {
+	writeOpts := pebble.NoSync
+	if sync {
+		writeOpts = pebble.Sync
+	}
+	b.batch.Delete(key, writeOpts)
 }
 
 // Commit writes all batched operations.

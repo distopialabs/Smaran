@@ -1,0 +1,37 @@
+syntax = "proto3";
+
+package baseline.api.v1;
+
+option go_package = "github.com/nepal80m/samurai/api/proto/merkle/v1;merkleproofpb";
+
+// ProofService provides Merkle Patricia Trie proof generation for account balances.
+service ProofService {
+  // GetRangeProof streams account proofs for each block in the given range.
+  rpc GetRangeProof(GetRangeProofRequest) returns (stream BlockProof);
+
+  // GetInfo returns the latest processed block and state root.
+  rpc GetInfo(GetInfoRequest) returns (GetInfoResponse);
+}
+
+message GetRangeProofRequest {
+  string account = 1;
+  uint64 start_block = 2;
+  uint64 end_block = 3;
+}
+
+// BlockProof is a single eth_getProof-style account proof at one block.
+message BlockProof {
+  uint64 block_number = 1;
+  bytes state_root = 2;
+  repeated bytes account_proof = 3; // RLP-encoded trie nodes
+  bytes balance = 4;                // big-endian big.Int
+  uint64 nonce = 5;
+  bool exists = 6;
+}
+
+message GetInfoRequest {}
+
+message GetInfoResponse {
+  uint64 latest_block = 1;
+  string state_root = 2;
+}

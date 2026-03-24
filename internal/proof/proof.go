@@ -1,12 +1,10 @@
 package proof
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
 	"math"
-	"os"
 	"sync"
 	"time"
 
@@ -57,7 +55,7 @@ type RangeProof struct {
 }
 
 // BinarySearchVersionByBlockNumber finds the version for a given block number using binary search.
-func BinarySearchVersionByBlockNumber(blockNumber uint64, searchStart uint64, searchEnd uint64, account common.Address, db *db.SamuraiDB) (uint64, error) {
+func BinarySearchVersionByBlockNumber(blockNumber uint64, searchStart uint64, searchEnd uint64, account common.Address, db *db.SamuraiStore) (uint64, error) {
 	L := searchStart
 	R := searchEnd
 	for L <= R {
@@ -82,7 +80,7 @@ func BinarySearchVersionByBlockNumber(blockNumber uint64, searchStart uint64, se
 // It handles edge cases:
 // - If endingBlock < account's first recorded block: returns error (no data available)
 // - If startingBlock < account's first recorded block: clamps to version 0
-func BlockRangeToVersionRange(account common.Address, startingBlock uint64, endingBlock uint64, config *config.Config, db *db.SamuraiDB) (uint64, uint64, error) {
+func BlockRangeToVersionRange(account common.Address, startingBlock uint64, endingBlock uint64, db *db.SamuraiStore) (uint64, uint64, error) {
 
 	cbInfo, err := tree.GetCurrentBalanceInfo(account, db.StateDB)
 	if err != nil {
@@ -90,7 +88,7 @@ func BlockRangeToVersionRange(account common.Address, startingBlock uint64, endi
 	}
 
 	if cbInfo.Version == 0 {
-		return 0, 0, fmt.Errorf("no historical balances available to prove for this account")
+		return 0, 0, fmt.Errorf("%w: no historical balances available", ErrAccountNotFound)
 	}
 
 	// Get the first recorded version to check bounds
@@ -118,7 +116,7 @@ func BlockRangeToVersionRange(account common.Address, startingBlock uint64, endi
 	if startingBlock < firstHbInfo.StartBlock {
 		startingVersion = 0
 	} else if startingBlock >= cbInfo.StartBlock {
-		return 0, 0, fmt.Errorf("starting block %d is beyond the latest historical version", startingBlock)
+		return 0, 0, fmt.Errorf("%w: starting block %d is at or beyond the latest historical version (block %d)", ErrBlockRangeOutOfBounds, startingBlock, cbInfo.StartBlock)
 	} else {
 		startingVersion, err = BinarySearchVersionByBlockNumber(startingBlock, 0, endingVersion, account, db)
 		if err != nil {
@@ -130,7 +128,7 @@ func BlockRangeToVersionRange(account common.Address, startingBlock uint64, endi
 }
 
 // GetNewProofRange generates range proofs for a given account and version range.
-func GetNewProofRange(account common.Address, startingVersion, endingVersion uint64, precomputedData *config.PrecomputedData, db *db.SamuraiDB) ([]*RangeProof, []*tree.HistoricalBalance) {
+func GetNewProofRange(account common.Address, startingVersion, endingVersion uint64, precomputedData *config.PrecomputedData, db *db.SamuraiStore) ([]*RangeProof, []*tree.HistoricalBalance) {
 	reqCommits := findCommitmentsCoveringRange(int(startingVersion), int(endingVersion))
 
 	lxRequiredBatchIdxs := make(map[uint64][]uint64)
@@ -143,13 +141,11 @@ func GetNewProofRange(account common.Address, startingVersion, endingVersion uin
 		// fmt.Printf("layer: %d, idx: %d\n", reqCommit.layer, reqCommit.idx)
 	}
 	start := time.Now()
-	requiredTreeBatchesMap, requiredHBInfos := RebuildSegmentTreeForProof(account, lxRequiredBatchIdxs, startingVersion, endingVersion, db, precomputedData)
+	requiredTreeBatchesMap, requiredHBInfos, cachedCommitments := RebuildSegmentTreeForProof(account, lxRequiredBatchIdxs, startingVersion, endingVersion, db, precomputedData)
 	log.Printf("Time taken to rebuild segment tree: %dms", time.Since(start).Milliseconds())
 
 	allRangeProofs := make([]*RangeProof, len(reqCommits))
 	var wg sync.WaitGroup
-
-	needVerify := false
 
 	for i, reqCommit := range reqCommits {
 		wg.Add(1)
@@ -161,28 +157,38 @@ func GetNewProofRange(account common.Address, startingVersion, endingVersion uin
 
 			nodesToInterpolate := findNodesToInterpolate(reqCommit, true)
 
-			fmt.Printf("\n\nlayer: %d, idx: %d, \n", reqCommit.layer, reqCommit.idx)
-			if reqCommit.BlockRange == nil {
-				fmt.Printf("Commitment is not covering any range.\n")
-			} else {
-				fmt.Printf("sb: %d, eb: %d\n", reqCommit.BlockRange.Start, reqCommit.BlockRange.End)
-			}
-			fmt.Printf("dependentCommitments: %v\n", reqCommit.dependentCommitments)
-			fmt.Printf("nodesToInterpolate: %v\n", nodesToInterpolate)
+			// fmt.Printf("\n\nlayer: %d, idx: %d, \n", reqCommit.layer, reqCommit.idx)
+			// if reqCommit.BlockRange == nil {
+			// 	fmt.Printf("Commitment is not covering any range.\n")
+			// } else {
+			// 	fmt.Printf("sb: %d, eb: %d\n", reqCommit.BlockRange.Start, reqCommit.BlockRange.End)
+			// }
+			// fmt.Printf("dependentCommitments: %v\n", reqCommit.dependentCommitments)
+			// fmt.Printf("nodesToInterpolate: %v\n", nodesToInterpolate)
 
 			treeKey := fmt.Sprintf("%d:%d", layer, idx)
 			batchTree := requiredTreeBatchesMap[treeKey]
 
 			xs1 := make([]int, len(batchTree))
 			ys1 := make([]fr.Element, len(batchTree))
+			var zeroHash common.Hash
 			for i, v := range batchTree {
 				xs1[i] = i
+				if v == zeroHash {
+					// Skip HashToFieldElement for zero hashes — result is zero element
+					continue
+				}
 				ys1[i] = polynomial.HashToFieldElement(v)
-				// fmt.Printf("xs1[%d] = %d, ys1[%d] = %s\n", i, i, i, ys1[i].String())
 			}
 			P := polynomial.Interpolate(xs1, ys1, precomputedData.V, precomputedData.Weights)
 
-			storedCommitment := tree.GetBatchCommitment(account, uint64(layer), uint64(idx), db.StateDB)
+			// Use cached commitment from tree rebuild instead of re-fetching from DB
+			commitKey := fmt.Sprintf("%d:%d", layer, idx)
+			storedCommitment, ok := cachedCommitments[commitKey]
+			if !ok {
+				// Fallback to DB fetch if not cached (e.g., L1 commitments)
+				storedCommitment = tree.GetBatchCommitment(account, uint64(layer), uint64(idx), db.StateDB)
+			}
 
 			Z := polynomial.VanishingPolynomial(nodesToInterpolate)
 
@@ -191,7 +197,6 @@ func GetNewProofRange(account common.Address, startingVersion, endingVersion uin
 			for i, v := range nodesToInterpolate {
 				xs[i] = fr.NewElement(uint64(v))
 				ys[i] = polynomial.HashToFieldElement(batchTree[v])
-				// fmt.Printf("xs[%d] = %d, ys[%d] = %s\n", i, v, i, ys[i].String())
 			}
 
 			I := kzg.Interpolate(xs, ys)
@@ -201,77 +206,6 @@ func GetNewProofRange(account common.Address, startingVersion, endingVersion uin
 			QCommit, err := gnark_kzg.Commit(Q, precomputedData.SRS.Inner.Pk)
 			if err != nil {
 				panic(err)
-			}
-			if needVerify {
-				// Always compare stored vs rebuilt commitment
-				pCommit, _ := gnark_kzg.Commit(P, precomputedData.SRS.Inner.Pk)
-				storedBytes := storedCommitment.Bytes()
-				rebuiltBytes := pCommit.Bytes()
-				commitMatch := storedCommitment.Equal(&pCommit)
-				fmt.Printf("DEBUG layer %d idx %d: stored=%x rebuilt=%x match=%v\n", layer, idx, storedBytes[:8], rebuiltBytes[:8], commitMatch)
-
-				ZCommit, _ := kzg.CommitG2(Z, precomputedData.SRS.G2Powers)
-				ICommit, err := gnark_kzg.Commit(I, precomputedData.SRS.Inner.Pk)
-				if err != nil {
-					panic(err)
-				}
-
-				ok, err := PairingCheck(storedCommitment, QCommit, ICommit, ZCommit, precomputedData.SRS)
-				if err != nil {
-				}
-				if !ok {
-					// Recompute commitment from P
-					pCommit, _ := gnark_kzg.Commit(P, precomputedData.SRS.Inner.Pk)
-					fmt.Printf("Stored Commitment: %x\n", storedCommitment.Bytes())
-					fmt.Printf("Rebuilt Tree Commitment: %x\n", pCommit.Bytes())
-
-					// Load the stored tree from DB for comparison
-					storedLXTree := tree.GetCurrentLXBatchTree(account, db.TreeDB)
-					storedBatchTree := storedLXTree[layer-1]
-
-					fmt.Println("--- Comparing Rebuilt vs Stored BatchTree ---")
-					diffCount := 0
-					for i := 0; i < len(batchTree); i++ {
-						rebuilt := batchTree[i]
-						stored := storedBatchTree[i]
-						if rebuilt != stored {
-							diffCount++
-							if diffCount <= 50 { // limit output
-								fmt.Printf("DIFF Idx %d: rebuilt=%s stored=%s\n", i, rebuilt.Hex(), stored.Hex())
-							}
-						}
-					}
-					fmt.Printf("Total differing indices: %d\n", diffCount)
-
-					// Also dump non-zero entries of rebuilt tree
-					nonZeroCount := 0
-					for i, h := range batchTree {
-						if h != (common.Hash{}) {
-							nonZeroCount++
-							if nonZeroCount <= 30 {
-								fmt.Printf("Rebuilt NonZero Idx %d: %s\n", i, h.Hex())
-							}
-						}
-					}
-					fmt.Printf("Total non-zero entries in rebuilt tree: %d\n", nonZeroCount)
-
-					// Dump non-zero entries of stored tree
-					storedNonZeroCount := 0
-					for i, h := range storedBatchTree {
-						if h != (common.Hash{}) {
-							storedNonZeroCount++
-							if storedNonZeroCount <= 30 {
-								fmt.Printf("Stored NonZero Idx %d: %s\n", i, h.Hex())
-							}
-						}
-					}
-					fmt.Printf("Total non-zero entries in stored tree: %d\n", storedNonZeroCount)
-					fmt.Println("--- End Comparison ---")
-
-					panic("pairing check failed.")
-				} else {
-					fmt.Println("Pairing check passed.✅")
-				}
 			}
 
 			rangeProof := &RangeProof{
@@ -476,29 +410,4 @@ func findCoveringNodes(N, L, R int) []int {
 	}
 
 	return out
-}
-
-// DumpNewProofsAndBalances writes proofs and historical balances to JSON files.
-func DumpNewProofsAndBalances(proofs []*RangeProof, balances []*tree.HistoricalBalance) {
-	// Create the storage/proofs directory if it doesn't exist
-	err := os.MkdirAll(fmt.Sprintf("storage/proofs/"), 0755)
-	if err != nil {
-		panic(err)
-	}
-
-	proofFile, err := os.Create(fmt.Sprintf("storage/proofs/proofs.json"))
-	if err != nil {
-		panic(err)
-	}
-	defer proofFile.Close()
-
-	balanceFile, err := os.Create(fmt.Sprintf("storage/proofs/historical_balances.json"))
-	if err != nil {
-		panic(err)
-	}
-	defer balanceFile.Close()
-
-	json.NewEncoder(proofFile).Encode(proofs)
-	json.NewEncoder(balanceFile).Encode(balances)
-
 }

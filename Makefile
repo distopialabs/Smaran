@@ -1,47 +1,101 @@
-.PHONY: all build clean run-bench plot-graphs bench-range bench-concurrency bench-stress bench-proof-all
+.PHONY: all build build-samurai build-merkle build-verkle clean proto \
+        bench-ingest-samurai bench-ingest-merkle bench-ingest-verkle bench-ingest \
+        bench-proof-samurai bench-proof-merkle bench-proof-verkle bench-proof
 
-BUILD_DIR := bin
+export PATH := $(HOME)/go/bin:$(PATH)
+
+BUILD_DIR      := bin
+BLOCKS_DIR     := data/blocks
+ACCOUNTS_LIST  ?= account_stats_all.csv
+RANGE_SIZE     ?= 50000
+NUM_CLIENTS    ?= 1
+BENCH_DURATION ?= 60s
 
 all: build
 
-build:
+# --- Build targets ---
+
+build: build-samurai build-merkle build-verkle
+
+build-samurai:
 	mkdir -p $(BUILD_DIR)
 	go build -o $(BUILD_DIR)/samurai ./cmd/samurai
 	go build -o $(BUILD_DIR)/proofc ./cmd/proofc
 	go build -o $(BUILD_DIR)/makedataset ./cmd/tools/makedataset
-	@echo "Build artifacts in $(BUILD_DIR)/"
+	@echo "Samurai build artifacts in $(BUILD_DIR)/"
+
+build-merkle:
+	mkdir -p $(BUILD_DIR)
+	go build -o $(BUILD_DIR)/merkle ./cmd/merkle
+	go build -o $(BUILD_DIR)/merkle-proofc ./cmd/merkle-proofc
+	@echo "Merkle build artifacts in $(BUILD_DIR)/"
+
+build-verkle:
+	mkdir -p $(BUILD_DIR)
+	go build -o $(BUILD_DIR)/verkle ./cmd/verkle
+	go build -o $(BUILD_DIR)/verkle-proofc ./cmd/verkle-proofc
+	@echo "Verkle build artifacts in $(BUILD_DIR)/"
 
 clean:
 	rm -rf $(BUILD_DIR)
 
-commit:
-	nohup ./$(BUILD_DIR)/samurai --datadir /data/local/samurai-keccak --n 1 > /data/local/run.log 2>&1 &
+proto:
+	protoc --go_out=. --go_opt=paths=source_relative \
+	       --go-grpc_out=. --go-grpc_opt=paths=source_relative \
+	       api/proto/samurai/v1/proof_service.proto
+	protoc --go_out=. --go_opt=paths=source_relative \
+	       --go-grpc_out=. --go-grpc_opt=paths=source_relative \
+	       api/proto/merkle/v1/proof_service.proto
+	protoc --go_out=. --go_opt=paths=source_relative \
+	       --go-grpc_out=. --go-grpc_opt=paths=source_relative \
+	       api/proto/verkle/v1/proof_service.proto
 
-commit-clean:
-	nohup ./$(BUILD_DIR)/samurai --datadir /data/local/samurai-keccak --n 2616996 --clean > /data/local/run.log 2>&1 &
+# --- Ingestion benchmark targets ---
+# Output goes to benchmark_output/<protocol>/ingestion_<kUsers>_<timestamp>.csv
 
-serve:
-	./$(BUILD_DIR)/samurai --datadir /data/local/samurai-keccak --mode serve
+bench-ingest-samurai: build-samurai
+	./$(BUILD_DIR)/samurai bench-ingest \
+		--blocks-dir $(BLOCKS_DIR) \
+		--duration 5m
 
-# Proof server benchmark targets
-bench-range: build
-	./$(BUILD_DIR)/proofc --benchmark --mode range --output-dir ./benchmark_output --datadir /data/local/samurai
+bench-ingest-merkle: build-merkle
+	./$(BUILD_DIR)/merkle bench-ingest \
+		--db-dir /data/local/tmp/bench-merkle \
+		--blocks-dir $(BLOCKS_DIR) \
+		--duration 5m --fresh
 
-bench-range-verify: build
-	./$(BUILD_DIR)/proofc --benchmark --mode range --verify --params-dir ./data/params --output-dir ./benchmark_output --datadir /data/local/samurai
+bench-ingest-verkle: build-verkle
+	./$(BUILD_DIR)/verkle bench-ingest \
+		--blocks-dir $(BLOCKS_DIR) \
+		--duration 5m
 
-bench-concurrency: build
-	./$(BUILD_DIR)/proofc --benchmark --mode concurrency --output-dir ./benchmark_output
+bench-ingest: bench-ingest-samurai bench-ingest-merkle bench-ingest-verkle
 
-bench-stress: build
-	./$(BUILD_DIR)/proofc --benchmark --mode stress --stress-duration 5m --stress-clients 50 --output-dir ./benchmark_output
+# --- Proof benchmark targets ---
+# Output goes to benchmark_output/<protocol>/proof_range<rangeSize>_<timestamp>.txt
 
-bench-proof-all: bench-range bench-concurrency
+bench-proof-samurai: build-samurai
+	./$(BUILD_DIR)/proofc bench \
+		--server-addr localhost:50051 \
+		--range-size $(RANGE_SIZE) \
+		--num-clients $(NUM_CLIENTS) \
+		--accounts-list $(ACCOUNTS_LIST) \
+		--duration $(BENCH_DURATION)
 
-# Commit generation benchmark
-run-bench: build
-	./$(BUILD_DIR)/samurai -bench -benchDuration 300 -benchOutputDir ./benchmark_output -benchDBMetrics
+bench-proof-merkle: build-merkle
+	./$(BUILD_DIR)/merkle-proofc bench \
+		--server-addr localhost:50051 \
+		--range-size $(RANGE_SIZE) \
+		--num-clients $(NUM_CLIENTS) \
+		--accounts-list $(ACCOUNTS_LIST) \
+		--duration $(BENCH_DURATION)
 
-# Plot graphs
-plot-graphs:
-	python scripts/benchmark/plot_bench.py --updates ./benchmark_output/bench_updates_20260112_195414.csv --blocks ./benchmark_output/bench_blocks_20260112_195414.csv --warmup 0 --cooldown 0 --output ./benchmark_output/plots/
+bench-proof-verkle: build-verkle
+	./$(BUILD_DIR)/verkle-proofc bench \
+		--server-addr localhost:50053 \
+		--range-size $(RANGE_SIZE) \
+		--num-clients $(NUM_CLIENTS) \
+		--accounts-list $(ACCOUNTS_LIST) \
+		--duration $(BENCH_DURATION)
+
+bench-proof: bench-proof-samurai bench-proof-merkle bench-proof-verkle

@@ -9,12 +9,12 @@ import (
 )
 
 // CreateOrUpdateAccountInfo updates an account's balance and returns the commitment hash.
-func CreateOrUpdateAccountInfo(account common.Address, balance *big.Int, blockNumber uint64, cache *Cache) common.Hash {
+func CreateOrUpdateAccountInfo(account common.Address, balance *big.Int, blockNumber uint64, cache *Cache) (common.Hash, error) {
 	initFn := func(account common.Address) *tree.AccountInfo {
 		return tree.NewAccountInfo(account, cache.PrecomputedData)
 	}
 
-	loadFn := func(account common.Address, sdb *db.SamuraiDB) *tree.AccountInfo {
+	loadFn := func(account common.Address, sdb *db.SamuraiStore) *tree.AccountInfo {
 		cbInfo, err := tree.GetCurrentBalanceInfo(account, sdb.StateDB)
 		if err != nil {
 			if err != db.ErrNotFound {
@@ -34,7 +34,7 @@ func CreateOrUpdateAccountInfo(account common.Address, balance *big.Int, blockNu
 		}
 	}
 
-	mutate := func(accountInfo *tree.AccountInfo, sdb *db.SamuraiDB) {
+	mutate := func(accountInfo *tree.AccountInfo, sdb *db.SamuraiStore) {
 		accountInfo.Update(blockNumber, balance, sdb)
 	}
 
@@ -43,5 +43,5 @@ func CreateOrUpdateAccountInfo(account common.Address, balance *big.Int, blockNu
 		panic(err)
 	}
 	commitmentHash := accountInfo.CalculateFinalCommitment()
-	return commitmentHash
+	return commitmentHash, nil
 }

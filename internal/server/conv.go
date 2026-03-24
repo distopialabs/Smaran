@@ -5,7 +5,7 @@ import (
 
 	bls "github.com/consensys/gnark-crypto/ecc/bls12-381"
 	gnark_kzg "github.com/consensys/gnark-crypto/ecc/bls12-381/kzg"
-	proofpb "github.com/nepal80m/samurai/api/proto/v1"
+	proofpb "github.com/nepal80m/samurai/api/proto/samurai/v1"
 	"github.com/nepal80m/samurai/internal/proof"
 	"github.com/nepal80m/samurai/internal/tree"
 )

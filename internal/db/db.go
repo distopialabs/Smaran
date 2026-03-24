@@ -19,6 +19,9 @@ type DB interface {
 	// Set stores a key-value pair.
 	Set(key []byte, value []byte, sync bool) error
 
+	// Delete removes a key from the database.
+	Delete(key []byte, sync bool) error
+
 	// Close closes the database.
 	Close() error
 
@@ -31,6 +34,9 @@ type Batch interface {
 	// Set adds a key-value pair to the batch.
 	Set(key []byte, value []byte, sync bool)
 
+	// Delete removes a key in the batch.
+	Delete(key []byte, sync bool)
+
 	// Commit writes all batched operations.
 	Commit(sync bool) error
 
@@ -38,15 +44,15 @@ type Batch interface {
 	Close() error
 }
 
-// SamuraiDB holds references to the split database instances.
-type SamuraiDB struct {
+// SamuraiStore holds references to the split database instances.
+type SamuraiStore struct {
 	StateDB   DB
 	TreeDB    DB
 	HistoryDB DB
 }
 
 // Close closes all underlying databases.
-func (s *SamuraiDB) Close() error {
+func (s *SamuraiStore) Close() error {
 	if err := s.StateDB.Close(); err != nil {
 		return err
 	}

@@ -18,7 +18,7 @@ func main() {
 	var accountHex string
 	var numShards int
 
-	flag.StringVar(&datadir, "datadir", "/data/local/samurai/db/", "Data directory containing the databases")
+	flag.StringVar(&datadir, "db-dir", "/data/local/tmp/samurai/", "Data directory containing the databases")
 	flag.StringVar(&accountHex, "account", "", "Account address (hex) to debug")
 	flag.IntVar(&numShards, "shards", 32, "Number of shards")
 	flag.Parse()
@@ -33,10 +33,9 @@ func main() {
 
 	fmt.Printf("Debugging account: %s\n", account.Hex())
 	fmt.Printf("Shard index: %d\n\n", shardIdx)
-
 	// Open shard databases (read-only)
-	stateDBPath := fmt.Sprintf("%ssamurai-shard-%d-state.db", datadir, shardIdx)
-	historyDBPath := fmt.Sprintf("%ssamurai-shard-%d-history.db", datadir, shardIdx)
+	stateDBPath := fmt.Sprintf("%s/db/shard-%d-state", datadir, shardIdx)
+	historyDBPath := fmt.Sprintf("%s/db/shard-%d-history", datadir, shardIdx)
 
 	stateDB, err := db.NewPebbleDB(stateDBPath, &pebble.Options{ReadOnly: true})
 	if err != nil {

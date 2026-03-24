@@ -12,12 +12,12 @@ import (
 // Cache wraps an LRU cache with database persistence.
 type Cache struct {
 	C               *lru.Cache[common.Address, *tree.AccountInfo]
-	DB              *db.SamuraiDB
+	DB              *db.SamuraiStore
 	PrecomputedData *config.PrecomputedData
 }
 
 // NewCache creates a new Cache with the given configuration.
-func NewCache(sdb *db.SamuraiDB, cfg *config.Cache, precomputedData *config.PrecomputedData) (*Cache, error) {
+func NewCache(size int, sdb *db.SamuraiStore, precomputedData *config.PrecomputedData) (*Cache, error) {
 	cache := &Cache{
 		DB:              sdb,
 		PrecomputedData: precomputedData,
@@ -27,7 +27,7 @@ func NewCache(sdb *db.SamuraiDB, cfg *config.Cache, precomputedData *config.Prec
 		v.Save(sdb)
 	}
 
-	rc, err := lru.NewWithEvict(cfg.Size, onEvicted)
+	rc, err := lru.NewWithEvict(size, onEvicted)
 	if err != nil {
 		return nil, err
 	}
@@ -36,7 +36,7 @@ func NewCache(sdb *db.SamuraiDB, cfg *config.Cache, precomputedData *config.Prec
 }
 
 // Update retrieves or creates an AccountInfo, applies mutations, and stores in cache.
-func (c *Cache) Update(k common.Address, initFn func(common.Address) *tree.AccountInfo, loadFn func(common.Address, *db.SamuraiDB) *tree.AccountInfo, mutate func(*tree.AccountInfo, *db.SamuraiDB)) (*tree.AccountInfo, error) {
+func (c *Cache) Update(k common.Address, initFn func(common.Address) *tree.AccountInfo, loadFn func(common.Address, *db.SamuraiStore) *tree.AccountInfo, mutate func(*tree.AccountInfo, *db.SamuraiStore)) (*tree.AccountInfo, error) {
 	var ai *tree.AccountInfo
 	found := false
 

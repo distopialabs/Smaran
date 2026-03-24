@@ -37,6 +37,10 @@ func GenerateBatchCommitmentsKey(account common.Address, layer, batchIdx uint64)
 	return "user:" + account.Hex() + ":batch_commitments:" + strconv.Itoa(int(layer)) + ":" + strconv.Itoa(int(batchIdx))
 }
 
+func GenerateBatchRootKey(account common.Address, layer, batchIdx uint64) string {
+	return "user:" + account.Hex() + ":batch_root:" + strconv.Itoa(int(layer)) + ":" + strconv.Itoa(int(batchIdx))
+}
+
 // Store/Get CurrentBalanceInfo
 
 func StoreCurrentBalanceInfo(account common.Address, cb *CurrentBalance, d db.DB) {
@@ -93,12 +97,29 @@ func StoreCurrentLXBatchTree(account common.Address, batchTree *LXBatchTree, dir
 				if endIdx > SegmentTreeSize {
 					endIdx = SegmentTreeSize
 				}
-				chunkData := make([]byte, (endIdx-startIdx)*common.HashLength)
+
+				// Check if the chunk is entirely empty (all zero hashes)
+				isEmpty := true
 				for i := startIdx; i < endIdx; i++ {
-					copy(chunkData[(i-startIdx)*common.HashLength:], batchTree[layer-1][i][:])
+					if (batchTree[layer-1][i] != common.Hash{}) {
+						isEmpty = false
+						break
+					}
 				}
-				if err := d.Set([]byte(key), chunkData, false); err != nil {
-					panic(fmt.Errorf("failed to store batch tree chunk: %w", err))
+
+				if isEmpty {
+					// Delete stale chunk from DB to reclaim space
+					if err := d.Delete([]byte(key), false); err != nil {
+						panic(fmt.Errorf("failed to delete empty batch tree chunk: %w", err))
+					}
+				} else {
+					chunkData := make([]byte, (endIdx-startIdx)*common.HashLength)
+					for i := startIdx; i < endIdx; i++ {
+						copy(chunkData[(i-startIdx)*common.HashLength:], batchTree[layer-1][i][:])
+					}
+					if err := d.Set([]byte(key), chunkData, false); err != nil {
+						panic(fmt.Errorf("failed to store batch tree chunk: %w", err))
+					}
 				}
 			}
 		}
@@ -219,6 +240,33 @@ func GetBatchCommitment(account common.Address, layer, batchIdx uint64, d db.DB)
 		panic(fmt.Errorf("failed to decode commitment: %w", err))
 	}
 	return commitment
+}
+
+// Store/Get LXBatchRoots
+
+func StoreLXBatchRoots(account common.Address, version uint64, batchTree *LXBatchTree, d db.DB) {
+	lastLeafNodeIdx := version - 1
+	lxBatchIdx := func(layer uint64) uint64 {
+		return lastLeafNodeIdx / (L1BatchSize * utils.PowUint64(L2BatchSize, layer-1))
+	}
+
+	for layer := uint64(1); layer <= MaxLayer; layer++ {
+		batchIdx := lxBatchIdx(layer)
+		key := GenerateBatchRootKey(account, layer, batchIdx)
+		root := batchTree[layer-1][0]
+		if err := d.Set([]byte(key), root[:], false); err != nil {
+			panic(fmt.Errorf("failed to store batch root: %w", err))
+		}
+	}
+}
+
+func GetBatchRoot(account common.Address, layer, batchIdx uint64, d db.DB) common.Hash {
+	key := GenerateBatchRootKey(account, layer, batchIdx)
+	val, err := d.Get([]byte(key))
+	if err != nil {
+		panic(fmt.Errorf("failed to get batch root: %w", err))
+	}
+	return common.BytesToHash(val)
 }
 
 // Store/Get HistoricalBalance
