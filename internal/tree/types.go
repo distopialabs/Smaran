@@ -4,6 +4,7 @@ package tree
 import (
 	"fmt"
 	"math/big"
+	"time"
 	"unsafe"
 
 	"github.com/consensys/gnark-crypto/ecc"
@@ -116,6 +117,7 @@ func (a *AccountInfo) DeepCopy() *AccountInfo {
 
 // Update updates the account with a new balance at the given block.
 func (accountInfo *AccountInfo) Update(blockNumber uint64, balance *big.Int, sdb *db.SamuraiStore) {
+	const threshold = 2000000 * time.Second
 	prevCb := accountInfo.CurrentBalanceInfo
 
 	if prevCb == nil {
@@ -126,12 +128,19 @@ func (accountInfo *AccountInfo) Update(blockNumber uint64, balance *big.Int, sdb
 		}
 		return
 	}
+
+	t0 := time.Now()
 	hb := prevCb.ToHistoricalBalance(blockNumber - 1)
+	if d := time.Since(t0); d > threshold {
+		fmt.Printf("[Update] ToHistoricalBalance took %v\n", d)
+	}
 
-	// Store historical balance for proof generation
+	t1 := time.Now()
 	StoreHistoricalBalance(accountInfo.Account, hb, sdb.HistoryDB)
+	if d := time.Since(t1); d > threshold {
+		fmt.Printf("[Update] StoreHistoricalBalance took %v\n", d)
+	}
 
-	// Update current balance
 	cb := &CurrentBalance{
 		Version:    prevCb.Version + 1,
 		Balance:    balance,
@@ -139,14 +148,30 @@ func (accountInfo *AccountInfo) Update(blockNumber uint64, balance *big.Int, sdb
 	}
 	accountInfo.CurrentBalanceInfo = cb
 
-	// Update historical balance and segment tree
+	t2 := time.Now()
 	hbHash := hb.Hash()
+	if d := time.Since(t2); d > threshold {
+		fmt.Printf("[Update] hb.Hash took %v\n", d)
+	}
+
+	t3 := time.Now()
 	accountInfo.AddLeafNode(hb.Version, hbHash)
+	if d := time.Since(t3); d > threshold {
+		fmt.Printf("[Update] AddLeafNode took %v\n", d)
+	}
 
 	if cb.Version > 0 && cb.Version%L1BatchSize == 0 {
-		// explicitly persist the finalized commitment and root before the *next* batch boundary resets them in memory
-		StoreLXBatchCommitments(accountInfo.Account, accountInfo.CurrentBalanceInfo.Version, accountInfo.CurrentLXBatchCommitment, sdb.StateDB)
-		StoreLXBatchRoots(accountInfo.Account, accountInfo.CurrentBalanceInfo.Version, accountInfo.CurrentLXBatchTree, sdb.StateDB)
+		t4 := time.Now()
+		StoreLXBatchCommitments(accountInfo.Account, accountInfo.CurrentBalanceInfo.Version, accountInfo.CurrentLXBatchCommitment, &sdb.StateDB)
+		if d := time.Since(t4); d > threshold {
+			fmt.Printf("[Update] StoreLXBatchCommitments took %v\n", d)
+		}
+
+		t5 := time.Now()
+		StoreLXBatchRoots(accountInfo.Account, accountInfo.CurrentBalanceInfo.Version, accountInfo.CurrentLXBatchTree, &sdb.StateDB)
+		if d := time.Since(t5); d > threshold {
+			fmt.Printf("[Update] StoreLXBatchRoots took %v\n", d)
+		}
 	}
 }
 
@@ -162,10 +187,10 @@ func (accountInfo *AccountInfo) CalculateFinalCommitment() common.Hash {
 
 // Save persists the account to the database.
 func (accountInfo *AccountInfo) Save(sdb *db.SamuraiStore) {
-	StoreCurrentBalanceInfo(accountInfo.Account, accountInfo.CurrentBalanceInfo, sdb.StateDB)
-	StoreCurrentLXBatchTree(accountInfo.Account, accountInfo.CurrentLXBatchTree, &accountInfo.DirtyChunks, sdb.TreeDB)
-	StoreLXBatchCommitments(accountInfo.Account, accountInfo.CurrentBalanceInfo.Version, accountInfo.CurrentLXBatchCommitment, sdb.StateDB)
-	StoreLXBatchRoots(accountInfo.Account, accountInfo.CurrentBalanceInfo.Version, accountInfo.CurrentLXBatchTree, sdb.StateDB)
+	StoreCurrentBalanceInfo(accountInfo.Account, accountInfo.CurrentBalanceInfo, &sdb.StateDB)
+	StoreCurrentLXBatchTree(accountInfo.Account, accountInfo.CurrentLXBatchTree, &accountInfo.DirtyChunks, &sdb.TreeDB)
+	StoreLXBatchCommitments(accountInfo.Account, accountInfo.CurrentBalanceInfo.Version, accountInfo.CurrentLXBatchCommitment, &sdb.StateDB)
+	StoreLXBatchRoots(accountInfo.Account, accountInfo.CurrentBalanceInfo.Version, accountInfo.CurrentLXBatchTree, &sdb.StateDB)
 }
 
 // AddLeafNode updates the tree with a new leaf node.
@@ -201,6 +226,8 @@ func (accountInfo *AccountInfo) AddLeafNode(leafNodeIdx uint64, leafNodeHash com
 
 	lXm1CommitHash := common.Hash{}
 	lXm1RootHash := leafNodeHash
+	t0 := time.Now()
+	const threshold = 2000000 * time.Second
 	for layer := uint64(1); layer <= MaxLayer; layer++ {
 		lxCommit := accountInfo.UpdateLXTree(lxBatchLeafNodeOffsetIdx(layer), lXm1RootHash, lXm1CommitHash, layer)
 		// lxCommitHash := hash.CommitmentToHash(lxCommit)
@@ -209,10 +236,14 @@ func (accountInfo *AccountInfo) AddLeafNode(leafNodeIdx uint64, leafNodeHash com
 		lXm1CommitHash = lxCommitHash
 		lXm1RootHash = lxRootHash
 	}
+	if d := time.Since(t0); d > threshold {
+		fmt.Printf("[Total time taken for UpdateLXTree] %v\n", d)
+	}
 }
 
 // UpdateLXTree updates a layer of the tree.
 func (accountInfo *AccountInfo) UpdateLXTree(idx uint64, val common.Hash, lXm1CommitHash common.Hash, layer uint64) bls.G1Affine {
+	const threshold = 1000000 * time.Second
 	tree := &accountInfo.CurrentLXBatchTree[layer-1]
 	prevCommit := accountInfo.CurrentLXBatchCommitment[layer-1]
 
@@ -224,6 +255,7 @@ func (accountInfo *AccountInfo) UpdateLXTree(idx uint64, val common.Hash, lXm1Co
 	}
 
 	if layer > 1 {
+		t0 := time.Now()
 		existingLXm1CommitHash := tree[L2BatchSize+idx]
 		tree[L2BatchSize+idx] = lXm1CommitHash
 		chunkIdx := int((L2BatchSize + idx) / ChunkSize)
@@ -237,9 +269,13 @@ func (accountInfo *AccountInfo) UpdateLXTree(idx uint64, val common.Hash, lXm1Co
 		var incCommitNew bls.G1Affine
 		incCommitNew.ScalarMultiplication(&accountInfo.PrecomputedData.WeightCommits[L2BatchSize+idx], incCommitBigInt)
 		newCommit.Add(&newCommit, &incCommitNew)
+		if d := time.Since(t0); d > threshold {
+			fmt.Printf("[UpdateLXTree] layer %d commitHash ScalarMul took %v\n", layer, d)
+		}
 	}
 
 	if (val != common.Hash{}) {
+		t1 := time.Now()
 		tree[idx] = val
 		chunkIdx := int(idx / ChunkSize)
 		accountInfo.DirtyChunks[layer-1][chunkIdx] = true
@@ -264,7 +300,11 @@ func (accountInfo *AccountInfo) UpdateLXTree(idx uint64, val common.Hash, lXm1Co
 			updatedYs = append(updatedYs, tree[parentIdx].Big())
 			idx = parentIdx
 		}
+		if d := time.Since(t1); d > threshold {
+			fmt.Printf("[UpdateLXTree] layer %d tree walk took %v\n", layer, d)
+		}
 
+		t2 := time.Now()
 		if len(updatedIndices) > 7 {
 			points := make([]bls.G1Affine, len(updatedIndices))
 			scalars := make([]fr.Element, len(updatedIndices))
@@ -273,7 +313,10 @@ func (accountInfo *AccountInfo) UpdateLXTree(idx uint64, val common.Hash, lXm1Co
 				scalars[i] = polynomial.HashToFieldElement(tree[idx])
 			}
 			var tempIncCommit bls.G1Affine
-			tempIncCommit.MultiExp(points, scalars, ecc.MultiExpConfig{})
+			_, err := tempIncCommit.MultiExp(points, scalars, ecc.MultiExpConfig{})
+			if err != nil {
+				panic(err)
+			}
 			newCommit.Add(&newCommit, &tempIncCommit)
 		} else {
 			for i, idx := range updatedIndices {
@@ -281,6 +324,9 @@ func (accountInfo *AccountInfo) UpdateLXTree(idx uint64, val common.Hash, lXm1Co
 				incCommit.ScalarMultiplication(&accountInfo.PrecomputedData.WeightCommits[idx], updatedYs[i])
 				newCommit.Add(&newCommit, &incCommit)
 			}
+		}
+		if d := time.Since(t2); d > threshold {
+			fmt.Printf("[UpdateLXTree] layer %d commitment update took %v\n", layer, d)
 		}
 	}
 

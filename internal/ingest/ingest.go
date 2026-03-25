@@ -69,6 +69,9 @@ func startCommitWorkers(cfg Config, queues []*utils.BoundedQueue[UpdateTask], co
 					task.BlockNumber,
 					cfg.Caches[i],
 				)
+				// commitmentHash := common.Hash{}
+				// err := errors.New("test error")
+				// err = nil
 				if err != nil {
 					panic(err)
 				}

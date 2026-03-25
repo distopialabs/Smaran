@@ -61,7 +61,7 @@ func BinarySearchVersionByBlockNumber(blockNumber uint64, searchStart uint64, se
 	R := searchEnd
 	for L <= R {
 		m := (L + R) / 2
-		hbInfo := tree.GetHistoricalBalance(account, m, db.HistoryDB)
+		hbInfo := tree.GetHistoricalBalance(account, m, &db.HistoryDB)
 		if hbInfo.StartBlock <= blockNumber && blockNumber <= hbInfo.EndBlock {
 			return m, nil
 		} else if blockNumber < hbInfo.StartBlock {
@@ -82,7 +82,7 @@ func BinarySearchVersionByBlockNumber(blockNumber uint64, searchStart uint64, se
 // - If endingBlock < account's first recorded block: returns error (no data available)
 // - If startingBlock < account's first recorded block: clamps to version 0
 func BlockRangeToVersionRange(account common.Address, startingBlock uint64, endingBlock uint64, db *db.SamuraiStore) (uint64, uint64, error) {
-	cbInfo, err := tree.GetCurrentBalanceInfo(account, db.StateDB)
+	cbInfo, err := tree.GetCurrentBalanceInfo(account, &db.StateDB)
 	if err != nil {
 		return 0, 0, fmt.Errorf("%w: %v", ErrAccountNotFound, err)
 	}
@@ -92,7 +92,7 @@ func BlockRangeToVersionRange(account common.Address, startingBlock uint64, endi
 	}
 
 	// Get the first recorded version to check bounds
-	firstHbInfo := tree.GetHistoricalBalance(account, 0, db.HistoryDB)
+	firstHbInfo := tree.GetHistoricalBalance(account, 0, &db.HistoryDB)
 
 	// Case 1: Ending block is before account's first recorded block - no data available
 	if endingBlock < firstHbInfo.StartBlock {

@@ -27,8 +27,7 @@ import (
 // Returns the tree batches map, all required historical balances, and a map of cached
 // commitments keyed by "layer:batchIdx" to avoid redundant DB fetches downstream.
 func RebuildSegmentTreeForProof(account common.Address, lxRequiredBatchIdxs map[uint64][]uint64, startingVersion uint64, endingVersion uint64, sdb *db.SamuraiStore, precomputedData *config.PrecomputedData) (map[string]tree.BatchTree, []*tree.HistoricalBalance, map[string]gnark_kzg.Digest) {
-
-	cbInfo, err := tree.GetCurrentBalanceInfo(account, sdb.StateDB)
+	cbInfo, err := tree.GetCurrentBalanceInfo(account, &sdb.StateDB)
 	if err != nil {
 		panic(err)
 	}
@@ -42,7 +41,7 @@ func RebuildSegmentTreeForProof(account common.Address, lxRequiredBatchIdxs map[
 	// Used for both the return value (verify path) and L1 tree building (dedup).
 	requiredHBInfos := make([]*tree.HistoricalBalance, 0, endingVersion-startingVersion+1)
 	for version := startingVersion; version <= endingVersion; version++ {
-		hbInfo := tree.GetHistoricalBalance(account, version, sdb.HistoryDB)
+		hbInfo := tree.GetHistoricalBalance(account, version, &sdb.HistoryDB)
 		requiredHBInfos = append(requiredHBInfos, hbInfo)
 	}
 
@@ -67,7 +66,7 @@ func RebuildSegmentTreeForProof(account common.Address, lxRequiredBatchIdxs map[
 			if version >= startingVersion && version <= endingVersion {
 				hbInfo = requiredHBInfos[version-startingVersion]
 			} else {
-				hbInfo = tree.GetHistoricalBalance(account, version, sdb.HistoryDB)
+				hbInfo = tree.GetHistoricalBalance(account, version, &sdb.HistoryDB)
 			}
 
 			// Insert leaf at the correct offset position
@@ -163,7 +162,6 @@ func InsertCommitmentHashes(layer uint64, batchIdx uint64, batchTree *tree.Batch
 
 // AddLeafNode adds a leaf to the multi-layer tree (used by the verify path).
 func AddLeafNode(accountInfo *tree.AccountInfo, leafNodeIdx uint64, leafNodeHash common.Hash) {
-
 	// find which index to update for each layer
 	lxBatchNodeIdx := func(layer uint64) uint64 {
 		if layer == 0 || layer > MaxLayer {
@@ -171,7 +169,6 @@ func AddLeafNode(accountInfo *tree.AccountInfo, leafNodeIdx uint64, leafNodeHash
 		}
 		if layer == 1 {
 			return leafNodeIdx % L1BatchSize
-
 		} else {
 			return leafNodeIdx / (L1BatchSize * utils.PowUint64(L2BatchSize, layer-2)) % L2BatchSize
 		}
@@ -201,7 +198,6 @@ func AddLeafNode(accountInfo *tree.AccountInfo, leafNodeIdx uint64, leafNodeHash
 
 // UpdateLXTree updates a single layer of the batch tree (used by the verify path).
 func UpdateLXTree(accountInfo *tree.AccountInfo, idx uint64, val common.Hash, layer uint64) {
-
 	batchTree := &accountInfo.CurrentLXBatchTree[layer-1]
 
 	// updating the tree

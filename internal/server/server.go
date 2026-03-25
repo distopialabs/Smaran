@@ -96,7 +96,7 @@ func (s *ProofServer) GetProof(ctx context.Context, req *proofpb.GetProofRequest
 		len(rangeProofs), len(balanceInfos), proofgenDurationNs)
 
 	// Get current balance for the account
-	cbInfo, err := tree.GetCurrentBalanceInfo(addr, sdb.StateDB)
+	cbInfo, err := tree.GetCurrentBalanceInfo(addr, &sdb.StateDB)
 	if err != nil {
 		log.Printf("Error getting current balance for account %s: %v", addr.Hex(), err)
 		return nil, status.Errorf(codes.Internal, "failed to get current balance: %v", err)
@@ -186,7 +186,7 @@ func (s *ProofServer) GetProofStream(req *proofpb.GetProofRequest, stream proofp
 		len(rangeProofs), len(balanceInfos), proofgenDurationNs)
 
 	// Get current balance for the account
-	cbInfo, err := tree.GetCurrentBalanceInfo(addr, sdb.StateDB)
+	cbInfo, err := tree.GetCurrentBalanceInfo(addr, &sdb.StateDB)
 	if err != nil {
 		log.Printf("Error getting current balance for account %s: %v", addr.Hex(), err)
 		return status.Errorf(codes.Internal, "failed to get current balance: %v", err)
@@ -307,7 +307,7 @@ func (s *ProofServer) GetOldProofStream(req *proofpb.GetProofRequest, stream pro
 		len(rangeProofs), len(balanceInfos), proofgenDurationNs)
 
 	// Get current balance for the account
-	cbInfo, err := tree.GetCurrentBalanceInfo(addr, sdb.StateDB)
+	cbInfo, err := tree.GetCurrentBalanceInfo(addr, &sdb.StateDB)
 	if err != nil {
 		log.Printf("Error getting current balance for account %s: %v", addr.Hex(), err)
 		return status.Errorf(codes.Internal, "failed to get current balance: %v", err)
