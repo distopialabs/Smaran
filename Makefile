@@ -1,6 +1,6 @@
 .PHONY: all build build-samurai build-merkle build-verkle clean proto \
         bench-ingest-samurai bench-ingest-merkle bench-ingest-verkle bench-ingest \
-        bench-proof-samurai bench-proof-merkle bench-proof-verkle bench-proof
+        bench-proof-samurai bench-proof-merkle bench-proof-verkle bench-proof bench-proof-verklekzg bench-ingest-verklekzg build-verklekzg
 
 export PATH := $(HOME)/go/bin:$(PATH)
 
@@ -15,7 +15,7 @@ all: build
 
 # --- Build targets ---
 
-build: build-samurai build-merkle build-verkle
+build: build-samurai build-merkle build-verkle build-verklekzg
 
 build-samurai:
 	mkdir -p $(BUILD_DIR)
@@ -35,6 +35,12 @@ build-verkle:
 	go build -o $(BUILD_DIR)/verkle ./cmd/verkle
 	go build -o $(BUILD_DIR)/verkle-proofc ./cmd/verkle-proofc
 	@echo "Verkle build artifacts in $(BUILD_DIR)/"
+
+build-verklekzg:
+	mkdir -p $(BUILD_DIR)
+	go build -o $(BUILD_DIR)/verklekzg ./cmd/verklekzg
+	go build -o $(BUILD_DIR)/verklekzg-proofc ./cmd/verklekzg-proofc
+	@echo "Verkle-KZG build artifacts in $(BUILD_DIR)/"
 
 clean:
 	rm -rf $(BUILD_DIR)
@@ -69,7 +75,12 @@ bench-ingest-verkle: build-verkle
 		--blocks-dir $(BLOCKS_DIR) \
 		--duration 5m
 
-bench-ingest: bench-ingest-samurai bench-ingest-merkle bench-ingest-verkle
+bench-ingest-verklekzg: build-verklekzg
+	./$(BUILD_DIR)/verklekzg bench-ingest \
+		--blocks-dir $(BLOCKS_DIR) \
+		--duration 5m
+
+bench-ingest: bench-ingest-samurai bench-ingest-merkle bench-ingest-verkle bench-ingest-verklekzg
 
 # --- Proof benchmark targets ---
 # Output goes to benchmark_output/<protocol>/proof_range<rangeSize>_<timestamp>.txt
@@ -98,4 +109,12 @@ bench-proof-verkle: build-verkle
 		--accounts-list $(ACCOUNTS_LIST) \
 		--duration $(BENCH_DURATION)
 
-bench-proof: bench-proof-samurai bench-proof-merkle bench-proof-verkle
+bench-proof-verklekzg: build-verklekzg
+	./$(BUILD_DIR)/verklekzg-proofc bench \
+		--server-addr localhost:50053 \
+		--range-size $(RANGE_SIZE) \
+		--num-clients $(NUM_CLIENTS) \
+		--accounts-list $(ACCOUNTS_LIST) \
+		--duration $(BENCH_DURATION)
+
+bench-proof: bench-proof-samurai bench-proof-merkle bench-proof-verkle bench-proof-verklekzg
