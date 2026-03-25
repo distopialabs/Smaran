@@ -210,6 +210,14 @@ outerLoop:
 		}
 
 	}
+
+	// Write remaining roots and record the last processed block.
+	if blocksProcessed > 0 {
+		meta.PutLastBatch(batch, lastBlockNumber)
+	}
+	if err := batch.Write(); err != nil {
+		panic(fmt.Sprintf("final batch write: %v", err))
+	}
 }
 
 func maybeCreateNewBlock(
@@ -288,11 +296,10 @@ func maybeCreateNewBlock(
 
 	// --- periodic log ---
 	if (*blocksProcessed)%logInterval == 0 {
-		fmt.Printf("[MPT] blk=%d elapsed=%s buffered=%d elapsed2=%dms\n",
+		fmt.Printf("[MPT] blk=%d elapsed=%s buffered=%d\n",
 			blockInfo.blockNumber,
 			time.Since(*logStart).Truncate(time.Millisecond),
 			len(*buffered),
-			(completedAtNs-startAtNs)/1e6, // milliseconds
 		)
 		*logStart = time.Now()
 	}
@@ -556,7 +563,7 @@ func produceBlocks(cfg Config, blockInfoCh chan<- mptBlockInfo, queues []*utils.
 				startTime := time.Now()
 				blockInfoCh <- info
 				elapsed := time.Since(startTime)
-				if elapsed > 2*time.Millisecond {
+				if elapsed > 10*time.Millisecond {
 					fmt.Println("Time taken to send block info:", elapsed)
 				}
 			}
