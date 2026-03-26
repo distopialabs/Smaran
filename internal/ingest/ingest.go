@@ -27,6 +27,7 @@ type UpdateTask struct {
 	Balance     *big.Int
 	MustFlush   bool // If true, the task is the last for a batch of blocks and will result in a new MPT update.
 	IsEmpty     bool // If true, ignore other fields, MustFlush also must be true.
+	ForwardRaw  bool // If true, forward the raw balance to the MPT worker.
 }
 
 type mptBlockInfo struct {
@@ -41,11 +42,16 @@ type mptUpdateCommitmentInfo struct {
 	blockNumber uint64
 	address     common.Address
 	commitment  common.Hash
+	rawBalance  *big.Int
+	isRaw       bool
 }
 
 type mptUpdateCommitmentInfoBulk struct {
 	blockNumber uint64
 	commitments map[common.Address]common.Hash
+	rawBalance  *big.Int
+	rawAddress  common.Address
+	isRaw       bool
 }
 
 // startCommitWorkers spawns one goroutine per shard that pops UpdateTasks,
@@ -70,6 +76,19 @@ func startCommitWorkers(cfg Config, queues []*chann.Chann[UpdateTask], commitCh 
 				task, ok := <-queue.Out()
 				if !ok {
 					return
+				}
+
+				if task.ForwardRaw {
+					if commitCh != nil {
+						commitCh <- mptUpdateCommitmentInfoBulk{
+							blockNumber: task.BlockNumber,
+							commitments: nil,
+							isRaw:       true,
+							rawBalance:  task.Balance,
+							rawAddress:  task.Account,
+						}
+					}
+					continue
 				}
 				// popElapsed := time.Since(popStart)
 				// fmt.Println("Time taken to pop task:", popElapsed)
@@ -120,6 +139,7 @@ func startCommitWorkers(cfg Config, queues []*chann.Chann[UpdateTask], commitCh 
 					commitCh <- mptUpdateCommitmentInfoBulk{
 						blockNumber: task.BlockNumber,
 						commitments: commitmentHashes,
+						isRaw:       false,
 					}
 				}
 				// commitElapsed := time.Since(commitStart)
@@ -242,11 +262,20 @@ outerLoop:
 				buffered[commit.blockNumber] = make([]mptUpdateCommitmentInfo, 0)
 			}
 
-			for account, commitment := range commit.commitments {
+			if commit.isRaw {
 				buffered[commit.blockNumber] = append(buffered[commit.blockNumber], mptUpdateCommitmentInfo{
-					address:    account,
-					commitment: commitment,
+					address:    commit.rawAddress,
+					rawBalance: commit.rawBalance,
+					isRaw:      true,
 				})
+			} else {
+				for account, commitment := range commit.commitments {
+					buffered[commit.blockNumber] = append(buffered[commit.blockNumber], mptUpdateCommitmentInfo{
+						address:    account,
+						commitment: commitment,
+						isRaw:      false,
+					})
+				}
 			}
 
 			if _, ok := bufferedFirstTime[commit.blockNumber]; !ok {
@@ -318,7 +347,11 @@ func maybeCreateNewBlock(
 	var waitCommitmentsNs int64
 
 	for _, u := range buffer {
-		st.SetAccountCommitmentAsBalance(tr, u.address, u.commitment)
+		if u.isRaw {
+			st.SetAccountBalance(tr, u.address, u.rawBalance)
+		} else {
+			st.SetAccountCommitmentAsBalance(tr, u.address, u.commitment)
+		}
 	}
 
 	newRoot, err := cfg.MPTStore.CommitState(tr, *currentRoot, currentBlock)
@@ -565,7 +598,7 @@ func runMetricsCollector(cfg Config, blockInfoCh <-chan mptBlockInfo, commitCh <
 	}
 }
 
-const BATCH_SIZE = 400
+const BATCH_SIZE = 200
 
 // produceBlocks reads blocks from the dataset and distributes entries
 // to shard queues (for commitment workers). If blockInfoCh is non-nil,
@@ -616,13 +649,20 @@ func produceBlocks(cfg Config, blockInfoCh chan<- mptBlockInfo, queues []*chann.
 			// --- emit block metadata ---
 			mustFlush := n == uint32(cfg.Blocks.End) || (uint64(n)-cfg.Blocks.Start+1)%BATCH_SIZE == 0
 			updateCount := uint64(cfg.Workers.CommitWorkerCount)
+			forwardRaw := !mustFlush
+
 			if blockInfoCh != nil {
+
+				_updateCount := uint64(0)
+				if forwardRaw {
+					_updateCount = uint64(len(selected))
+				}
 
 				info := mptBlockInfo{
 					blockNumber:         uint64(n),
-					updateCount:         0,
+					updateCount:         _updateCount,
 					rawUpdateCount:      rawCount,
-					filteredUpdateCount: uint64(len(selected)),
+					filteredUpdateCount: _updateCount,
 				}
 				if mustFlush {
 					info.updateCount = updateCount
@@ -648,6 +688,7 @@ func produceBlocks(cfg Config, blockInfoCh chan<- mptBlockInfo, queues []*chann.
 					Balance:     new(big.Int).SetBytes(entry.Balance),
 					MustFlush:   false,
 					IsEmpty:     false,
+					ForwardRaw:  forwardRaw,
 				}
 
 				startTime := time.Now()
