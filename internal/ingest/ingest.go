@@ -4,17 +4,20 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"runtime"
 	"strconv"
 	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethdb"
+	"golang.design/x/chann"
 
 	"github.com/nepal80m/samurai/internal/dataset"
 	"github.com/nepal80m/samurai/internal/merkle/meta"
 	st "github.com/nepal80m/samurai/internal/merkle/state"
 	"github.com/nepal80m/samurai/internal/storage"
+	"github.com/nepal80m/samurai/internal/tree"
 	"github.com/nepal80m/samurai/internal/utils"
 )
 
@@ -22,13 +25,16 @@ type UpdateTask struct {
 	BlockNumber uint64
 	Account     common.Address
 	Balance     *big.Int
+	MustFlush   bool // If true, the task is the last for a batch of blocks and will result in a new MPT update.
+	IsEmpty     bool // If true, ignore other fields, MustFlush also must be true.
 }
 
 type mptBlockInfo struct {
-	blockNumber    uint64
-	updateCount    uint64 // selected updates (after filtering)
-	rawUpdateCount uint64 // raw updates (before filtering)
-	queuedAtNs     int64  // UnixNano timestamp when queued; 0 when not benchmarking
+	blockNumber         uint64
+	updateCount         uint64 // selected updates (after filtering)
+	rawUpdateCount      uint64 // raw updates (before filtering)
+	queuedAtNs          int64  // UnixNano timestamp when queued; 0 when not benchmarking
+	filteredUpdateCount uint64
 }
 
 type mptUpdateCommitmentInfo struct {
@@ -37,86 +43,122 @@ type mptUpdateCommitmentInfo struct {
 	commitment  common.Hash
 }
 
+type mptUpdateCommitmentInfoBulk struct {
+	blockNumber uint64
+	commitments map[common.Address]common.Hash
+}
+
 // startCommitWorkers spawns one goroutine per shard that pops UpdateTasks,
 // computes the Samurai commitment, and optionally forwards the result to commitCh.
 // If commitCh is nil, commitment results are discarded (samurai-only mode).
-func startCommitWorkers(cfg Config, queues []*utils.BoundedQueue[UpdateTask], commitCh chan<- mptUpdateCommitmentInfo, wg *sync.WaitGroup) {
+// func startCommitWorkers(cfg Config, queues []*utils.BoundedQueue[UpdateTask], commitCh chan<- mptUpdateCommitmentInfoBulk, wg *sync.WaitGroup) {
+func startCommitWorkers(cfg Config, queues []*chann.Chann[UpdateTask], commitCh chan<- mptUpdateCommitmentInfoBulk, wg *sync.WaitGroup) {
 	// Capture update-level metrics collector (may be nil when not benchmarking).
 	updateMetrics := cfg.Bench != nil && cfg.Bench.UpdateMetrics != nil
 
 	for i := 0; i < cfg.Workers.CommitWorkerCount; i++ {
-		i := i
 		wg.Add(1)
-		go func() {
+		// go func(i int, queue *utils.BoundedQueue[UpdateTask]) {
+		go func(i int, queue *chann.Chann[UpdateTask]) {
 			defer wg.Done()
+
+			taskBuffer := make(map[common.Address][]tree.AccountBulkUpdateEntry)
+			commitmentHashes := make(map[common.Address]common.Hash)
+
 			for {
-				popStart := time.Now()
-				task, ok := queues[i].Pop()
+				// popStart := time.Now()
+				task, ok := <-queue.Out()
 				if !ok {
 					return
 				}
-				popElapsed := time.Since(popStart)
+				// popElapsed := time.Since(popStart)
+				// fmt.Println("Time taken to pop task:", popElapsed)
+
+				if !task.IsEmpty {
+					if _, ok := taskBuffer[task.Account]; !ok {
+						taskBuffer[task.Account] = make([]tree.AccountBulkUpdateEntry, 0)
+					}
+					taskBuffer[task.Account] = append(taskBuffer[task.Account], tree.AccountBulkUpdateEntry{
+						Balance:     task.Balance,
+						BlockNumber: task.BlockNumber,
+					})
+				}
 
 				var computeStart time.Time
 				if updateMetrics {
 					computeStart = time.Now()
 				}
 
-				createOrUpdateStart := time.Now()
-				commitmentHash, err := storage.CreateOrUpdateAccountInfo(
-					task.Account,
-					task.Balance,
-					task.BlockNumber,
-					cfg.Caches[i],
-				)
-				// commitmentHash := common.Hash{}
-				// err := errors.New("test error")
-				// err = nil
-				if err != nil {
-					panic(err)
+				// createOrUpdateStart := time.Now()
+				for account, entries := range taskBuffer {
+					commitmentHash, err := storage.CreateOrUpdateAccountInfoBulk(
+						task.Account,
+						cfg.Caches[i],
+						entries,
+					)
+					if err != nil {
+						panic(err)
+					}
+					commitmentHashes[account] = commitmentHash
+					// commitmentHashes[account] = common.Hash{}
 				}
-				createOrUpdateElapsed := time.Since(createOrUpdateStart)
+				// createOrUpdateElapsed := time.Since(createOrUpdateStart)
 
 				if updateMetrics {
 					cfg.Bench.UpdateMetrics.Record(time.Since(computeStart).Nanoseconds())
 				}
+				taskBuffer = make(map[common.Address][]tree.AccountBulkUpdateEntry)
 
-				commitStart := time.Now()
+				if !task.MustFlush {
+					continue
+				} else {
+					// fmt.Println("Flushing at block:", task.BlockNumber)
+				}
+
+				// commitStart := time.Now()
 				if commitCh != nil {
-					commitCh <- mptUpdateCommitmentInfo{
+					commitCh <- mptUpdateCommitmentInfoBulk{
 						blockNumber: task.BlockNumber,
-						address:     task.Account,
-						commitment:  commitmentHash,
+						commitments: commitmentHashes,
 					}
 				}
-				commitElapsed := time.Since(commitStart)
+				// commitElapsed := time.Since(commitStart)
+				commitmentHashes = make(map[common.Address]common.Hash)
 
-				times := []time.Duration{
-					popElapsed,
-					createOrUpdateElapsed,
-					commitElapsed,
-				}
+				// times := []time.Duration{
+				// 	popElapsed,
+				// 	createOrUpdateElapsed,
+				// 	commitElapsed,
+				// }
 
-				for _, t := range times {
-					if t > 10*time.Millisecond {
-						fmt.Println("Times:", times)
-						break
-					}
-				}
+				// for _, t := range times {
+				// 	if t > 1000*time.Millisecond {
+				// 		fmt.Println("Times:", times)
+				// 		break
+				// 	}
+				// }
 			}
-		}()
+		}(i, queues[i])
 	}
 }
 
 type defaultDict struct {
-	internal map[uint64]uint64
+	internal     map[uint64]uint64
+	defaultValue uint64
+}
+
+func NewDefaultDict(defaultValue uint64) defaultDict {
+	return defaultDict{
+		internal:     make(map[uint64]uint64),
+		defaultValue: defaultValue,
+	}
 }
 
 func (d *defaultDict) Get(key uint64) uint64 {
 	if val, ok := d.internal[key]; ok {
 		return val
 	}
-	return math.MaxUint64
+	return d.defaultValue
 }
 
 func (d *defaultDict) Set(key uint64, value uint64) {
@@ -134,9 +176,9 @@ func mayHang(blockInfoCh *<-chan mptBlockInfo, hangChan *<-chan mptBlockInfo, cu
 	return blockInfoCh
 }
 
-const MAX_HANG_LEN = 1
+const MAX_HANG_LEN = 100
 
-func runMPTWorker(cfg Config, blockInfoCh <-chan mptBlockInfo, commitCh <-chan mptUpdateCommitmentInfo) {
+func runMPTWorker(cfg Config, blockInfoCh <-chan mptBlockInfo, commitCh <-chan mptUpdateCommitmentInfoBulk) {
 	currentRoot, err := meta.GetRoot(cfg.MPTStore.DiskDB, cfg.Blocks.Start-1)
 	if err != nil {
 		panic(err)
@@ -149,7 +191,8 @@ func runMPTWorker(cfg Config, blockInfoCh <-chan mptBlockInfo, commitCh <-chan m
 	buffered := make(map[uint64][]mptUpdateCommitmentInfo)
 	bufferedFirstTime := make(map[uint64]time.Time)
 	blockInfoBuffered := make(map[uint64]mptBlockInfo)
-	pendingCount := defaultDict{internal: make(map[uint64]uint64)}
+	pendingCount := NewDefaultDict(math.MaxUint64)
+	fulfilledCount := NewDefaultDict(0)
 
 	const flushInterval = 1024
 	const logInterval = 1000
@@ -159,6 +202,8 @@ func runMPTWorker(cfg Config, blockInfoCh <-chan mptBlockInfo, commitCh <-chan m
 	logStart := time.Now()
 
 	currentBlock := cfg.Blocks.Start
+
+	bufferedUpdates := uint64(0)
 
 outerLoop:
 	for {
@@ -170,14 +215,18 @@ outerLoop:
 			}
 
 			dequeuTime := time.Now().UnixNano()
-			if (dequeuTime-blockInfo.queuedAtNs)/1e6 > 10 {
-				fmt.Println("Time taken to dequeue:", (dequeuTime-blockInfo.queuedAtNs)/1e6, "ms", "Channel Length:", len(blockInfoCh), "Channel Cap:", cap(blockInfoCh))
+			if (dequeuTime-blockInfo.queuedAtNs)/1e6 > 1000 {
+				// fmt.Println("Time taken to dequeue:", (dequeuTime-blockInfo.queuedAtNs)/1e6, "ms", "Channel Length:", len(blockInfoCh), "Channel Cap:", cap(blockInfoCh))
 			}
 
 			// blockInfo.queuedAtNs = time.Now().UnixNano()
 
 			pending := blockInfo.updateCount
-			pendingCount.Set(blockInfo.blockNumber, pending)
+			bufferedUpdates += blockInfo.filteredUpdateCount
+			// if pending > 0 {
+			// 	pending = 1
+			// }
+			pendingCount.Set(blockInfo.blockNumber, pending) // 0)
 			blockInfoBuffered[blockInfo.blockNumber] = blockInfo
 
 			if _, ok := buffered[blockInfo.blockNumber]; !ok {
@@ -189,20 +238,27 @@ outerLoop:
 			if !ok {
 				break outerLoop
 			}
-			if buf, ok := buffered[commit.blockNumber]; ok {
-				buffered[commit.blockNumber] = append(buf, commit)
-			} else {
-				buffered[commit.blockNumber] = []mptUpdateCommitmentInfo{commit}
+			if _, ok := buffered[commit.blockNumber]; !ok {
+				buffered[commit.blockNumber] = make([]mptUpdateCommitmentInfo, 0)
+			}
+
+			for account, commitment := range commit.commitments {
+				buffered[commit.blockNumber] = append(buffered[commit.blockNumber], mptUpdateCommitmentInfo{
+					address:    account,
+					commitment: commitment,
+				})
 			}
 
 			if _, ok := bufferedFirstTime[commit.blockNumber]; !ok {
 				bufferedFirstTime[commit.blockNumber] = time.Now()
 			}
+			_fulfilledCount := fulfilledCount.Get(commit.blockNumber)
+			fulfilledCount.Set(commit.blockNumber, _fulfilledCount+1)
 		}
 
 		// Can I make a new block?
 		for {
-			newBlockCreated := maybeCreateNewBlock(currentBlock, &pendingCount, &buffered, &blockInfoBuffered, &currentRoot, &cfg, bench, &blocksProcessed, &lastBlockNumber, flushInterval, logInterval, &logStart, &batch, &bufferedFirstTime)
+			newBlockCreated := maybeCreateNewBlock(currentBlock, &pendingCount, &fulfilledCount, &buffered, &blockInfoBuffered, &currentRoot, &cfg, bench, &blocksProcessed, &lastBlockNumber, flushInterval, logInterval, &logStart, &batch, &bufferedFirstTime, &bufferedUpdates)
 			if !newBlockCreated {
 				break
 			}
@@ -221,23 +277,24 @@ outerLoop:
 }
 
 func maybeCreateNewBlock(
-	currentBlock uint64, pendingCount *defaultDict, buffered *map[uint64][]mptUpdateCommitmentInfo, blockInfoBuffered *map[uint64]mptBlockInfo,
+	currentBlock uint64, pendingCount *defaultDict, fulfilledCount *defaultDict, buffered *map[uint64][]mptUpdateCommitmentInfo, blockInfoBuffered *map[uint64]mptBlockInfo,
 	currentRoot *common.Hash, cfg *Config, bench *BenchContext,
 	blocksProcessed *uint64, lastBlockNumber *uint64,
 	flushInterval uint64, logInterval uint64, logStart *time.Time,
 	batch *ethdb.Batch,
 	bufferedFirstTime *map[uint64]time.Time,
+	bufferedUpdates *uint64,
 ) bool {
-	// fmt.Printf("maybeCreateNewBlock:%d, currentBlock:%d, pending:%d\n", len(pendingCount.internal), currentBlock, pendingCount.Get(currentBlock))
 	if _, ok := (*buffered)[currentBlock]; !ok {
 		return false
 	}
 
 	buffer := (*buffered)[currentBlock]
+	// fmt.Printf("maybeCreateNewBlock:%d, currentBlock:%d, pending:%d buffer:%d fulfilled:%d\n", len(pendingCount.internal), currentBlock, pendingCount.Get(currentBlock), len(buffer), fulfilledCount.Get(currentBlock))
 	pending := pendingCount.Get(currentBlock)
 	blockInfo := (*blockInfoBuffered)[currentBlock]
 
-	if uint64(len(buffer)) < pending {
+	if fulfilledCount.Get(currentBlock) < pending {
 		return false
 	}
 
@@ -249,10 +306,11 @@ func maybeCreateNewBlock(
 	defer pendingCount.Delete(currentBlock)
 	defer delete(*buffered, currentBlock)
 	defer delete(*blockInfoBuffered, currentBlock)
-	if _bufferedFirstTime, ok := (*bufferedFirstTime)[currentBlock]; ok {
-		if time.Since(_bufferedFirstTime) > 10*time.Millisecond {
-			fmt.Println("Time taken to buffer first time:", time.Since(_bufferedFirstTime))
-		}
+	defer fulfilledCount.Delete(currentBlock)
+	if _, ok := (*bufferedFirstTime)[currentBlock]; ok {
+		// if time.Since(_bufferedFirstTime) > 100*time.Millisecond {
+		// 	fmt.Println("Time taken to buffer first time:", time.Since(_bufferedFirstTime))
+		// }
 		defer delete(*bufferedFirstTime, currentBlock)
 	}
 
@@ -275,7 +333,7 @@ func maybeCreateNewBlock(
 		_ = bench.CSV.WriteRow(
 			strconv.FormatUint(currentBlock, 10),
 			strconv.FormatUint(blockInfo.rawUpdateCount, 10),
-			strconv.FormatUint(pending, 10),
+			strconv.FormatUint(*bufferedUpdates, 10),
 			strconv.FormatInt(blockInfo.queuedAtNs, 10),
 			strconv.FormatInt(startAtNs, 10),
 			strconv.FormatInt(completedAtNs, 10),
@@ -283,6 +341,7 @@ func maybeCreateNewBlock(
 		)
 	}
 
+	*bufferedUpdates = 0
 	*currentRoot = newRoot
 	(*lastBlockNumber) = blockInfo.blockNumber
 	(*blocksProcessed)++
@@ -449,7 +508,7 @@ func __runMPTWorker(cfg Config, blockInfoCh <-chan mptBlockInfo, commitCh <-chan
 // samurai-only benchmark mode. It drains blockInfoCh and commitCh, counts
 // per-block commitment completions, and writes CSV timing rows — but performs
 // no trie operations.
-func runMetricsCollector(cfg Config, blockInfoCh <-chan mptBlockInfo, commitCh <-chan mptUpdateCommitmentInfo) {
+func runMetricsCollector(cfg Config, blockInfoCh <-chan mptBlockInfo, commitCh <-chan mptUpdateCommitmentInfoBulk) {
 	bench := cfg.Bench                  // guaranteed non-nil in bench mode
 	buffered := make(map[uint64]uint64) // blockNumber -> count of pre-arrived commitments
 
@@ -506,6 +565,8 @@ func runMetricsCollector(cfg Config, blockInfoCh <-chan mptBlockInfo, commitCh <
 	}
 }
 
+const BATCH_SIZE = 400
+
 // produceBlocks reads blocks from the dataset and distributes entries
 // to shard queues (for commitment workers). If blockInfoCh is non-nil,
 // block metadata is also sent to the MPT worker.
@@ -516,7 +577,9 @@ func runMetricsCollector(cfg Config, blockInfoCh <-chan mptBlockInfo, commitCh <
 //   - stamps EnqueuedAt on each UpdateTask
 //   - sends enriched mptBlockInfo with raw/discarded counts and emittedAt
 //   - increments global atomic counters on the MetricsCollector
-func produceBlocks(cfg Config, blockInfoCh chan<- mptBlockInfo, queues []*utils.BoundedQueue[UpdateTask]) error {
+//
+// func produceBlocks(cfg Config, blockInfoCh chan<- mptBlockInfo, queues []*utils.BoundedQueue[UpdateTask]) error {
+func produceBlocks(cfg Config, blockInfoCh chan<- mptBlockInfo, queues []*chann.Chann[UpdateTask]) error {
 	r := dataset.NewDatasetReader(cfg.Blocks.DataDir, dataset.SEGMENT_SIZE)
 	defer r.Close()
 
@@ -548,14 +611,21 @@ func produceBlocks(cfg Config, blockInfoCh chan<- mptBlockInfo, queues []*utils.
 				}
 				selected = filtered
 			}
-			selectedCount := uint64(len(selected))
+			// selectedCount := uint64(len(selected))
 
 			// --- emit block metadata ---
+			mustFlush := n == uint32(cfg.Blocks.End) || (uint64(n)-cfg.Blocks.Start+1)%BATCH_SIZE == 0
+			updateCount := uint64(cfg.Workers.CommitWorkerCount)
 			if blockInfoCh != nil {
+
 				info := mptBlockInfo{
-					blockNumber:    uint64(n),
-					updateCount:    selectedCount,
-					rawUpdateCount: rawCount,
+					blockNumber:         uint64(n),
+					updateCount:         0,
+					rawUpdateCount:      rawCount,
+					filteredUpdateCount: uint64(len(selected)),
+				}
+				if mustFlush {
+					info.updateCount = updateCount
 				}
 				if bench != nil {
 					info.queuedAtNs = time.Now().UnixNano()
@@ -563,21 +633,48 @@ func produceBlocks(cfg Config, blockInfoCh chan<- mptBlockInfo, queues []*utils.
 				startTime := time.Now()
 				blockInfoCh <- info
 				elapsed := time.Since(startTime)
-				if elapsed > 10*time.Millisecond {
+				if elapsed > 1000*time.Millisecond {
 					fmt.Println("Time taken to send block info:", elapsed)
 				}
 			}
 
 			// --- distribute selected entries to shard queues ---
+			// fmt.Println("Distributing entries to shard queues:", len(selected))
 			for _, entry := range selected {
 				idx := utils.AddressToShardIndex(entry.Address, cfg.Workers.CommitWorkerCount)
 				task := UpdateTask{
 					BlockNumber: uint64(n),
 					Account:     common.BytesToAddress(entry.Address[:]),
 					Balance:     new(big.Int).SetBytes(entry.Balance),
+					MustFlush:   false,
+					IsEmpty:     false,
 				}
-				if err := queues[idx].Push(task); err != nil {
-					return fmt.Errorf("push to shard queue %d: %w", idx, err)
+
+				startTime := time.Now()
+				// if err := queues[idx].Push(task); err != nil {
+				// if err := queues[idx].In() <- task; err != nil {
+				// 	return fmt.Errorf("push to shard queue %d: %w", idx, err)
+				// }
+				queues[idx].In() <- task
+				runtime.Gosched()
+				elapsed := time.Since(startTime)
+				if elapsed > 100*time.Millisecond {
+					fmt.Println("Time taken to push task:", elapsed)
+				}
+			}
+
+			if mustFlush {
+				task := UpdateTask{
+					BlockNumber: uint64(n),
+					MustFlush:   true,
+					IsEmpty:     true,
+				}
+
+				for _, queue := range queues {
+					// if err := queue.Push(task); err != nil {
+					// 	return fmt.Errorf("push to shard queue %d: %w", idx, err)
+					// }
+					queue.In() <- task
 				}
 			}
 
@@ -590,13 +687,15 @@ func produceBlocks(cfg Config, blockInfoCh chan<- mptBlockInfo, queues []*utils.
 func Run(cfg Config) error {
 	totalStart := time.Now()
 
-	queues := make([]*utils.BoundedQueue[UpdateTask], cfg.Workers.CommitWorkerCount)
+	// queues := make([]*utils.BoundedQueue[UpdateTask], cfg.Workers.CommitWorkerCount)
+	queues := make([]*chann.Chann[UpdateTask], cfg.Workers.CommitWorkerCount)
 	for i := 0; i < cfg.Workers.CommitWorkerCount; i++ {
-		queues[i] = utils.NewBoundedQueue[UpdateTask](1024, cfg.Workers.CommitWorkerQueueSize)
+		// queues[i] = utils.NewBoundedQueue[UpdateTask](1024, cfg.Workers.CommitWorkerQueueSize)
+		queues[i] = chann.New[UpdateTask]()
 	}
 
-	blockInfoCh := make(chan mptBlockInfo, 10)
-	commitCh := make(chan mptUpdateCommitmentInfo, 1000)
+	blockInfoCh := make(chan mptBlockInfo, 100)
+	commitCh := make(chan mptUpdateCommitmentInfoBulk, 1000)
 
 	var commitWG sync.WaitGroup
 	var mptWG sync.WaitGroup
@@ -641,9 +740,11 @@ func Run(cfg Config) error {
 func RunSamuraiOnly(cfg Config) error {
 	totalStart := time.Now()
 
-	queues := make([]*utils.BoundedQueue[UpdateTask], cfg.Workers.CommitWorkerCount)
+	// queues := make([]*utils.BoundedQueue[UpdateTask], cfg.Workers.CommitWorkerCount)
+	queues := make([]*chann.Chann[UpdateTask], cfg.Workers.CommitWorkerCount)
 	for i := 0; i < cfg.Workers.CommitWorkerCount; i++ {
-		queues[i] = utils.NewBoundedQueue[UpdateTask](1024, cfg.Workers.CommitWorkerQueueSize)
+		// queues[i] = utils.NewBoundedQueue[UpdateTask](1024, cfg.Workers.CommitWorkerQueueSize)
+		queues[i] = chann.New[UpdateTask]()
 	}
 
 	var commitWG sync.WaitGroup

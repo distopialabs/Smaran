@@ -115,6 +115,65 @@ func (a *AccountInfo) DeepCopy() *AccountInfo {
 	}
 }
 
+type AccountBulkUpdateEntry struct {
+	Balance     *big.Int
+	BlockNumber uint64
+}
+
+func (accountInfo *AccountInfo) UpdateBulk(entries []AccountBulkUpdateEntry, sdb *db.SamuraiStore) {
+	// fmt.Println("UpdateBulk", accountInfo.Account, len(entries))
+	// defer fmt.Println("UpdateBulk done", accountInfo.Account, len(entries))
+	if len(entries) == 0 {
+		return
+	}
+
+	prevCb := accountInfo.CurrentBalanceInfo
+
+	if prevCb == nil {
+		entry := entries[0]
+		accountInfo.Update(entry.BlockNumber, entry.Balance, sdb)
+		accountInfo.UpdateBulk(entries[1:], sdb)
+		return
+	}
+
+	allHbs := make([]*HistoricalBalance, 0)
+	allHbHashes := make([]common.Hash, 0)
+
+	currVersion := prevCb.Version
+
+	for i, entry := range entries {
+		hb := prevCb.ToHistoricalBalance(entry.BlockNumber - 1)
+		StoreHistoricalBalance(accountInfo.Account, hb, sdb.HistoryDB)
+		currVersion++
+		cb := &CurrentBalance{
+			Version:    currVersion,
+			Balance:    entry.Balance,
+			StartBlock: entry.BlockNumber,
+		}
+		accountInfo.CurrentBalanceInfo = cb
+
+		allHbHashes = append(allHbHashes, hb.Hash())
+		allHbs = append(allHbs, hb)
+
+		if cb.Version > 0 && cb.Version%L1BatchSize == 0 {
+			_entries := entries[i+1:]
+			defer accountInfo.UpdateBulk(_entries, sdb)
+			break
+		}
+	}
+
+	// Stub for now
+	for i := range allHbs {
+		accountInfo.AddLeafNode(allHbs[i].Version, allHbHashes[i])
+	}
+	cb := accountInfo.CurrentBalanceInfo
+
+	if cb.Version > 0 && cb.Version%L1BatchSize == 0 {
+		StoreLXBatchCommitments(accountInfo.Account, accountInfo.CurrentBalanceInfo.Version, accountInfo.CurrentLXBatchCommitment, &sdb.StateDB)
+		StoreLXBatchRoots(accountInfo.Account, accountInfo.CurrentBalanceInfo.Version, accountInfo.CurrentLXBatchTree, &sdb.StateDB)
+	}
+}
+
 // Update updates the account with a new balance at the given block.
 func (accountInfo *AccountInfo) Update(blockNumber uint64, balance *big.Int, sdb *db.SamuraiStore) {
 	const threshold = 2000000 * time.Second

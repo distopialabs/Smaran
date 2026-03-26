@@ -79,7 +79,7 @@ func benchIngestCmd() *cli.Command {
 				log.Fatalf("failed to setup crypto params: %v", err)
 			}
 
-			shardsNum := 32
+			shardsNum := 1000
 			shardedSamuraiStores, err := ingest.SetupDatabases(shardsNum, filepath.Join(dbDir, "db"))
 			if err != nil {
 				log.Fatalf("failed to setup databases: %v", err)

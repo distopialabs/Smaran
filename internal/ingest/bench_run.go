@@ -9,7 +9,7 @@ import (
 
 	"github.com/nepal80m/samurai/internal/benchutil"
 	"github.com/nepal80m/samurai/internal/dataset"
-	"github.com/nepal80m/samurai/internal/utils"
+	"golang.design/x/chann"
 )
 
 // BenchConfig holds user-facing benchmark parameters that are translated into
@@ -75,13 +75,16 @@ func BenchRun(cfg Config, benchCfg BenchConfig, csvPath string) error {
 	}
 
 	// --- create pipeline plumbing (same as Run) ---
-	queues := make([]*utils.BoundedQueue[UpdateTask], cfg.Workers.CommitWorkerCount)
+	// queues := make([]*utils.BoundedQueue[UpdateTask], cfg.Workers.CommitWorkerCount)
+	queues := make([]*chann.Chann[UpdateTask], cfg.Workers.CommitWorkerCount)
 	for i := 0; i < cfg.Workers.CommitWorkerCount; i++ {
-		queues[i] = utils.NewBoundedQueue[UpdateTask](1024, cfg.Workers.CommitWorkerQueueSize)
+		// queues[i] = utils.NewBoundedQueue[UpdateTask](10000, 10000) // *cfg.Workers.CommitWorkerQueueSize)
+		queues[i] = chann.New[UpdateTask]()
+		// queues[i] = utils.NewBoundedQueue[UpdateTask](-1, -1)
 	}
 
 	blockInfoCh := make(chan mptBlockInfo, 1)
-	commitCh := make(chan mptUpdateCommitmentInfo, 10000)
+	commitCh := make(chan mptUpdateCommitmentInfoBulk, 10000)
 
 	var commitWG sync.WaitGroup
 	var mptWG sync.WaitGroup
@@ -176,13 +179,16 @@ func BenchRunSamuraiOnly(cfg Config, benchCfg BenchConfig, csvPath string) error
 	}
 
 	// --- create pipeline plumbing ---
-	queues := make([]*utils.BoundedQueue[UpdateTask], cfg.Workers.CommitWorkerCount)
+	// queues := make([]*utils.BoundedQueue[UpdateTask], cfg.Workers.CommitWorkerCount)
+	queues := make([]*chann.Chann[UpdateTask], cfg.Workers.CommitWorkerCount)
 	for i := 0; i < cfg.Workers.CommitWorkerCount; i++ {
-		queues[i] = utils.NewBoundedQueue[UpdateTask](1024, cfg.Workers.CommitWorkerQueueSize)
+		// queues[i] = utils.NewBoundedQueue[UpdateTask](1024, cfg.Workers.CommitWorkerQueueSize)
+		queues[i] = chann.New[UpdateTask]()
+		// queues[i] = utils.NewBoundedQueue[UpdateTask](10, 16) // cfg.Workers.CommitWorkerQueueSize)
 	}
 
 	blockInfoCh := make(chan mptBlockInfo, 10)
-	commitCh := make(chan mptUpdateCommitmentInfo, 10000)
+	commitCh := make(chan mptUpdateCommitmentInfoBulk, 10000)
 
 	var commitWG sync.WaitGroup
 	var collectorWG sync.WaitGroup
