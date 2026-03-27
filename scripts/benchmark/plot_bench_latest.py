@@ -235,7 +235,15 @@ def main():
         scalars = compute_scalars(csv_path, args.warmup, args.cooldown)
         proto_scalars.append((proto, scalars))
 
-    print(f"\nGenerating comparison charts:")
+    # Print summary table
+    print(f"\n{'Protocol':<15} {'Avg Update Lat (ms)':>20} {'Avg E2E Lat (ms)':>20} {'Throughput (upd/s)':>20}")
+    print("-" * 77)
+    for proto, scalars in proto_scalars:
+        sty = _protocol_style(proto)
+        print(f"{sty['label']:<15} {scalars['avg_update_lat']:>20.4f} {scalars['avg_e2e_update_lat']:>20.4f} {scalars['avg_throughput']:>20.2f}")
+    print()
+
+    print(f"Generating comparison charts:")
     plot_bar_charts(proto_scalars, args.user, args)
 
 

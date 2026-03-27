@@ -105,7 +105,7 @@ func benchIngestCmd() *cli.Command {
 			&cli.DurationFlag{Name: "duration", Value: 5 * time.Minute, Usage: "How long to run the benchmark"},
 			&cli.IntFlag{Name: "k-users", Value: 0, Usage: "Top-K hot accounts to include (0 = all, no filtering)"},
 			&cli.StringFlag{Name: "accounts-list", Value: "account_stats_all.csv", Usage: "CSV with hot accounts sorted by update count descending"},
-			&cli.IntFlag{Name: "num-shards", Value: 1, Usage: "Number of shard workers in the pipeline"},
+			&cli.IntFlag{Name: "num-shards", Value: 1000, Usage: "Number of shard workers in the pipeline"},
 			&cli.BoolFlag{Name: "fresh", Value: true, Usage: "Delete existing DB and start from scratch"},
 			&cli.StringFlag{Name: "output-dir", Value: benchutil.DefaultOutputDir, Usage: "Root directory for benchmark output"},
 		},

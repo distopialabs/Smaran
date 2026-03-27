@@ -13,6 +13,8 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethdb"
 
+	"golang.design/x/chann"
+
 	"github.com/nepal80m/samurai/internal/benchutil"
 	"github.com/nepal80m/samurai/internal/dataset"
 	"github.com/nepal80m/samurai/internal/merkle/meta"
@@ -61,7 +63,7 @@ func produceBlocks(
 	blocksDir string, start, end uint64,
 	filter *benchutil.HotAccountFilter, deadline time.Time,
 	blockInfoCh chan<- blockInfo,
-	queues []*utils.BoundedQueue[updateTask],
+	queues []*chann.Chann[updateTask],
 	numShards int,
 ) error {
 	r := dataset.NewDatasetReader(blocksDir, dataset.SEGMENT_SIZE)
@@ -99,13 +101,10 @@ func produceBlocks(
 			for _, entry := range selected {
 				addr := common.BytesToAddress(entry.Address[:])
 				idx := utils.AddressToShardIndex(addr, numShards)
-				task := updateTask{
+				queues[idx].In() <- updateTask{
 					blockNumber: uint64(n),
 					address:     addr,
 					balance:     new(big.Int).SetBytes(entry.Balance),
-				}
-				if err := queues[idx].Push(task); err != nil {
-					return fmt.Errorf("push to shard queue %d: %w", idx, err)
 				}
 			}
 
@@ -117,7 +116,7 @@ func produceBlocks(
 // startShardWorkers spawns one goroutine per shard queue. Each worker pops
 // updateTasks and forwards them to updateCh without any computation.
 func startShardWorkers(
-	queues []*utils.BoundedQueue[updateTask],
+	queues []*chann.Chann[updateTask],
 	updateCh chan<- updateForward,
 	wg *sync.WaitGroup,
 ) {
@@ -126,11 +125,7 @@ func startShardWorkers(
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for {
-				task, ok := queues[i].Pop()
-				if !ok {
-					return
-				}
+			for task := range queues[i].Out() {
 				updateCh <- updateForward{
 					blockNumber: task.blockNumber,
 					address:     task.address,
@@ -162,7 +157,7 @@ func (d *defaultDict) Delete(key uint64) {
 	delete(d.internal, key)
 }
 
-const maxHangLen = 1
+const maxHangLen = 100
 
 func mayHang(blockInfoCh *<-chan blockInfo, hangChan *<-chan blockInfo, currLen int, maxLen int) *<-chan blockInfo {
 	if currLen > maxLen {
@@ -417,13 +412,13 @@ func BenchRun(cfg BenchConfig) error {
 
 	// --- create pipeline plumbing ---
 	numShards := cfg.NumShards
-	if numShards < 1 {
-		numShards = 1
-	}
+	// if numShards < 1 {
+	// 	numShards = 1
+	// }
 
-	queues := make([]*utils.BoundedQueue[updateTask], numShards)
+	queues := make([]*chann.Chann[updateTask], numShards)
 	for i := range queues {
-		queues[i] = utils.NewBoundedQueue[updateTask](1024, 1024)
+		queues[i] = chann.New[updateTask]()
 	}
 
 	blockInfoCh := make(chan blockInfo, 1)

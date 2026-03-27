@@ -58,7 +58,7 @@ type mptUpdateCommitmentInfoBulk struct {
 // computes the Samurai commitment, and optionally forwards the result to commitCh.
 // If commitCh is nil, commitment results are discarded (samurai-only mode).
 // func startCommitWorkers(cfg Config, queues []*utils.BoundedQueue[UpdateTask], commitCh chan<- mptUpdateCommitmentInfoBulk, wg *sync.WaitGroup) {
-func startCommitWorkers(cfg Config, queues []*chann.Chann[UpdateTask], commitCh chan<- mptUpdateCommitmentInfoBulk, wg *sync.WaitGroup) {
+func startCommitWorkers(cfg Config, queues []*chann.Chann[UpdateTask], commitCh *chann.Chann[mptUpdateCommitmentInfoBulk], wg *sync.WaitGroup) {
 	// Capture update-level metrics collector (may be nil when not benchmarking).
 	updateMetrics := cfg.Bench != nil && cfg.Bench.UpdateMetrics != nil
 
@@ -80,7 +80,7 @@ func startCommitWorkers(cfg Config, queues []*chann.Chann[UpdateTask], commitCh 
 
 				if task.ForwardRaw {
 					if commitCh != nil {
-						commitCh <- mptUpdateCommitmentInfoBulk{
+						commitCh.In() <- mptUpdateCommitmentInfoBulk{
 							blockNumber: task.BlockNumber,
 							commitments: nil,
 							isRaw:       true,
@@ -88,7 +88,6 @@ func startCommitWorkers(cfg Config, queues []*chann.Chann[UpdateTask], commitCh 
 							rawAddress:  task.Account,
 						}
 					}
-					continue
 				}
 				// popElapsed := time.Since(popStart)
 				// fmt.Println("Time taken to pop task:", popElapsed)
@@ -136,7 +135,7 @@ func startCommitWorkers(cfg Config, queues []*chann.Chann[UpdateTask], commitCh 
 
 				// commitStart := time.Now()
 				if commitCh != nil {
-					commitCh <- mptUpdateCommitmentInfoBulk{
+					commitCh.In() <- mptUpdateCommitmentInfoBulk{
 						blockNumber: task.BlockNumber,
 						commitments: commitmentHashes,
 						isRaw:       false,
@@ -196,9 +195,9 @@ func mayHang(blockInfoCh *<-chan mptBlockInfo, hangChan *<-chan mptBlockInfo, cu
 	return blockInfoCh
 }
 
-const MAX_HANG_LEN = 100
+const MAX_HANG_LEN = 2000
 
-func runMPTWorker(cfg Config, blockInfoCh <-chan mptBlockInfo, commitCh <-chan mptUpdateCommitmentInfoBulk) {
+func runMPTWorker(cfg Config, blockInfoCh <-chan mptBlockInfo, commitCh *chann.Chann[mptUpdateCommitmentInfoBulk]) {
 	currentRoot, err := meta.GetRoot(cfg.MPTStore.DiskDB, cfg.Blocks.Start-1)
 	if err != nil {
 		panic(err)
@@ -253,7 +252,7 @@ outerLoop:
 				buffered[blockInfo.blockNumber] = []mptUpdateCommitmentInfo{}
 			}
 
-		case commit, ok := <-commitCh:
+		case commit, ok := <-commitCh.Out():
 			// fmt.Println(">>>>>>>>>>>>> commit:", commit.blockNumber, commit.blockNumber-cfg.Blocks.Start)
 			if !ok {
 				break outerLoop
@@ -302,6 +301,11 @@ outerLoop:
 	}
 	if err := batch.Write(); err != nil {
 		panic(fmt.Sprintf("final batch write: %v", err))
+	}
+	if blocksProcessed > 0 {
+		if err := cfg.MPTStore.FlushTrieDB(currentRoot); err != nil {
+			panic(fmt.Sprintf("final triedb flush: %v", err))
+		}
 	}
 }
 
@@ -359,6 +363,10 @@ func maybeCreateNewBlock(
 		panic(fmt.Sprintf("commit state for block %d: %v", currentBlock, err))
 	}
 	meta.PutRootBatch(*batch, currentBlock, newRoot)
+
+	if err := cfg.MPTStore.FlushTrieDB(newRoot); err != nil {
+		panic(fmt.Sprintf("block %d: triedb flush: %v", currentBlock, err))
+	}
 
 	completedAtNs := time.Now().UnixNano()
 
@@ -541,7 +549,7 @@ func __runMPTWorker(cfg Config, blockInfoCh <-chan mptBlockInfo, commitCh <-chan
 // samurai-only benchmark mode. It drains blockInfoCh and commitCh, counts
 // per-block commitment completions, and writes CSV timing rows — but performs
 // no trie operations.
-func runMetricsCollector(cfg Config, blockInfoCh <-chan mptBlockInfo, commitCh <-chan mptUpdateCommitmentInfoBulk) {
+func runMetricsCollector(cfg Config, blockInfoCh <-chan mptBlockInfo, commitCh *chann.Chann[mptUpdateCommitmentInfoBulk]) {
 	bench := cfg.Bench                  // guaranteed non-nil in bench mode
 	buffered := make(map[uint64]uint64) // blockNumber -> count of pre-arrived commitments
 
@@ -564,7 +572,7 @@ func runMetricsCollector(cfg Config, blockInfoCh <-chan mptBlockInfo, commitCh <
 		var waitCommitmentsNs int64
 		for pending > 0 {
 			tWait := time.Now()
-			u := <-commitCh
+			u := <-commitCh.Out()
 			waitCommitmentsNs += time.Since(tWait).Nanoseconds()
 
 			if u.blockNumber != blockInfo.blockNumber {
@@ -598,7 +606,7 @@ func runMetricsCollector(cfg Config, blockInfoCh <-chan mptBlockInfo, commitCh <
 	}
 }
 
-const BATCH_SIZE = 200
+const BATCH_SIZE = 7240
 
 // produceBlocks reads blocks from the dataset and distributes entries
 // to shard queues (for commitment workers). If blockInfoCh is non-nil,
@@ -736,7 +744,7 @@ func Run(cfg Config) error {
 	}
 
 	blockInfoCh := make(chan mptBlockInfo, 100)
-	commitCh := make(chan mptUpdateCommitmentInfoBulk, 1000)
+	commitCh := chann.New[mptUpdateCommitmentInfoBulk]()
 
 	var commitWG sync.WaitGroup
 	var mptWG sync.WaitGroup
@@ -757,7 +765,7 @@ func Run(cfg Config) error {
 	close(blockInfoCh)
 
 	commitWG.Wait()
-	close(commitCh)
+	commitCh.Close()
 
 	mptWG.Wait()
 

@@ -84,7 +84,7 @@ func BenchRun(cfg Config, benchCfg BenchConfig, csvPath string) error {
 	}
 
 	blockInfoCh := make(chan mptBlockInfo, 1)
-	commitCh := make(chan mptUpdateCommitmentInfoBulk, 10000)
+	commitCh := chann.New[mptUpdateCommitmentInfoBulk]()
 
 	var commitWG sync.WaitGroup
 	var mptWG sync.WaitGroup
@@ -111,7 +111,7 @@ func BenchRun(cfg Config, benchCfg BenchConfig, csvPath string) error {
 	close(blockInfoCh)
 
 	commitWG.Wait()
-	close(commitCh)
+	commitCh.Close()
 
 	mptWG.Wait()
 
@@ -187,8 +187,8 @@ func BenchRunSamuraiOnly(cfg Config, benchCfg BenchConfig, csvPath string) error
 		// queues[i] = utils.NewBoundedQueue[UpdateTask](10, 16) // cfg.Workers.CommitWorkerQueueSize)
 	}
 
-	blockInfoCh := make(chan mptBlockInfo, 10)
-	commitCh := make(chan mptUpdateCommitmentInfoBulk, 10000)
+	blockInfoCh := make(chan mptBlockInfo, 100)
+	commitCh := chann.New[mptUpdateCommitmentInfoBulk]()
 
 	var commitWG sync.WaitGroup
 	var collectorWG sync.WaitGroup
@@ -215,7 +215,7 @@ func BenchRunSamuraiOnly(cfg Config, benchCfg BenchConfig, csvPath string) error
 	close(blockInfoCh)
 
 	commitWG.Wait()
-	close(commitCh)
+	commitCh.Close()
 
 	collectorWG.Wait()
 
