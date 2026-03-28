@@ -15,7 +15,7 @@ try:
     matplotlib.use("Agg")
 
     import matplotlib.pyplot as plt
-    from matplotlib.ticker import ScalarFormatter
+    from matplotlib.ticker import LogLocator, NullFormatter
     import seaborn as sns
 except ImportError as exc:  # pragma: no cover
     raise SystemExit(
@@ -25,9 +25,21 @@ except ImportError as exc:  # pragma: no cover
 
 
 PROTOCOL_LABELS = {
-    "samurai": "Samurai",
+    "samurai": "Smaran",
     "optiks": "Optiks",
     "coniks": "Coniks",
+}
+
+PROTOCOL_STYLES = {
+    "samurai": {"color": "#e66101", "marker": "o", "label": "Smaran"},
+    "optiks": {"color": "#5e3c99", "marker": "s", "label": "Optiks"},
+    "coniks": {"color": "#4daf4a", "marker": "^", "label": "Coniks"},
+}
+
+PROTOCOL_HATCHES = {
+    "samurai": "///",
+    "optiks": "\\\\\\",
+    "coniks": "...",
 }
 
 SUMMARY_PATTERNS = {
@@ -83,7 +95,10 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "input",
-        help="Path to the exact sweep directory containing benchmark run subdirectories.",
+        help=(
+            "Path to either the exact sweep directory containing benchmark run subdirectories "
+            "or a previously generated kt_query_summary.csv file."
+        ),
     )
     return parser.parse_args()
 
@@ -242,6 +257,56 @@ def is_run_dir(path: Path) -> bool:
     )
 
 
+def load_points_from_summary_csv(summary_csv: Path) -> List[BenchmarkPoint]:
+    import pandas as pd
+
+    df = pd.read_csv(summary_csv)
+    required_columns = {
+        "run_dir",
+        "protocol",
+        "num_versions",
+        "total_requests",
+        "run_duration_seconds",
+        "throughput_qps",
+        "avg_latency_ms",
+        "avg_generation_ms",
+        "avg_verification_ms",
+        "avg_payload_kib",
+    }
+    missing = required_columns - set(df.columns)
+    if missing:
+        raise ValueError(f"Summary CSV is missing required columns: {sorted(missing)}")
+
+    points: List[BenchmarkPoint] = []
+    for row in df.to_dict(orient="records"):
+        protocol = str(row["protocol"]).lower()
+        if protocol not in PROTOCOL_LABELS:
+            raise ValueError(f"Unsupported protocol `{protocol}` in {summary_csv}")
+        sweep_parameters = {
+            key: row[key]
+            for key in row.keys()
+            if key not in required_columns and key != "protocol_label"
+        }
+        points.append(
+            BenchmarkPoint(
+                protocol=protocol,
+                num_versions=int(row["num_versions"]),
+                total_requests=int(row["total_requests"]),
+                run_duration_seconds=float(row["run_duration_seconds"]),
+                throughput_qps=float(row["throughput_qps"]),
+                avg_latency_ms=float(row["avg_latency_ms"]),
+                avg_generation_ms=float(row["avg_generation_ms"]),
+                avg_verification_ms=float(row["avg_verification_ms"]),
+                avg_payload_kib=float(row["avg_payload_kib"]),
+                run_dir=Path(str(row["run_dir"])),
+                sweep_parameters=sweep_parameters,
+            )
+        )
+    if not points:
+        raise ValueError(f"No benchmark rows found in {summary_csv}")
+    return sorted(points, key=lambda point: (point.protocol, point.num_versions))
+
+
 def resolve_sweep_root(input_path: Path) -> Path:
     if not input_path.exists():
         raise FileNotFoundError(f"Input path does not exist: {input_path}")
@@ -285,9 +350,8 @@ def load_benchmark_point(run_dir: Path) -> BenchmarkPoint:
 
     client_summaries = [parse_client_summary(log_path) for log_path in client_logs]
     total_requests = sum(summary.total_requests for summary in client_summaries)
-    run_duration_seconds = max(
-        summary.run_duration_seconds for summary in client_summaries
-    )
+    run_duration_seconds = max(summary.run_duration_seconds for summary in client_summaries)
+
     weighted_latency_sum = sum(
         summary.avg_latency_ms * summary.total_requests for summary in client_summaries
     )
@@ -302,6 +366,7 @@ def load_benchmark_point(run_dir: Path) -> BenchmarkPoint:
     weighted_payload_sum = sum(
         summary.avg_payload_kib * summary.total_requests for summary in client_summaries
     )
+
     if total_requests > 0:
         avg_latency_ms = weighted_latency_sum / total_requests
         avg_generation_ms = weighted_generation_sum / total_requests
@@ -344,25 +409,42 @@ def configure_plot_style() -> None:
     plt.rcParams.update(
         {
             "font.family": "serif",
-            "font.size": 8,
-            "axes.titlesize": 8,
-            "axes.labelsize": 8,
-            "xtick.labelsize": 7,
-            "ytick.labelsize": 7,
-            "legend.fontsize": 7,
+            "font.size": 10,
+            "axes.titlesize": 11,
+            "axes.labelsize": 12,
+            "xtick.labelsize": 10,
+            "ytick.labelsize": 10,
+            "legend.fontsize": 9,
             "pdf.fonttype": 42,
             "ps.fonttype": 42,
             "lines.linewidth": 1.6,
+            "hatch.linewidth": 0.7,
         }
     )
 
+def apply_y_scale(ax: plt.Axes, scale: str) -> None:
+    if scale == "symlog":
+        ax.set_yscale("symlog", linthresh=1.0, linscale=1.0, base=10)
+        ax.set_ylim(bottom=0)
+        ax.grid(True, which="major", axis="y", linestyle="--", linewidth=0.5, alpha=0.65)
+        ax.grid(True, which="minor", axis="y", linestyle=":", linewidth=0.35, alpha=0.35)
+    elif scale == "log":
+        ax.set_yscale("log")
+        ax.yaxis.set_major_locator(LogLocator(base=10.0))
+        ax.yaxis.set_minor_locator(LogLocator(base=10.0, subs=tuple(range(2, 10))))
+        ax.yaxis.set_minor_formatter(NullFormatter())
+        ax.grid(True, which="major", axis="y", linestyle="--", linewidth=0.5, alpha=0.65)
+        ax.grid(True, which="minor", axis="y", linestyle=":", linewidth=0.35, alpha=0.35)
+    else:
+        ax.grid(True, which="major", axis="y", linestyle="--", linewidth=0.5, alpha=0.65)
 
-def style_axis(ax: plt.Axes, x_values: Sequence[int]) -> None:
-    ax.set_xscale("log")
-    ax.set_xticks(list(x_values))
-    ax.xaxis.set_major_formatter(ScalarFormatter())
-    ax.grid(True, which="major", linestyle="--", linewidth=0.5, alpha=0.65)
-    ax.grid(True, which="minor", linestyle=":", linewidth=0.35, alpha=0.35)
+
+def style_axis(ax: plt.Axes, x_values: Sequence[int], *, y_scale: str) -> None:
+    x_positions = list(range(len(x_values)))
+    ax.set_xticks(x_positions)
+    ax.set_xticklabels([str(v) for v in x_values], rotation=30)
+    apply_y_scale(ax, y_scale)
+    ax.grid(True, which="major", axis="x", linestyle="--", linewidth=0.35, alpha=0.25)
 
 
 def create_single_plot(
@@ -371,52 +453,43 @@ def create_single_plot(
     *,
     ylabel: str,
     value_attr: str,
+    y_scale: str,
 ) -> None:
     configure_plot_style()
 
-    palette = sns.color_palette("colorblind", n_colors=len(PROTOCOL_LABELS))
-    markers = ["o", "s", "^", "D", "P", "X"]
-    protocol_styles = {
-        protocol: {"color": palette[index], "marker": markers[index % len(markers)]}
-        for index, protocol in enumerate(PROTOCOL_LABELS)
-    }
+    protocol_styles = PROTOCOL_STYLES
 
     grouped: Dict[str, List[BenchmarkPoint]] = {protocol: [] for protocol in PROTOCOL_LABELS}
     for point in points:
         grouped[point.protocol].append(point)
 
     all_versions = sorted({point.num_versions for point in points})
-    fig, ax = plt.subplots(figsize=(3.35, 2.05))
+    version_to_index = {version: index for index, version in enumerate(all_versions)}
+
+    fig, ax = plt.subplots(figsize=(3.6, 2.2))
 
     for protocol, protocol_points in grouped.items():
         if not protocol_points:
             continue
+
+        protocol_points = sorted(protocol_points, key=lambda p: p.num_versions)
         style = protocol_styles[protocol]
-        versions = [point.num_versions for point in protocol_points]
+        xs = [version_to_index[point.num_versions] for point in protocol_points]
         values = [getattr(point, value_attr) for point in protocol_points]
-        label = PROTOCOL_LABELS[protocol]
+        label = protocol_styles[protocol]["label"]
 
         ax.plot(
-            versions,
+            xs,
             values,
             marker=style["marker"],
             markersize=4,
             color=style["color"],
             label=label,
         )
-        for point, x_value, y_value in zip(protocol_points, versions, values):
-            ax.annotate(
-                f"{point.avg_payload_kib:.1f}",
-                xy=(x_value, y_value),
-                xytext=(4, 4),
-                textcoords="offset points",
-                fontsize=6,
-                color=style["color"],
-            )
 
     ax.set_ylabel(ylabel)
     ax.set_xlabel("Number of versions")
-    style_axis(ax, all_versions)
+    style_axis(ax, all_versions, y_scale=y_scale)
 
     handles, labels = ax.get_legend_handles_labels()
     fig.legend(
@@ -431,7 +504,7 @@ def create_single_plot(
     )
 
     sns.despine(fig=fig)
-    fig.subplots_adjust(top=0.84, left=0.17, right=0.99, bottom=0.23)
+    fig.subplots_adjust(top=0.84, left=0.17, right=0.99, bottom=0.30)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output_path, format="pdf", bbox_inches="tight")
     plt.close(fig)
@@ -443,13 +516,12 @@ def create_latency_breakdown_plot(
 ) -> None:
     configure_plot_style()
 
-    palette = sns.color_palette("colorblind", n_colors=2 * len(PROTOCOL_LABELS))
     protocol_styles = {
         protocol: {
-            "generation": palette[index * 2],
-            "verification": palette[index * 2 + 1],
+            "generation": PROTOCOL_STYLES[protocol]["color"],
+            "verification": "#bdbdbd",
         }
-        for index, protocol in enumerate(PROTOCOL_LABELS)
+        for protocol in PROTOCOL_LABELS
     }
 
     grouped: Dict[str, List[BenchmarkPoint]] = {protocol: [] for protocol in PROTOCOL_LABELS}
@@ -459,7 +531,8 @@ def create_latency_breakdown_plot(
     all_versions = sorted({point.num_versions for point in points})
     x_positions = list(range(len(all_versions)))
     version_to_index = {version: index for index, version in enumerate(all_versions)}
-    fig, ax = plt.subplots(figsize=(3.35, 2.25))
+
+    fig, ax = plt.subplots(figsize=(3.8, 2.4))
     protocol_order = list(PROTOCOL_LABELS)
     bar_width = 0.8 / max(1, len(protocol_order))
     offsets = {
@@ -470,6 +543,8 @@ def create_latency_breakdown_plot(
     for protocol, protocol_points in grouped.items():
         if not protocol_points:
             continue
+
+        protocol_points = sorted(protocol_points, key=lambda p: p.num_versions)
         style = protocol_styles[protocol]
         xs = [version_to_index[point.num_versions] + offsets[protocol] for point in protocol_points]
         generation_values = [point.avg_generation_ms for point in protocol_points]
@@ -480,7 +555,10 @@ def create_latency_breakdown_plot(
             generation_values,
             width=bar_width,
             color=style["generation"],
-            label=f"{PROTOCOL_LABELS[protocol]} generation",
+            hatch=PROTOCOL_HATCHES[protocol],
+            edgecolor="black",
+            linewidth=0.5,
+            label=f"{PROTOCOL_STYLES[protocol]['label']} generation",
         )
         ax.bar(
             xs,
@@ -488,14 +566,17 @@ def create_latency_breakdown_plot(
             width=bar_width,
             bottom=generation_values,
             color=style["verification"],
-            label=f"{PROTOCOL_LABELS[protocol]} verification",
+            hatch=PROTOCOL_HATCHES[protocol],
+            edgecolor="black",
+            linewidth=0.5,
+            label=f"{PROTOCOL_STYLES[protocol]['label']} verification",
         )
 
     ax.set_ylabel("Latency (ms)")
     ax.set_xlabel("Number of versions")
     ax.set_xticks(x_positions)
-    ax.set_xticklabels([str(version) for version in all_versions])
-    ax.grid(True, axis="y", linestyle="--", linewidth=0.5, alpha=0.65)
+    ax.set_xticklabels([str(version) for version in all_versions], rotation=30)
+    apply_y_scale(ax, "symlog")
 
     handles, labels = ax.get_legend_handles_labels()
     fig.legend(
@@ -510,7 +591,7 @@ def create_latency_breakdown_plot(
     )
 
     sns.despine(fig=fig)
-    fig.subplots_adjust(top=0.78, left=0.17, right=0.99, bottom=0.23)
+    fig.subplots_adjust(top=0.78, left=0.17, right=0.99, bottom=0.30)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output_path, format="pdf", bbox_inches="tight")
     plt.close(fig)
@@ -522,9 +603,8 @@ def create_payload_plot(
 ) -> None:
     configure_plot_style()
 
-    palette = sns.color_palette("colorblind", n_colors=len(PROTOCOL_LABELS))
     protocol_colors = {
-        protocol: palette[index] for index, protocol in enumerate(PROTOCOL_LABELS)
+        protocol: PROTOCOL_STYLES[protocol]["color"] for protocol in PROTOCOL_LABELS
     }
 
     grouped: Dict[str, List[BenchmarkPoint]] = {protocol: [] for protocol in PROTOCOL_LABELS}
@@ -534,7 +614,8 @@ def create_payload_plot(
     all_versions = sorted({point.num_versions for point in points})
     x_positions = list(range(len(all_versions)))
     version_to_index = {version: index for index, version in enumerate(all_versions)}
-    fig, ax = plt.subplots(figsize=(3.35, 2.15))
+
+    fig, ax = plt.subplots(figsize=(3.8, 2.3))
     protocol_order = list(PROTOCOL_LABELS)
     bar_width = 0.8 / max(1, len(protocol_order))
     offsets = {
@@ -545,22 +626,27 @@ def create_payload_plot(
     for protocol, protocol_points in grouped.items():
         if not protocol_points:
             continue
+
+        protocol_points = sorted(protocol_points, key=lambda p: p.num_versions)
         xs = [version_to_index[point.num_versions] + offsets[protocol] for point in protocol_points]
         payload_values = [point.avg_payload_kib for point in protocol_points]
+
         ax.bar(
             xs,
             payload_values,
             width=bar_width,
             color=protocol_colors[protocol],
-            label=PROTOCOL_LABELS[protocol],
+            hatch=PROTOCOL_HATCHES[protocol],
+            edgecolor="black",
+            linewidth=0.5,
+            label=PROTOCOL_STYLES[protocol]["label"],
         )
 
     ax.set_ylabel("Payload (KiB)")
     ax.set_xlabel("Number of versions")
     ax.set_xticks(x_positions)
-    ax.set_xticklabels([str(version) for version in all_versions])
-    ax.set_yscale("log")
-    ax.grid(True, axis="y", linestyle="--", linewidth=0.5, alpha=0.65)
+    ax.set_xticklabels([str(version) for version in all_versions], rotation=30)
+    apply_y_scale(ax, "log")
 
     handles, labels = ax.get_legend_handles_labels()
     fig.legend(
@@ -575,7 +661,7 @@ def create_payload_plot(
     )
 
     sns.despine(fig=fig)
-    fig.subplots_adjust(top=0.78, left=0.17, right=0.99, bottom=0.23)
+    fig.subplots_adjust(top=0.78, left=0.17, right=0.99, bottom=0.30)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output_path, format="pdf", bbox_inches="tight")
     plt.close(fig)
@@ -591,14 +677,16 @@ def create_plots(points: Sequence[BenchmarkPoint], output_dir: Path) -> Tuple[Pa
     create_single_plot(
         points,
         throughput_path,
-        ylabel="Queries/s",
+        ylabel="Throughput",
         value_attr="throughput_qps",
+        y_scale="symlog",
     )
     create_single_plot(
         points,
         latency_path,
         ylabel="Latency (ms)",
         value_attr="avg_latency_ms",
+        y_scale="symlog",
     )
     create_latency_breakdown_plot(points, latency_breakdown_path)
     create_payload_plot(points, payload_path)
@@ -607,13 +695,7 @@ def create_plots(points: Sequence[BenchmarkPoint], output_dir: Path) -> Tuple[Pa
 
 def write_summary_csv(points: Sequence[BenchmarkPoint], output_dir: Path) -> Path:
     summary_path = output_dir / "kt_query_summary.csv"
-    sweep_keys = sorted(
-        {
-            str(key)
-            for point in points
-            for key in point.sweep_parameters
-        }
-    )
+    sweep_keys = sorted({str(key) for point in points for key in point.sweep_parameters})
     fieldnames = [
         "run_dir",
         "protocol",
@@ -682,10 +764,15 @@ def print_summary(
 def main() -> int:
     args = parse_args()
     requested_input = Path(args.input).expanduser().resolve()
-    sweep_root = resolve_sweep_root(requested_input)
-    points = load_points(sweep_root)
 
-    output_dir = sweep_root / "output"
+    if requested_input.is_file() and requested_input.suffix.lower() == ".csv":
+        points = load_points_from_summary_csv(requested_input)
+        output_dir = requested_input.parent / "output_log"
+    else:
+        sweep_root = resolve_sweep_root(requested_input)
+        points = load_points(sweep_root)
+        output_dir = sweep_root / "output"
+
     throughput_path, latency_path, latency_breakdown_path, payload_path = create_plots(
         points, output_dir
     )
