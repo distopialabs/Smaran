@@ -10,7 +10,6 @@ Subcommands:
 
 import argparse
 import os
-import re
 import sys
 
 import matplotlib
@@ -294,71 +293,13 @@ def cmd_ingestion_summary(args):
 # Proof summary parsing
 # ---------------------------------------------------------------------------
 
-def _parse_go_duration_ms(s: str) -> float:
-    """
-    Parse a Go time.Duration string into milliseconds.
-    Handles: '60s', '8.2ms', '500µs', '1.2s', '1m30s', '100us'
-    """
-    s = s.strip()
-    # Go duration units — longer suffixes first to avoid "m" shadowing "ms"
-    units = [("h", 3600_000.0), ("ms", 1.0), ("µs", 0.001), ("us", 0.001),
-             ("ns", 1e-6), ("m", 60_000.0), ("s", 1_000.0)]
-    total = 0.0
-    remaining = s
-    while remaining:
-        matched = False
-        for unit, factor in units:
-            pattern = r"^(\d+(?:\.\d+)?)" + re.escape(unit)
-            m = re.match(pattern, remaining)
-            if m:
-                total += float(m.group(1)) * factor
-                remaining = remaining[m.end():]
-                matched = True
-                break
-        if not matched:
-            break
-    return total
-
-
 def parse_proof_summary(path: str) -> dict:
-    """Parse a proof_bench_summary.txt file into a dict with numeric values."""
-    result = {}
-    with open(path, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if ":" not in line:
-                continue
-            key, _, val = line.partition(":")
-            key = key.strip()
-            val = val.strip()
-
-            if key == "Duration":
-                result["duration_s"] = _parse_go_duration_ms(val) / 1000.0
-            elif key == "Clients":
-                result["clients"] = int(val)
-            elif key == "Range Size":
-                result["range_size"] = int(val)
-            elif key == "Total Requests":
-                result["total_requests"] = int(val)
-            elif key == "Client Errors":
-                result["client_errors"] = int(val)
-            elif key == "Server Errors":
-                result["server_errors"] = int(val)
-            elif key == "Verify Failures":
-                result["verify_failures"] = int(val)
-            elif key == "Throughput":
-                m = re.search(r"[\d.]+", val)
-                result["throughput_rps"] = float(m.group()) if m else 0.0
-            elif key == "Avg Proofgen":
-                result["avg_proofgen_ms"] = _parse_go_duration_ms(val)
-            elif key == "Avg E2E Latency":
-                result["avg_e2e_ms"] = _parse_go_duration_ms(val)
-            elif key == "Avg Verify":
-                result["avg_verify_ms"] = _parse_go_duration_ms(val)
-            elif key == "Avg Payload Size":
-                m = re.search(r"[\d.]+", val)
-                result["avg_payload_kb"] = float(m.group()) if m else 0.0
-    return result
+    """Parse a proof summary CSV file into a dict with numeric values."""
+    df = pd.read_csv(path)
+    if len(df) == 0:
+        return {}
+    row = df.iloc[0]
+    return {col: float(row[col]) for col in df.columns}
 
 
 # ---------------------------------------------------------------------------
@@ -392,7 +333,7 @@ def cmd_proof_summary(args):
 
     graphs = [
         ("avg_proofgen_ms", "Latency (ms)",       "G10_proofgen_vs_range",   "Proofgen Latency vs Range"),
-        ("avg_e2e_ms",      "Latency (ms)",        "G11_e2e_vs_range",        "E2E Latency vs Range"),
+        ("avg_response_ms", "Latency (ms)",        "G11_response_vs_range",   "Response Latency vs Range"),
         ("avg_verify_ms",   "Latency (ms)",        "G12_verify_vs_range",     "Verify Latency vs Range"),
         ("throughput_rps",  "Throughput (req/s)",  "G13_throughput_vs_range", "Throughput vs Range"),
     ]
@@ -500,6 +441,90 @@ def cmd_update_timeseries(args):
 
 
 # ---------------------------------------------------------------------------
+# Subcommand 5: proof-throughput-timeseries  (G16–G17)
+# ---------------------------------------------------------------------------
+
+PROOF_THROUGHPUT_REQUIRED_COLS = {"start_at_ns", "completed_at_ns"}
+
+
+def load_proof_throughput_csv(path: str) -> pd.DataFrame:
+    df = pd.read_csv(path)
+    df.columns = [c.strip() for c in df.columns]
+    missing = PROOF_THROUGHPUT_REQUIRED_COLS - set(df.columns)
+    if missing:
+        sys.exit(f"ERROR: {path} is missing columns: {missing}")
+    return df
+
+
+def process_proof_throughput(df: pd.DataFrame, warmup: float, cooldown: float,
+                             window_sec: float) -> pd.DataFrame:
+    """Compute per-window throughput and latency from server bench log CSV."""
+    df = df.copy()
+    # Relative time based on completion timestamp.
+    t0 = df["completed_at_ns"].min()
+    df["rel_time"] = (df["completed_at_ns"] - t0) / 1e9
+
+    # Per-request latency.
+    df["latency_ms"] = (df["completed_at_ns"] - df["start_at_ns"]) / 1e6
+
+    # Trim warmup/cooldown.
+    max_t = df["rel_time"].max()
+    mask = (df["rel_time"] >= warmup) & (df["rel_time"] <= (max_t - cooldown))
+    df = df[mask].reset_index(drop=True)
+
+    if len(df) == 0:
+        return pd.DataFrame(columns=["t_mid", "request_throughput", "avg_latency_ms"])
+
+    # Bin into time windows.
+    df["_bucket"] = np.floor(df["rel_time"] / window_sec).astype(int)
+    grp = df.groupby("_bucket")
+
+    out = pd.DataFrame({
+        "t_mid":              grp["rel_time"].mean(),
+        "request_throughput": grp["latency_ms"].count() / window_sec,
+        "avg_latency_ms":     grp["latency_ms"].mean(),
+    }).reset_index(drop=True)
+    return out.sort_values("t_mid").reset_index(drop=True)
+
+
+_PROOF_THROUGHPUT_GRAPHS = {
+    "G16": ("request_throughput", "Throughput (req/s)", "G16_proof_throughput", "Proof Request Throughput"),
+    "G17": ("avg_latency_ms",    "Latency (ms)",       "G17_proof_latency",    "Avg Proof Request Latency"),
+}
+
+
+def cmd_proof_throughput_timeseries(args):
+    inputs = _parse_input_args(args.input)
+    graphs_to_plot = (
+        set(_PROOF_THROUGHPUT_GRAPHS.keys())
+        if args.graphs == "all"
+        else {g.strip().upper() for g in args.graphs.split(",")}
+    )
+
+    processed = []
+    for label, path in inputs:
+        df = load_proof_throughput_csv(path)
+        df = process_proof_throughput(df, args.warmup, args.cooldown, args.window)
+        processed.append((label, df))
+
+    title_suffix = " — " + ", ".join(lbl for lbl, _ in inputs) if len(inputs) == 1 else ""
+
+    for gid, (col, ylabel, fname, gtitle) in _PROOF_THROUGHPUT_GRAPHS.items():
+        if gid not in graphs_to_plot:
+            continue
+        fig, ax = _make_fig()
+        for label, df in processed:
+            sty = _protocol_style(label)
+            x = df["t_mid"].values
+            y = df[col].values
+            ax.plot(x, y, color=sty["color"], linewidth=1, label=sty["label"])
+        _finalize_ax(ax, "Time (s)", ylabel,
+                     f"{gtitle}{title_suffix}",
+                     [lbl for lbl, _ in inputs])
+        save_figure(fig, args.output_dir, fname, args.format, args.dpi)
+
+
+# ---------------------------------------------------------------------------
 # Argument parsing
 # ---------------------------------------------------------------------------
 
@@ -570,6 +595,18 @@ def main():
     p4.add_argument("--graphs", default="all",
                     help="Graphs to produce: 'all' or comma-separated G14,G15 (default: all)")
     p4.set_defaults(func=cmd_update_timeseries)
+
+    # proof-throughput-timeseries
+    p5 = sub.add_parser("proof-throughput-timeseries",
+                         help="Proof throughput time-series graphs G16–G17 from server bench CSVs")
+    _add_global_opts(p5)
+    p5.add_argument("--input", action="append", required=True, metavar="LABEL:PATH",
+                    help="'label:csv_path' (repeatable for multi-protocol overlay)")
+    p5.add_argument("--window", type=float, default=5.0,
+                    help="Rolling window size in seconds (default: 5.0)")
+    p5.add_argument("--graphs", default="all",
+                    help="Graphs to produce: 'all' or comma-separated G16,G17 (default: all)")
+    p5.set_defaults(func=cmd_proof_throughput_timeseries)
 
     args = parser.parse_args()
     args.func(args)

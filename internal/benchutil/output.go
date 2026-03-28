@@ -33,14 +33,14 @@ func UpdateMetricsOutputPath(baseDir, protocol string, kUsers int) (string, erro
 }
 
 // ProofOutputPath returns the standardized output path for proof benchmarks.
-// Format: {baseDir}/{protocol}/proof_range{rangeSize}_{timestamp}.txt
+// Format: {baseDir}/{protocol}/proof_range{rangeSize}_{timestamp}.csv
 func ProofOutputPath(baseDir, protocol string, rangeSize int) (string, error) {
 	dir, err := EnsureOutputDir(baseDir, protocol)
 	if err != nil {
 		return "", err
 	}
 	ts := time.Now().Format("20060102_150405")
-	return filepath.Join(dir, fmt.Sprintf("proof_range%d_%s.txt", rangeSize, ts)), nil
+	return filepath.Join(dir, fmt.Sprintf("proof_range%d_%s.csv", rangeSize, ts)), nil
 }
 
 // EnsureOutputDir creates {baseDir}/{protocol}/ if it doesn't exist

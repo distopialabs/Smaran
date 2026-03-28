@@ -73,16 +73,16 @@ func queryCmd() *cli.Command {
 				EndBlock:   endBlock,
 			}
 
-			e2eStart := time.Now()
+			respStart := time.Now()
 			proofs, proofgenNs, fetchErr := callRangeProof(context.Background(), client, req)
-			e2eDur := time.Since(e2eStart)
+			respDur := time.Since(respStart)
 
 			if fetchErr != nil {
 				s := verkleQuerySummary{
 					Account:    account,
 					StartBlock: startBlock,
 					EndBlock:   endBlock,
-					E2EDur:     e2eDur,
+					ResponseDur:     respDur,
 				}
 				if isClientError(fetchErr) {
 					s.ClientErr = fetchErr.Error()
@@ -121,7 +121,7 @@ func queryCmd() *cli.Command {
 				StartBlock:    startBlock,
 				EndBlock:      endBlock,
 				ProofgenDur:   time.Duration(proofgenNs),
-				E2EDur:        e2eDur,
+				ResponseDur:        respDur,
 				VerifyDur:     verifyDur,
 				Verified:      doVerify,
 				VerifiedCount: verifiedCount,
@@ -223,9 +223,9 @@ func benchCmd() *cli.Command {
 							EndBlock:   endBlock,
 						}
 
-						e2eStart := time.Now()
+						respStart := time.Now()
 						proofs, proofgenNs, reqErr := callRangeProof(context.Background(), cl, req)
-						e2eNs := time.Since(e2eStart).Nanoseconds()
+						respNs := time.Since(respStart).Nanoseconds()
 
 						if reqErr != nil {
 							if isClientError(reqErr) {
@@ -237,7 +237,7 @@ func benchCmd() *cli.Command {
 						}
 
 						stats.TotalRequests++
-						stats.TotalE2ENs += e2eNs
+						stats.TotalResponseNs += respNs
 						stats.TotalProofgenNs += proofgenNs
 
 						// Payload size: sum of proof fields.
@@ -379,7 +379,7 @@ type verkleQuerySummary struct {
 	StartBlock    uint64
 	EndBlock      uint64
 	ProofgenDur   time.Duration
-	E2EDur        time.Duration
+	ResponseDur   time.Duration
 	VerifyDur     time.Duration
 	Verified      bool
 	VerifiedCount int
@@ -403,7 +403,7 @@ func printVerkleQuerySummary(w io.Writer, s verkleQuerySummary) {
 	if s.ProofgenDur > 0 {
 		fmt.Fprintf(w, "  %-20s %s\n", "Proofgen Latency:", s.ProofgenDur.Round(100*time.Microsecond))
 	}
-	fmt.Fprintf(w, "  %-20s %s\n", "E2E Latency:", s.E2EDur.Round(100*time.Microsecond))
+	fmt.Fprintf(w, "  %-20s %s\n", "Response Latency:", s.ResponseDur.Round(100*time.Microsecond))
 	if s.Verified {
 		fmt.Fprintf(w, "  %-20s %s\n", "Verify Latency:", s.VerifyDur.Round(100*time.Microsecond))
 		total := s.VerifiedCount + s.FailedCount

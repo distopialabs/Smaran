@@ -11,6 +11,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	proofpb "github.com/nepal80m/samurai/api/proto/samurai/v1"
+	"github.com/nepal80m/samurai/internal/benchutil"
 	"github.com/nepal80m/samurai/internal/config"
 	"github.com/nepal80m/samurai/internal/db"
 	"github.com/nepal80m/samurai/internal/merkle/meta"
@@ -30,14 +31,17 @@ type ProofServer struct {
 	dbs             []*db.SamuraiStore
 	precomputedData *config.PrecomputedData
 	mptStore        *st.MPTStateStore
+	benchLog        *benchutil.BenchLogger // nil when --bench is off
 }
 
 // NewProofServer creates a new ProofServer instance.
-func NewProofServer(dbs []*db.SamuraiStore, precomputedData *config.PrecomputedData, mptStore *st.MPTStateStore) *ProofServer {
+// benchLog may be nil to disable server-side bench logging.
+func NewProofServer(dbs []*db.SamuraiStore, precomputedData *config.PrecomputedData, mptStore *st.MPTStateStore, benchLog *benchutil.BenchLogger) *ProofServer {
 	return &ProofServer{
 		dbs:             dbs,
 		precomputedData: precomputedData,
 		mptStore:        mptStore,
+		benchLog:        benchLog,
 	}
 }
 
@@ -137,6 +141,17 @@ func (s *ProofServer) GetProof(ctx context.Context, req *proofpb.GetProofRequest
 
 // GetProofStream streams range proofs for a given account and block range.
 func (s *ProofServer) GetProofStream(req *proofpb.GetProofRequest, stream proofpb.ProofService_GetProofStreamServer) error {
+	var benchStartNs int64
+	if s.benchLog != nil {
+		benchStartNs = time.Now().UnixNano()
+		defer func() {
+			s.benchLog.Log(benchutil.BenchRecord{
+				StartNs:     benchStartNs,
+				CompletedNs: time.Now().UnixNano(),
+			})
+		}()
+	}
+
 	// Validate request
 	if req.Account == "" {
 		return status.Error(codes.InvalidArgument, "account address is required")
@@ -258,6 +273,17 @@ func (s *ProofServer) GetProofStream(req *proofpb.GetProofRequest, stream proofp
 }
 
 func (s *ProofServer) GetOldProofStream(req *proofpb.GetProofRequest, stream proofpb.ProofService_GetProofStreamServer) error {
+	var benchStartNs int64
+	if s.benchLog != nil {
+		benchStartNs = time.Now().UnixNano()
+		defer func() {
+			s.benchLog.Log(benchutil.BenchRecord{
+				StartNs:     benchStartNs,
+				CompletedNs: time.Now().UnixNano(),
+			})
+		}()
+	}
+
 	// Validate request
 	if req.Account == "" {
 		return status.Error(codes.InvalidArgument, "account address is required")
@@ -398,13 +424,15 @@ func (s *ProofServer) GetInfo(ctx context.Context, req *proofpb.GetInfoRequest) 
 }
 
 // ListenAndServe starts the gRPC server on the specified address.
-func ListenAndServe(addr string, server *ProofServer) error {
+// Optional grpc.ServerOption values (e.g. grpc.MaxConcurrentStreams) are
+// forwarded to grpc.NewServer.
+func ListenAndServe(addr string, server *ProofServer, opts ...grpc.ServerOption) error {
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
 		return fmt.Errorf("failed to listen on %s: %w", addr, err)
 	}
 
-	grpcServer := grpc.NewServer()
+	grpcServer := grpc.NewServer(opts...)
 	proofpb.RegisterProofServiceServer(grpcServer, server)
 
 	log.Printf("Starting gRPC server on %s", addr)
