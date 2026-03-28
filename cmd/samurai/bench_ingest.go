@@ -85,7 +85,7 @@ func benchIngestCmd() *cli.Command {
 				log.Fatalf("failed to setup databases: %v", err)
 			}
 
-			cacheSize := 2048
+			cacheSize := 64
 			caches, err := ingest.SetupCaches(cacheSize, shardedSamuraiStores, cryptoParams)
 			if err != nil {
 				log.Fatalf("failed to setup caches: %v", err)

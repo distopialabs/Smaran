@@ -65,8 +65,8 @@ func ProofCmd() *cli.Command {
 				return fmt.Errorf("verification failed: %v", err)
 			}
 
-			start = time.Now()
-			fmt.Println("Time taken to verify range proofs", time.Since(start))
+			// start = time.Now()
+			// fmt.Println("Time taken to verify range proofs", time.Since(start))
 
 			return nil
 		},

@@ -180,6 +180,8 @@ func runMPTWorker(
 	var hangChan chan blockInfo
 	_hangChan := (<-chan blockInfo)(hangChan)
 
+	var blockInfoChClosed bool
+
 	buffered := make(map[uint64][]updateForward)
 	bufferedFirstTime := make(map[uint64]time.Time)
 	blockInfoBuffered := make(map[uint64]blockInfo)
@@ -196,10 +198,18 @@ func runMPTWorker(
 
 outerLoop:
 	for {
+		var activeBlockInfoCh *<-chan blockInfo
+		if blockInfoChClosed {
+			activeBlockInfoCh = &_hangChan
+		} else {
+			activeBlockInfoCh = mayHang(&blockInfoCh, &_hangChan, len(blockInfoBuffered), maxHangLen)
+		}
+
 		select {
-		case bi, ok := <-*mayHang(&blockInfoCh, &_hangChan, len(blockInfoBuffered), maxHangLen):
+		case bi, ok := <-*activeBlockInfoCh:
 			if !ok {
-				break outerLoop
+				blockInfoChClosed = true
+				continue
 			}
 
 			pending := bi.updateCount
@@ -281,10 +291,10 @@ func maybeCreateNewBlock(
 	defer pendingCount.Delete(currentBlock)
 	defer delete(*buffered, currentBlock)
 	defer delete(*blockInfoBuffered, currentBlock)
-	if ft, ok := (*bufferedFirstTime)[currentBlock]; ok {
-		if time.Since(ft) > 10*time.Millisecond {
-			fmt.Println("Time taken to buffer first time:", time.Since(ft))
-		}
+	if _, ok := (*bufferedFirstTime)[currentBlock]; ok {
+		// if time.Since(ft) > 10*time.Millisecond {
+		// 	fmt.Println("Time taken to buffer first time:", time.Since(ft))
+		// }
 		defer delete(*bufferedFirstTime, currentBlock)
 	}
 

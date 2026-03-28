@@ -114,9 +114,9 @@ func (s *MPTStateStore) CommitState(stateDB *state.StateDB, parentRoot common.Ha
 // }
 
 func (s *MPTStateStore) FlushTrieDB(root common.Hash) error {
-	// if err := s.TrieDB.Commit(root, false); err != nil {
-	// 	return fmt.Errorf("triedb flush failed: %w", err)
-	// }
+	if err := s.TrieDB.Commit(root, false); err != nil {
+		return fmt.Errorf("triedb flush failed: %w", err)
+	}
 	return nil
 }
 

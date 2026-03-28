@@ -54,7 +54,7 @@ func benchIngestCmd() *cli.Command {
 			}
 
 			startBlock := dataset.FIRST_BLOCK
-			endBlock := startBlock + 10_000_000
+			endBlock := dataset.LAST_BLOCK
 
 			return ingest.RunBench(ingest.BenchConfig{
 				BlocksDir:         blocksDir,

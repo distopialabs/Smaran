@@ -24,13 +24,14 @@ import pandas as pd
 # ---------------------------------------------------------------------------
 
 PROTOCOL_STYLE = {
-    "samurai":    {"color": "#2166ac", "marker": "o", "label": "Samurai"},
-    "samuraimpt": {"color": "#4393c3", "marker": "D", "label": "Samurai+MPT"},
-    "merkle":     {"color": "#b2182b", "marker": "^", "label": "Merkle"},
+    "samurai":    {"color": "#e66101", "marker": "o", "label": "Samurai"},
+    "samuraimpt": {"color": "#7b3294", "marker": "D", "label": "Samurai+MPT"},
+    "merkle":     {"color": "#2166ac", "marker": "^", "label": "Merkle"},
     "verkle":     {"color": "#1b7837", "marker": "s", "label": "Verkle"},
+    "cauchy":     {"color": "#b2182b", "marker": "D", "label": "Cauchy"},
 }
 _AUTO_COLORS = [
-    "#7b3294", "#e66101", "#4dac26", "#d01c8b", "#f1b6da",
+    "#4393c3", "#4dac26", "#d01c8b", "#f1b6da",
 ]
 _auto_color_idx = 0
 

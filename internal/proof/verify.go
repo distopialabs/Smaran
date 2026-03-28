@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"log"
 	"slices"
-	"time"
 
 	bls "github.com/consensys/gnark-crypto/ecc/bls12-381"
 	"github.com/consensys/gnark-crypto/ecc/bls12-381/fr/fft"
@@ -94,9 +93,9 @@ func VerifyNewRangeProofs(account common.Address, startingVersion, endingVersion
 
 	// Step 2: Rebuild segment tree and verify range proofs (existing logic).
 	// TODO: Rebuild partial tree
-	start := time.Now()
+	// start := time.Now()
 	requiredTreeBatchesMap := RebuildSegmentTreeForVerify(account, lxRequiredBatchIdxs, startingVersion, endingVersion, balanceInfos, proofHashMap, reqCommits, precomputedData)
-	log.Printf("Time taken to rebuild segment tree: %v", time.Since(start))
+	// log.Printf("Time taken to rebuild segment tree: %v", time.Since(start))
 
 	slices.SortFunc(reqCommits, func(a, b RangeCommitment) int {
 		if a.layer != b.layer {
@@ -105,7 +104,7 @@ func VerifyNewRangeProofs(account common.Address, startingVersion, endingVersion
 		return a.idx - b.idx
 	})
 	isVerified := make(map[string]bool, len(rangeProofs))
-	verifyStart := time.Now()
+	// verifyStart := time.Now()
 
 	// loop from last item to first item
 	for i := len(reqCommits) - 1; i >= 0; i-- {
@@ -216,7 +215,7 @@ func VerifyNewRangeProofs(account common.Address, startingVersion, endingVersion
 
 		// fmt.Printf("Time taken to verify range proof %d:%d: %v\n", reqCommit.layer, reqCommit.idx, time.Since(innerVerifyStart))
 	}
-	log.Printf("Time taken to verify range proofs: %v", time.Since(verifyStart))
+	// log.Printf("Time taken to verify range proofs: %v", time.Since(verifyStart))
 	return nil
 }
 

@@ -19,7 +19,7 @@ import (
 	"github.com/nepal80m/samurai/internal/storage"
 )
 
-const NUM_SHARDS = 32
+const NUM_SHARDS = 1000
 
 func IngestCmd() *cli.Command {
 	return &cli.Command{
@@ -84,7 +84,7 @@ func IngestCmd() *cli.Command {
 			}
 
 			// Setup caches
-			cacheSize := 2048 // max number of entries per cache
+			cacheSize := 64 // max number of entries per cache
 			caches, err := ingest.SetupCaches(cacheSize, shardedSamuraiStores, cryptoParams)
 			if err != nil {
 				log.Fatalf("failed to setup caches: %v", err)
