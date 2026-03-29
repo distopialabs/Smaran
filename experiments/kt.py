@@ -357,6 +357,7 @@ def build_bench_command(
             f"-d {settings.bench_run_duration_secs} "
             f"-e {settings.bench_num_versions} "
             f"-a {settings.bench_num_versions} "
+            f"-b {settings.server_batch_size} "
             f"-v"
             f"> {settings.remote_base_dir}/{node_name}.log 2>&1"
         )
