@@ -310,9 +310,10 @@ func runLoadClient(clientID int, addr string, userIDStart, userIDEnd, numVersion
 	received := <-responsesDone
 	log.Infof("[Client %d] done: %d/%d responses received", clientID, received, sentCount)
 }
-// runPutClient opens a persistent TCP connection and sends synchronous Put
-// requests for random users until the duration elapses. It returns only the
-// total completed request count; latency breakdown is intentionally not tracked.
+// runPutClient opens a persistent TCP connection and sends pipelined Put
+// requests for random users until the duration elapses. Requests are written
+// back-to-back without waiting for responses; a concurrent reader goroutine
+// drains responses asynchronously, mirroring the load phase design.
 func runPutClient(clientID int, addr string, numUsers int, duration time.Duration) runClientMetrics {
 	conn, err := net.Dial("tcp", addr)
 	if err != nil {
@@ -321,13 +322,44 @@ func runPutClient(clientID int, addr string, numUsers int, duration time.Duratio
 	}
 	defer conn.Close()
 
-	bw := bufio.NewWriterSize(conn, 64*1024)
-	br := bufio.NewReaderSize(conn, 256*1024)
+	bw := bufio.NewWriterSize(conn, 256*1024)
+	br := bufio.NewReaderSize(conn, 64*1024)
 	rng := rand.New(rand.NewSource(time.Now().UnixNano() + int64(clientID)*1000))
 
-	var metrics runClientMetrics
-	deadline := time.Now().Add(duration)
+	// allSent is closed after the writer flushes its last byte. The close
+	// provides the memory barrier that makes `sent` visible to the reader.
+	allSent := make(chan struct{})
+	responsesDone := make(chan int64, 1)
+	var sent int64
 
+	// Reader goroutine: drain responses concurrently with the writer so that
+	// TCP send/recv buffers never fill and back-pressure the writer.
+	go func() {
+		var count int64
+		for {
+			resp, err := http.ReadResponse(br, nil)
+			if err != nil {
+				log.Errorf("[Run %d] read response %d: %v", clientID, count, err)
+				break
+			}
+			io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+			count++
+			// After each response, check whether writing is finished and we
+			// have drained every outstanding response.
+			select {
+			case <-allSent:
+				if count >= sent {
+					responsesDone <- count
+					return
+				}
+			default:
+			}
+		}
+		responsesDone <- count
+	}()
+
+	deadline := time.Now().Add(duration)
 	for time.Now().Before(deadline) {
 		userID := rng.Intn(numUsers)
 		user := []byte(fmt.Sprintf("user:%d", userID))
@@ -335,24 +367,22 @@ func runPutClient(clientID int, addr string, numUsers int, duration time.Duratio
 		rng.Read(key)
 
 		body, _ := json.Marshal(putRequest{User: user, Key: key})
-
 		fmt.Fprintf(bw, "POST /put HTTP/1.1\r\nHost: %s\r\nContent-Type: application/json\r\nContent-Length: %d\r\nConnection: keep-alive\r\n\r\n", addr, len(body))
 		bw.Write(body)
-		if err := bw.Flush(); err != nil {
-			log.Errorf("[Run %d] write: %v", clientID, err)
-			break
-		}
-		resp, err := http.ReadResponse(br, nil)
-		if err != nil {
-			log.Errorf("[Run %d] read response: %v", clientID, err)
-			break
-		}
-		io.Copy(io.Discard, resp.Body)
-		resp.Body.Close()
-
-		metrics.TotalRequestsCompleted++
+		sent++
 	}
-	return metrics
+
+	if err := bw.Flush(); err != nil {
+		log.Errorf("[Run %d] flush: %v", clientID, err)
+	}
+
+	log.Infof("[Run %d] sent %d requests, waiting for responses...", clientID, sent)
+	close(allSent)
+
+	completed := <-responsesDone
+	log.Infof("[Run %d] done: %d/%d responses received", clientID, completed, sent)
+
+	return runClientMetrics{TotalRequestsCompleted: completed}
 }
 
 // runRunClient opens a persistent TCP connection and sends synchronous Get

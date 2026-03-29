@@ -251,7 +251,10 @@ func (s *SamuraiKTServer) GetProofRangeInMemory(account common.Address, starting
 
 		// start := time.Now()
 		treeKey := fmt.Sprintf("%d:%d", layer, idx)
-		batchTree := requiredTreeBatchesMap[treeKey]
+		batchTree, ok := requiredTreeBatchesMap[treeKey]
+		if !ok {
+			panic(fmt.Errorf("batch tree not found for key: %s %v", treeKey, requiredTreeBatchesMap))
+		}
 
 		P := make([]fr.Element, len(batchTree))
 		for i, v := range batchTree {
