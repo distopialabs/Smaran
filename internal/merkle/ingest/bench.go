@@ -91,13 +91,6 @@ func produceBlocks(
 			}
 			selectedCount := uint64(len(selected))
 
-			blockInfoCh <- blockInfo{
-				blockNumber:    uint64(n),
-				updateCount:    selectedCount,
-				rawUpdateCount: rawCount,
-				queuedAtNs:     time.Now().UnixNano(),
-			}
-
 			for _, entry := range selected {
 				addr := common.BytesToAddress(entry.Address[:])
 				idx := utils.AddressToShardIndex(addr, numShards)
@@ -106,6 +99,13 @@ func produceBlocks(
 					address:     addr,
 					balance:     new(big.Int).SetBytes(entry.Balance),
 				}
+			}
+
+			blockInfoCh <- blockInfo{
+				blockNumber:    uint64(n),
+				updateCount:    selectedCount,
+				rawUpdateCount: rawCount,
+				queuedAtNs:     time.Now().UnixNano(),
 			}
 
 			return nil
@@ -157,7 +157,7 @@ func (d *defaultDict) Delete(key uint64) {
 	delete(d.internal, key)
 }
 
-const maxHangLen = 100
+const maxHangLen = 1
 
 func mayHang(blockInfoCh *<-chan blockInfo, hangChan *<-chan blockInfo, currLen int, maxLen int) *<-chan blockInfo {
 	if currLen > maxLen {
@@ -282,7 +282,7 @@ func maybeCreateNewBlock(
 	defer delete(*buffered, currentBlock)
 	defer delete(*blockInfoBuffered, currentBlock)
 	if ft, ok := (*bufferedFirstTime)[currentBlock]; ok {
-		if time.Since(ft) > 10*time.Millisecond {
+		if time.Since(ft) > 1000*time.Second {
 			fmt.Println("Time taken to buffer first time:", time.Since(ft))
 		}
 		defer delete(*bufferedFirstTime, currentBlock)

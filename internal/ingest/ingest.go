@@ -195,7 +195,7 @@ func mayHang(blockInfoCh *<-chan mptBlockInfo, hangChan *<-chan mptBlockInfo, cu
 	return blockInfoCh
 }
 
-const MAX_HANG_LEN = 2000
+const MAX_HANG_LEN = 1
 
 func runMPTWorker(cfg Config, blockInfoCh <-chan mptBlockInfo, commitCh *chann.Chann[mptUpdateCommitmentInfoBulk]) {
 	currentRoot, err := meta.GetRoot(cfg.MPTStore.DiskDB, cfg.Blocks.Start-1)
@@ -659,33 +659,6 @@ func produceBlocks(cfg Config, blockInfoCh chan<- mptBlockInfo, queues []*chann.
 			updateCount := uint64(cfg.Workers.CommitWorkerCount)
 			forwardRaw := !mustFlush
 
-			if blockInfoCh != nil {
-
-				_updateCount := uint64(0)
-				if forwardRaw {
-					_updateCount = uint64(len(selected))
-				}
-
-				info := mptBlockInfo{
-					blockNumber:         uint64(n),
-					updateCount:         _updateCount,
-					rawUpdateCount:      rawCount,
-					filteredUpdateCount: _updateCount,
-				}
-				if mustFlush {
-					info.updateCount = updateCount
-				}
-				if bench != nil {
-					info.queuedAtNs = time.Now().UnixNano()
-				}
-				startTime := time.Now()
-				blockInfoCh <- info
-				elapsed := time.Since(startTime)
-				if elapsed > 1000*time.Millisecond {
-					fmt.Println("Time taken to send block info:", elapsed)
-				}
-			}
-
 			// --- distribute selected entries to shard queues ---
 			// fmt.Println("Distributing entries to shard queues:", len(selected))
 			for _, entry := range selected {
@@ -724,6 +697,33 @@ func produceBlocks(cfg Config, blockInfoCh chan<- mptBlockInfo, queues []*chann.
 					// 	return fmt.Errorf("push to shard queue %d: %w", idx, err)
 					// }
 					queue.In() <- task
+				}
+			}
+
+			if blockInfoCh != nil {
+
+				_updateCount := uint64(0)
+				if forwardRaw {
+					_updateCount = uint64(len(selected))
+				}
+
+				info := mptBlockInfo{
+					blockNumber:         uint64(n),
+					updateCount:         _updateCount,
+					rawUpdateCount:      rawCount,
+					filteredUpdateCount: _updateCount,
+				}
+				if mustFlush {
+					info.updateCount = updateCount
+				}
+				if bench != nil {
+					info.queuedAtNs = time.Now().UnixNano()
+				}
+				startTime := time.Now()
+				blockInfoCh <- info
+				elapsed := time.Since(startTime)
+				if elapsed > 1000*time.Millisecond {
+					fmt.Println("Time taken to send block info:", elapsed)
 				}
 			}
 

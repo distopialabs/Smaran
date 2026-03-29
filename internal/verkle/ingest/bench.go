@@ -9,11 +9,11 @@ import (
 	"strconv"
 	"time"
 
+	verkle "github.com/ethereum/go-verkle"
 	"github.com/nepal80m/samurai/internal/benchutil"
 	"github.com/nepal80m/samurai/internal/dataset"
 	"github.com/nepal80m/samurai/internal/verkle/keys"
 	"github.com/nepal80m/samurai/internal/verkle/store"
-	verkle "github.com/ethereum/go-verkle"
 )
 
 var errTimeLimitReached = errors.New("time limit reached")
@@ -166,6 +166,8 @@ func RunBench(cfg BenchConfig) error {
 		}
 
 		root.Commit()
+
+		// fmt.Printf("root commitment: %x\n", root.Commitment())
 
 		iroot, ok := root.(*verkle.InternalNode)
 		if !ok {
