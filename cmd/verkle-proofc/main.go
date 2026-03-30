@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	verkle "github.com/ethereum/go-verkle"
@@ -33,6 +34,7 @@ func main() {
 		Commands: []*cli.Command{
 			queryCmd(),
 			benchCmd(),
+			openloopCmd(),
 		},
 	}
 	if err := app.Run(os.Args); err != nil {
@@ -443,6 +445,155 @@ func humanBytes(b int64) string {
 		return fmt.Sprintf("%.1f KB", float64(b)/1024)
 	default:
 		return fmt.Sprintf("%.1f MB", float64(b)/(1024*1024))
+	}
+}
+
+func dialGRPC(addr string) (*grpc.ClientConn, error) {
+	return grpc.NewClient(addr,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(100*1024*1024)),
+	)
+}
+
+// --- openloop subcommand ---
+
+func openloopCmd() *cli.Command {
+	return &cli.Command{
+		Name:  "openloop",
+		Usage: "Open-loop throughput test: fire requests at a fixed rate to find max server throughput",
+		Flags: []cli.Flag{
+			&cli.StringFlag{Name: "server-addr", Value: "localhost:50051", Usage: "gRPC server address"},
+			&cli.IntFlag{Name: "range-size", Value: 50000, Usage: "Block range size per query"},
+			&cli.StringFlag{Name: "accounts-list", Required: true, Usage: "CSV with accounts sorted by update count desc"},
+			&cli.IntFlag{Name: "num-clients", Value: 1, Usage: "Number of concurrent client connections"},
+			&cli.IntFlag{Name: "rps-per-client", Value: 10, Usage: "Requests per second per client connection"},
+			&cli.IntFlag{Name: "max-concurrent", Value: 100, Usage: "Max in-flight requests per connection (semaphore size)"},
+			&cli.DurationFlag{Name: "duration", Value: 60 * time.Second, Usage: "Test duration"},
+		},
+		Action: func(c *cli.Context) error {
+			serverAddr := c.String("server-addr")
+			rangeSize := c.Int("range-size")
+			numClients := c.Int("num-clients")
+			rpsPerClient := c.Int("rps-per-client")
+			maxConcurrent := c.Int("max-concurrent")
+			duration := c.Duration("duration")
+
+			conn, err := dialGRPC(serverAddr)
+			if err != nil {
+				return err
+			}
+			info, err := proofpb.NewVerkleProofServiceClient(conn).GetInfo(context.Background(), &proofpb.GetInfoRequest{})
+			conn.Close()
+			if err != nil {
+				return fmt.Errorf("GetInfo failed: %w", err)
+			}
+			log.Printf("Server info: latest_block=%d state_root=%s", info.LatestBlock, info.StateRoot)
+
+			firstBlock := dataset.FIRST_BLOCK
+			if info.LatestBlock-firstBlock+1 < uint64(rangeSize) {
+				return fmt.Errorf("server has %d blocks, need at least %d for range-size=%d",
+					info.LatestBlock-firstBlock+1, rangeSize, rangeSize)
+			}
+
+			selector, err := benchutil.NewWeightedAccountSelector(c.String("accounts-list"))
+			if err != nil {
+				return err
+			}
+			log.Printf("Loaded %d weighted accounts", selector.Size())
+
+			offeredRPS := numClients * rpsPerClient
+			log.Printf("Starting open-loop test: %d clients x %d rps = %d offered rps, duration %s, max_concurrent %d",
+				numClients, rpsPerClient, offeredRPS, duration, maxConcurrent)
+
+			var sent, completed, dropped, clientErrors, serverErrors atomic.Int64
+
+			ctx, cancel := context.WithTimeout(context.Background(), duration)
+			defer cancel()
+
+			var wg sync.WaitGroup
+			for i := 0; i < numClients; i++ {
+				wg.Add(1)
+				go func(clientID int) {
+					defer wg.Done()
+
+					clientConn, err := dialGRPC(serverAddr)
+					if err != nil {
+						log.Printf("client %d: dial failed: %v", clientID, err)
+						return
+					}
+					defer clientConn.Close()
+					cl := proofpb.NewVerkleProofServiceClient(clientConn)
+
+					sem := make(chan struct{}, maxConcurrent)
+					ticker := time.NewTicker(time.Second / time.Duration(rpsPerClient))
+					defer ticker.Stop()
+
+					var requestWg sync.WaitGroup
+					defer requestWg.Wait()
+
+					for {
+						select {
+						case <-ctx.Done():
+							return
+						case <-ticker.C:
+							select {
+							case sem <- struct{}{}:
+							default:
+								dropped.Add(1)
+								continue
+							}
+
+							sent.Add(1)
+							account := selector.Pick()
+							endBlock := info.LatestBlock
+							startBlock := endBlock - uint64(rangeSize) + 1
+
+							req := &proofpb.GetRangeProofRequest{
+								Account:    account,
+								StartBlock: startBlock,
+								EndBlock:   endBlock,
+							}
+
+							requestWg.Add(1)
+							go func() {
+								defer requestWg.Done()
+								defer func() { <-sem }()
+
+								_, _, reqErr := callRangeProof(ctx, cl, req)
+								if reqErr != nil {
+									if ctx.Err() != nil {
+										return
+									}
+									if isClientError(reqErr) {
+										clientErrors.Add(1)
+									} else {
+										serverErrors.Add(1)
+									}
+									return
+								}
+								completed.Add(1)
+							}()
+						}
+					}
+				}(i)
+			}
+
+			wg.Wait()
+
+			fmt.Println()
+			fmt.Println("=== Open-Loop Results ===")
+			fmt.Printf("Clients:       %d\n", numClients)
+			fmt.Printf("Offered RPS:   %d\n", offeredRPS)
+			fmt.Printf("Duration:      %s\n", duration)
+			fmt.Printf("Sent:          %d\n", sent.Load())
+			fmt.Printf("Completed:     %d\n", completed.Load())
+			fmt.Printf("Dropped:       %d\n", dropped.Load())
+			fmt.Printf("Client Errors: %d\n", clientErrors.Load())
+			fmt.Printf("Server Errors: %d\n", serverErrors.Load())
+			fmt.Println()
+
+			return nil
+		},
 	}
 }
 

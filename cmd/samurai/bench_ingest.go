@@ -25,7 +25,8 @@ func benchIngestCmd() *cli.Command {
 		Flags: []cli.Flag{
 			&cli.StringFlag{Name: "db-dir", Value: "/data/local/tmp/bench-samurai", Usage: "Root directory for all databases"},
 			&cli.StringFlag{Name: "blocks-dir", Value: "data/blocks", Usage: "Path to block dataset directory"},
-			&cli.DurationFlag{Name: "duration", Value: 5 * time.Minute, Usage: "How long to run the benchmark"},
+			&cli.Uint64Flag{Name: "n", Value: 50000, Usage: "Number of blocks to ingest"},
+			&cli.DurationFlag{Name: "duration", Value: 15 * time.Minute, Usage: "Deadline/timeout for the benchmark"},
 			&cli.IntFlag{Name: "k-users", Value: 0, Usage: "Top-K hot accounts to include (0 = all, no filtering)"},
 			&cli.StringFlag{Name: "accounts-list", Value: "account_stats_all.csv", Usage: "CSV with hot accounts sorted by update count descending"},
 			&cli.StringFlag{Name: "cpuprofile", Value: "", Usage: "Write CPU profile to file"},
@@ -71,6 +72,7 @@ func benchIngestCmd() *cli.Command {
 			}
 
 			startBlock := dataset.FIRST_BLOCK
+			endBlock := startBlock + c.Uint64("n") - 1
 
 			// Samurai setup (always needed).
 			cryptoParamsDir := filepath.Join(dbDir, "params")
@@ -97,6 +99,7 @@ func benchIngestCmd() *cli.Command {
 				Blocks: ingest.BlocksConfig{
 					DataDir: c.String("blocks-dir"),
 					Start:   startBlock,
+					End:     endBlock,
 				},
 				Workers: ingest.WorkersConfig{
 					CommitWorkerCount:       shardsNum,

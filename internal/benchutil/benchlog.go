@@ -2,6 +2,7 @@ package benchutil
 
 import (
 	"strconv"
+	"time"
 )
 
 const benchLogChanSize = 100_000
@@ -44,16 +45,31 @@ func (l *BenchLogger) Log(r BenchRecord) {
 	l.ch <- r
 }
 
-// Run drains the channel and writes records to CSV. Call as a goroutine.
+// Run drains the channel and writes records to CSV. A periodic flush (every 1s)
+// ensures data reaches disk even if the process is killed with SIGKILL.
+// Call as a goroutine.
 func (l *BenchLogger) Run() {
 	defer close(l.done)
-	for r := range l.ch {
-		_ = l.csv.WriteRow(
-			strconv.FormatInt(r.StartNs, 10),
-			strconv.FormatInt(r.CompletedNs, 10),
-		)
+
+	flushTicker := time.NewTicker(time.Second)
+	defer flushTicker.Stop()
+
+	for {
+		select {
+		case r, ok := <-l.ch:
+			if !ok {
+				// Channel closed — drain any remaining records.
+				l.csv.Close()
+				return
+			}
+			_ = l.csv.WriteRow(
+				strconv.FormatInt(r.StartNs, 10),
+				strconv.FormatInt(r.CompletedNs, 10),
+			)
+		case <-flushTicker.C:
+			_ = l.csv.Flush()
+		}
 	}
-	l.csv.Close()
 }
 
 // Stop closes the channel, waits for all buffered records to be written,

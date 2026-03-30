@@ -17,6 +17,7 @@ import (
 	"time"
 
 	proofpb "github.com/nepal80m/samurai/api/proto/verkle/v1"
+	"github.com/nepal80m/samurai/internal/benchutil"
 	"github.com/nepal80m/samurai/internal/verkle/keys"
 	"github.com/nepal80m/samurai/internal/verklekzg/proof"
 	"github.com/nepal80m/samurai/internal/verklekzg/store"
@@ -29,15 +30,27 @@ import (
 
 type ProofServer struct {
 	proofpb.UnimplementedVerkleProofServiceServer
-	ns      *store.NodeStore
-	treeCfg *tree.TreeConfig
+	ns       *store.NodeStore
+	treeCfg  *tree.TreeConfig
+	benchLog *benchutil.BenchLogger
 }
 
-func NewProofServer(ns *store.NodeStore, treeCfg *tree.TreeConfig) *ProofServer {
-	return &ProofServer{ns: ns, treeCfg: treeCfg}
+func NewProofServer(ns *store.NodeStore, treeCfg *tree.TreeConfig, benchLog *benchutil.BenchLogger) *ProofServer {
+	return &ProofServer{ns: ns, treeCfg: treeCfg, benchLog: benchLog}
 }
 
 func (s *ProofServer) GetRangeProof(req *proofpb.GetRangeProofRequest, stream proofpb.VerkleProofService_GetRangeProofServer) error {
+	var benchStartNs int64
+	if s.benchLog != nil {
+		benchStartNs = time.Now().UnixNano()
+		defer func() {
+			s.benchLog.Log(benchutil.BenchRecord{
+				StartNs:     benchStartNs,
+				CompletedNs: time.Now().UnixNano(),
+			})
+		}()
+	}
+
 	if req.Account == "" {
 		return status.Error(codes.InvalidArgument, "account address is required")
 	}
@@ -143,13 +156,13 @@ func (s *ProofServer) GetInfo(ctx context.Context, req *proofpb.GetInfoRequest) 
 	}, nil
 }
 
-func ListenAndServe(addr string, server *ProofServer) error {
+func ListenAndServe(addr string, server *ProofServer, opts ...grpc.ServerOption) error {
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
 		return fmt.Errorf("failed to listen on %s: %w", addr, err)
 	}
 
-	grpcServer := grpc.NewServer()
+	grpcServer := grpc.NewServer(opts...)
 	proofpb.RegisterVerkleProofServiceServer(grpcServer, server)
 
 	sigCh := make(chan os.Signal, 1)
@@ -157,7 +170,18 @@ func ListenAndServe(addr string, server *ProofServer) error {
 	go func() {
 		sig := <-sigCh
 		log.Printf("received %v, shutting down gracefully...", sig)
-		grpcServer.GracefulStop()
+		done := make(chan struct{})
+		go func() {
+			grpcServer.GracefulStop()
+			close(done)
+		}()
+		select {
+		case <-done:
+			log.Println("graceful shutdown complete")
+		case <-time.After(5 * time.Second):
+			log.Println("graceful shutdown timed out, forcing exit")
+			os.Exit(1)
+		}
 	}()
 
 	log.Printf("gRPC Verkle-KZG server listening on %s", addr)

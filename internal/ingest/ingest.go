@@ -195,7 +195,7 @@ func mayHang(blockInfoCh *<-chan mptBlockInfo, hangChan *<-chan mptBlockInfo, cu
 	return blockInfoCh
 }
 
-const MAX_HANG_LEN = 100
+const MAX_HANG_LEN = 1
 
 func runMPTWorker(cfg Config, blockInfoCh <-chan mptBlockInfo, commitCh *chann.Chann[mptUpdateCommitmentInfoBulk]) {
 	currentRoot, err := meta.GetRoot(cfg.MPTStore.DiskDB, cfg.Blocks.Start-1)

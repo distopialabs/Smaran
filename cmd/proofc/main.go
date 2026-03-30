@@ -114,18 +114,18 @@ func queryCmd() *cli.Command {
 			}
 
 			// Extract version range from balance infos.
-			var startVersion uint64 = math.MaxUint64
+			var startVersion uint64
 			var endVersion uint64
-			for _, bi := range resp.BalanceInfos {
-				if bi.Version < startVersion {
-					startVersion = bi.Version
+			if len(resp.BalanceInfos) > 0 {
+				startVersion = math.MaxUint64
+				for _, bi := range resp.BalanceInfos {
+					if bi.Version < startVersion {
+						startVersion = bi.Version
+					}
+					if bi.Version > endVersion {
+						endVersion = bi.Version
+					}
 				}
-				if bi.Version > endVersion {
-					endVersion = bi.Version
-				}
-			}
-			if len(resp.BalanceInfos) == 0 {
-				startVersion = 0
 			}
 
 			payloadBytes := int64(proto.Size(resp))
@@ -417,8 +417,12 @@ func openloopCmd() *cli.Command {
 								defer requestWg.Done()
 								defer func() { <-sem }()
 
-								_, reqErr := fetchProofStream(context.Background(), cl, req, useOld)
+								_, reqErr := fetchProofStream(ctx, cl, req, useOld)
 								if reqErr != nil {
+									// Don't count cancellations from test ending.
+									if ctx.Err() != nil {
+										return
+									}
 									if isClientError(reqErr) {
 										clientErrors.Add(1)
 									} else {
@@ -515,14 +519,17 @@ func verifyResponse(resp *proofpb.GetProofResponse, addr common.Address, precomp
 		balanceInfos[i] = server.BalanceInfoFromProto(bi)
 	}
 
-	var startingVersion uint64 = math.MaxUint64
-	var endingVersion uint64 = 0
-	for _, b := range balanceInfos {
-		if b.Version < startingVersion {
-			startingVersion = b.Version
-		}
-		if b.Version > endingVersion {
-			endingVersion = b.Version
+	var startingVersion uint64
+	var endingVersion uint64
+	if len(balanceInfos) > 0 {
+		startingVersion = math.MaxUint64
+		for _, b := range balanceInfos {
+			if b.Version < startingVersion {
+				startingVersion = b.Version
+			}
+			if b.Version > endingVersion {
+				endingVersion = b.Version
+			}
 		}
 	}
 

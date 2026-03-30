@@ -50,14 +50,18 @@ func (b *BenchCSVWriter) WriteRow(fields ...string) error {
 	return b.w.Write(fields)
 }
 
-// Close flushes and closes the underlying file.
-func (b *BenchCSVWriter) Close() error {
+// Flush pushes buffered data to disk without closing the file.
+func (b *BenchCSVWriter) Flush() error {
 	b.w.Flush()
 	if err := b.w.Error(); err != nil {
-		b.file.Close()
 		return err
 	}
-	if err := b.buf.Flush(); err != nil {
+	return b.buf.Flush()
+}
+
+// Close flushes and closes the underlying file.
+func (b *BenchCSVWriter) Close() error {
+	if err := b.Flush(); err != nil {
 		b.file.Close()
 		return err
 	}

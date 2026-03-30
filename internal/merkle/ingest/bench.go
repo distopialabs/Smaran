@@ -27,6 +27,7 @@ type BenchConfig struct {
 	BlocksDir         string
 	Store             *st.MPTStateStore
 	Start             uint64
+	End               uint64
 	Duration          time.Duration
 	KUsers            int
 	NumShards         int
@@ -157,7 +158,7 @@ func (d *defaultDict) Delete(key uint64) {
 	delete(d.internal, key)
 }
 
-const maxHangLen = 100
+const maxHangLen = 1
 
 func mayHang(blockInfoCh *<-chan blockInfo, hangChan *<-chan blockInfo, currLen int, maxLen int) *<-chan blockInfo {
 	if currLen > maxLen {
@@ -417,7 +418,7 @@ func BenchRun(cfg BenchConfig) error {
 		currentRoot = st.EmptyRootHash
 	}
 
-	end := uint64(^uint32(0))
+	end := cfg.End
 	deadline := time.Now().Add(cfg.Duration)
 
 	// --- create pipeline plumbing ---

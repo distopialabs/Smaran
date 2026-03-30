@@ -140,18 +140,18 @@ def rolling_window_stats(df: pd.DataFrame, window_sec: float) -> pd.DataFrame:
 
     t_mid            = grp["rel_time"].mean()
     mean_block_lat   = grp["block_lat_ms"].mean()
-    mean_e2e_block   = grp["e2e_block_lat_ms"].mean()
+    mean_e2e_block_lat   = grp["e2e_block_lat_ms"].mean()
     mean_update_lat  = grp["update_lat_ms"].mean()     # NaN rows excluded
-    mean_e2e_update  = grp["e2e_update_lat_ms"].mean() # NaN rows excluded
-    block_throughput = grp["block_lat_ms"].count() / window_sec
+    mean_e2e_update_lat  = grp["e2e_update_lat_ms"].mean() # NaN rows excluded
+    block_throughput = grp["e2e_block_lat_ms"].count() / window_sec
     update_throughput= grp["num_selected_updates"].sum() / window_sec
 
     out = pd.DataFrame({
         "t_mid":               t_mid,
         "mean_block_lat":      mean_block_lat,
-        "mean_e2e_block_lat":  mean_e2e_block,
+        "mean_e2e_block_lat":  mean_e2e_block_lat,
         "mean_update_lat":     mean_update_lat,
-        "mean_e2e_update_lat": mean_e2e_update,
+        "mean_e2e_update_lat": mean_e2e_update_lat,
         "block_throughput":    block_throughput,
         "update_throughput":   update_throughput,
     }).reset_index(drop=True)
@@ -457,7 +457,8 @@ def load_proof_throughput_csv(path: str) -> pd.DataFrame:
 
 
 def process_proof_throughput(df: pd.DataFrame, warmup: float, cooldown: float,
-                             window_sec: float) -> pd.DataFrame:
+                             window_sec: float,
+                             max_time: float = 0.0) -> pd.DataFrame:
     """Compute per-window throughput and latency from server bench log CSV."""
     df = df.copy()
     # Relative time based on completion timestamp.
@@ -467,9 +468,12 @@ def process_proof_throughput(df: pd.DataFrame, warmup: float, cooldown: float,
     # Per-request latency.
     df["latency_ms"] = (df["completed_at_ns"] - df["start_at_ns"]) / 1e6
 
-    # Trim warmup/cooldown.
-    max_t = df["rel_time"].max()
-    mask = (df["rel_time"] >= warmup) & (df["rel_time"] <= (max_t - cooldown))
+    # Trim warmup/cooldown, and optionally cap at max_time.
+    upper = df["rel_time"].max()
+    if max_time > 0:
+        upper = min(upper, max_time)
+    upper = upper - cooldown
+    mask = (df["rel_time"] >= warmup) & (df["rel_time"] <= upper)
     df = df[mask].reset_index(drop=True)
 
     if len(df) == 0:
@@ -504,7 +508,12 @@ def cmd_proof_throughput_timeseries(args):
     processed = []
     for label, path in inputs:
         df = load_proof_throughput_csv(path)
-        df = process_proof_throughput(df, args.warmup, args.cooldown, args.window)
+        df = process_proof_throughput(df, args.warmup, args.cooldown, args.window,
+                                     args.max_time)
+                                    #  print the average throughput and latency
+        print(f"{label}: Average throughput: {df['request_throughput'].mean()} req/s, Average latency: {df['avg_latency_ms'].mean()} ms")
+        print(f"{label}: Max throughput: {df['request_throughput'].max()} req/s, Max latency: {df['avg_latency_ms'].max()} ms")
+        print(f"{label}: Min throughput: {df['request_throughput'].min()} req/s, Min latency: {df['avg_latency_ms'].min()} ms")
         processed.append((label, df))
 
     title_suffix = " — " + ", ".join(lbl for lbl, _ in inputs) if len(inputs) == 1 else ""
@@ -606,6 +615,8 @@ def main():
                     help="Rolling window size in seconds (default: 5.0)")
     p5.add_argument("--graphs", default="all",
                     help="Graphs to produce: 'all' or comma-separated G16,G17 (default: all)")
+    p5.add_argument("--max-time", type=float, default=0.0,
+                    help="Only show data up to this many seconds (0 = no limit, default: 0)")
     p5.set_defaults(func=cmd_proof_throughput_timeseries)
 
     args = parser.parse_args()

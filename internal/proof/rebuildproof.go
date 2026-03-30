@@ -3,7 +3,6 @@ package proof
 import (
 	"fmt"
 	"strconv"
-	"time"
 
 	gnark_kzg "github.com/consensys/gnark-crypto/ecc/bls12-381/kzg"
 	"github.com/ethereum/go-ethereum/common"
@@ -35,7 +34,7 @@ func RebuildSegmentTreeForProof(account common.Address, lxRequiredBatchIdxs map[
 	requiredTreeBatchesMap := make(map[string]tree.BatchTree)
 	cachedCommitments := make(map[string]gnark_kzg.Digest)
 
-	start := time.Now()
+	// start := time.Now()
 
 	// --- Fetch ALL historical balances in [startingVersion, endingVersion] once ---
 	// Used for both the return value (verify path) and L1 tree building (dedup).
@@ -45,8 +44,8 @@ func RebuildSegmentTreeForProof(account common.Address, lxRequiredBatchIdxs map[
 		requiredHBInfos = append(requiredHBInfos, hbInfo)
 	}
 
-	fmt.Printf("Time taken to fetch required HB infos: %v\n", time.Since(start))
-	start = time.Now()
+	// fmt.Printf("Time taken to fetch required HB infos: %v\n", time.Since(start))
+	// start = time.Now()
 
 	// --- Layer 1: build each required L1 batch tree from historical balances ---
 	for _, batchIdx := range lxRequiredBatchIdxs[1] {
@@ -79,10 +78,10 @@ func RebuildSegmentTreeForProof(account common.Address, lxRequiredBatchIdxs map[
 		requiredTreeBatchesMap[key] = batchTree
 	}
 
-	fmt.Printf("Time taken to build L1 batch trees: %v\n", time.Since(start))
+	// fmt.Printf("Time taken to build L1 batch trees: %v\n", time.Since(start))
 
 	// --- Layer 2+: build each required upper-layer batch tree from stored roots ---
-	start = time.Now()
+	// start = time.Now()
 	for layer := uint64(2); layer <= MaxLayer; layer++ {
 		// Latest batch index at the lower layer
 		latestLowerBatchIdx := (cbInfo.Version - 1) / (L1BatchSize * utils.PowUint64(L2BatchSize, layer-2))
@@ -113,7 +112,7 @@ func RebuildSegmentTreeForProof(account common.Address, lxRequiredBatchIdxs map[
 		}
 	}
 
-	fmt.Printf("Time taken to build upper layer batch trees: %v\n", time.Since(start))
+	// fmt.Printf("Time taken to build upper layer batch trees: %v\n", time.Since(start))
 
 	return requiredTreeBatchesMap, requiredHBInfos, cachedCommitments
 }
@@ -144,7 +143,7 @@ func InsertCommitmentHashes(layer uint64, batchIdx uint64, batchTree *tree.Batch
 		if layer == 0 || layer > MaxLayer {
 			panic("layer" + fmt.Sprintf("%d", layer) + " is not supported")
 		}
-		return latestVersion / (L1BatchSize * utils.PowUint64(L2BatchSize, layer-1))
+		return (latestVersion - 1) / (L1BatchSize * utils.PowUint64(L2BatchSize, layer-1))
 	}
 
 	lxm1BatchIdxStart := batchIdx * L2BatchSize
