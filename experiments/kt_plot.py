@@ -36,12 +36,6 @@ PROTOCOL_STYLES = {
     "coniks": {"color": "#4daf4a", "marker": "^", "label": "Coniks"},
 }
 
-PROTOCOL_HATCHES = {
-    "samurai": "///",
-    "optiks": "\\\\\\",
-    "coniks": "...",
-}
-
 SUMMARY_PATTERNS = {
     "run_duration": re.compile(r"Run phase complete in ([0-9a-zA-Z.µ]+)"),
     "total_requests": re.compile(r"Total requests completed:\s+(\d+)"),
@@ -409,16 +403,16 @@ def configure_plot_style() -> None:
     plt.rcParams.update(
         {
             "font.family": "serif",
-            "font.size": 10,
-            "axes.titlesize": 11,
-            "axes.labelsize": 12,
-            "xtick.labelsize": 10,
-            "ytick.labelsize": 10,
-            "legend.fontsize": 9,
+            "font.size": 36,
+            "axes.titlesize": 40,
+            "axes.labelsize": 46,
+            "xtick.labelsize": 34,
+            "ytick.labelsize": 34,
+            "legend.fontsize": 32,
             "pdf.fonttype": 42,
             "ps.fonttype": 42,
-            "lines.linewidth": 1.6,
-            "hatch.linewidth": 0.7,
+            "lines.linewidth": 4.0,
+            "axes.linewidth": 2.2,
         }
     )
 
@@ -426,26 +420,33 @@ def apply_y_scale(ax: plt.Axes, scale: str) -> None:
     if scale == "symlog":
         ax.set_yscale("symlog", linthresh=1.0, linscale=1.0, base=10)
         ax.set_ylim(bottom=0)
-        ax.grid(True, which="major", axis="y", linestyle="--", linewidth=0.5, alpha=0.65)
-        ax.grid(True, which="minor", axis="y", linestyle=":", linewidth=0.35, alpha=0.35)
+        ax.grid(True, which="major", axis="y", linestyle="--", linewidth=1.2, alpha=0.45)
+        ax.grid(True, which="minor", axis="y", linestyle="--", linewidth=0.8, alpha=0.20)
     elif scale == "log":
         ax.set_yscale("log")
         ax.yaxis.set_major_locator(LogLocator(base=10.0))
         ax.yaxis.set_minor_locator(LogLocator(base=10.0, subs=tuple(range(2, 10))))
         ax.yaxis.set_minor_formatter(NullFormatter())
-        ax.grid(True, which="major", axis="y", linestyle="--", linewidth=0.5, alpha=0.65)
-        ax.grid(True, which="minor", axis="y", linestyle=":", linewidth=0.35, alpha=0.35)
+        ax.grid(True, which="major", axis="y", linestyle="--", linewidth=1.2, alpha=0.45)
+        ax.grid(True, which="minor", axis="y", linestyle="--", linewidth=0.8, alpha=0.20)
     else:
-        ax.grid(True, which="major", axis="y", linestyle="--", linewidth=0.5, alpha=0.65)
-
+        ax.grid(True, which="major", axis="y", linestyle="--", linewidth=1.2, alpha=0.45)
 
 def style_axis(ax: plt.Axes, x_values: Sequence[int], *, y_scale: str) -> None:
     x_positions = list(range(len(x_values)))
     ax.set_xticks(x_positions)
-    ax.set_xticklabels([str(v) for v in x_values], rotation=30)
-    apply_y_scale(ax, y_scale)
-    ax.grid(True, which="major", axis="x", linestyle="--", linewidth=0.35, alpha=0.25)
 
+    # Format large numbers nicely (like sample)
+    def fmt(v):
+        if v >= 1000:
+            return f"{v//1000}k" if v % 1000 == 0 else str(v)
+        return str(v)
+
+    ax.set_xticklabels([fmt(v) for v in x_values], rotation=25, ha="right")
+
+    apply_y_scale(ax, y_scale)
+
+    ax.grid(True, which="major", axis="x", linestyle="--", linewidth=1.0, alpha=0.35)
 
 def create_single_plot(
     points: Sequence[BenchmarkPoint],
@@ -457,34 +458,31 @@ def create_single_plot(
 ) -> None:
     configure_plot_style()
 
-    protocol_styles = PROTOCOL_STYLES
-
     grouped: Dict[str, List[BenchmarkPoint]] = {protocol: [] for protocol in PROTOCOL_LABELS}
     for point in points:
         grouped[point.protocol].append(point)
 
     all_versions = sorted({point.num_versions for point in points})
     version_to_index = {version: index for index, version in enumerate(all_versions)}
-
-    fig, ax = plt.subplots(figsize=(3.6, 2.2))
+    fig, ax = plt.subplots(figsize=(14, 7))
 
     for protocol, protocol_points in grouped.items():
         if not protocol_points:
             continue
 
         protocol_points = sorted(protocol_points, key=lambda p: p.num_versions)
-        style = protocol_styles[protocol]
+        style = PROTOCOL_STYLES[protocol]
         xs = [version_to_index[point.num_versions] for point in protocol_points]
         values = [getattr(point, value_attr) for point in protocol_points]
-        label = protocol_styles[protocol]["label"]
 
         ax.plot(
             xs,
             values,
             marker=style["marker"],
-            markersize=4,
+            markersize=14,
+            markeredgewidth=1.5,
             color=style["color"],
-            label=label,
+            label=style["label"],
         )
 
     ax.set_ylabel(ylabel)
@@ -496,15 +494,16 @@ def create_single_plot(
         handles,
         labels,
         loc="upper center",
-        ncol=max(1, len(labels)),
-        frameon=False,
-        bbox_to_anchor=(0.5, 1.01),
-        columnspacing=1.1,
-        handletextpad=0.4,
+        ncol=len(labels),
+        frameon=True,
+        bbox_to_anchor=(0.5, 1.05),
+        columnspacing=1.2,
+        handletextpad=0.5,
+        borderpad=0.3,
     )
 
     sns.despine(fig=fig)
-    fig.subplots_adjust(top=0.84, left=0.17, right=0.99, bottom=0.30)
+    fig.subplots_adjust(top=0.84, left=0.14, right=0.99, bottom=0.32)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output_path, format="pdf", bbox_inches="tight")
     plt.close(fig)
@@ -532,7 +531,7 @@ def create_latency_breakdown_plot(
     x_positions = list(range(len(all_versions)))
     version_to_index = {version: index for index, version in enumerate(all_versions)}
 
-    fig, ax = plt.subplots(figsize=(3.8, 2.4))
+    fig, ax = plt.subplots(figsize=(16, 7))
     protocol_order = list(PROTOCOL_LABELS)
     bar_width = 0.8 / max(1, len(protocol_order))
     offsets = {
@@ -555,7 +554,6 @@ def create_latency_breakdown_plot(
             generation_values,
             width=bar_width,
             color=style["generation"],
-            hatch=PROTOCOL_HATCHES[protocol],
             edgecolor="black",
             linewidth=0.5,
             label=f"{PROTOCOL_STYLES[protocol]['label']} generation",
@@ -566,7 +564,67 @@ def create_latency_breakdown_plot(
             width=bar_width,
             bottom=generation_values,
             color=style["verification"],
-            hatch=PROTOCOL_HATCHES[protocol],
+            edgecolor="black",
+            linewidth=0.5,
+            label=f"{PROTOCOL_STYLES[protocol]['label']} verification",
+        )
+
+    ax.set_ylabel("Latency (ms)")
+def create_latency_breakdown_plot(
+    points: Sequence[BenchmarkPoint],
+    output_path: Path,
+) -> None:
+    configure_plot_style()
+
+    protocol_styles = {
+        protocol: {
+            "generation": PROTOCOL_STYLES[protocol]["color"],
+            "verification": "#bdbdbd",
+        }
+        for protocol in PROTOCOL_LABELS
+    }
+
+    grouped: Dict[str, List[BenchmarkPoint]] = {protocol: [] for protocol in PROTOCOL_LABELS}
+    for point in points:
+        grouped[point.protocol].append(point)
+
+    all_versions = sorted({point.num_versions for point in points})
+    x_positions = list(range(len(all_versions)))
+    version_to_index = {version: index for index, version in enumerate(all_versions)}
+
+    fig, ax = plt.subplots(figsize=(16, 7))
+    protocol_order = list(PROTOCOL_LABELS)
+    bar_width = 0.8 / max(1, len(protocol_order))
+    offsets = {
+        protocol: (index - (len(protocol_order) - 1) / 2) * bar_width
+        for index, protocol in enumerate(protocol_order)
+    }
+
+    for protocol, protocol_points in grouped.items():
+        if not protocol_points:
+            continue
+
+        protocol_points = sorted(protocol_points, key=lambda p: p.num_versions)
+        style = protocol_styles[protocol]
+        xs = [version_to_index[point.num_versions] + offsets[protocol] for point in protocol_points]
+        generation_values = [point.avg_generation_ms for point in protocol_points]
+        verification_values = [point.avg_verification_ms for point in protocol_points]
+
+        ax.bar(
+            xs,
+            generation_values,
+            width=bar_width,
+            color=style["generation"],
+            edgecolor="black",
+            linewidth=0.5,
+            label=f"{PROTOCOL_STYLES[protocol]['label']} generation",
+        )
+        ax.bar(
+            xs,
+            verification_values,
+            width=bar_width,
+            bottom=generation_values,
+            color=style["verification"],
             edgecolor="black",
             linewidth=0.5,
             label=f"{PROTOCOL_STYLES[protocol]['label']} verification",
@@ -574,28 +632,26 @@ def create_latency_breakdown_plot(
 
     ax.set_ylabel("Latency (ms)")
     ax.set_xlabel("Number of versions")
-    ax.set_xticks(x_positions)
-    ax.set_xticklabels([str(version) for version in all_versions], rotation=30)
-    apply_y_scale(ax, "symlog")
+    style_axis(ax, all_versions, y_scale="symlog")
 
     handles, labels = ax.get_legend_handles_labels()
     fig.legend(
         handles,
         labels,
         loc="upper center",
-        ncol=max(1, min(3, len(labels))),
-        frameon=False,
-        bbox_to_anchor=(0.5, 1.02),
-        columnspacing=0.9,
-        handletextpad=0.4,
+        ncol=3,
+        frameon=True,
+        bbox_to_anchor=(0.5, 1.10),
+        columnspacing=1.4,
+        handletextpad=0.6,
+        borderpad=0.35,
     )
 
     sns.despine(fig=fig)
-    fig.subplots_adjust(top=0.78, left=0.17, right=0.99, bottom=0.30)
+    fig.subplots_adjust(top=0.80, left=0.14, right=0.99, bottom=0.24)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output_path, format="pdf", bbox_inches="tight")
     plt.close(fig)
-
 
 def create_payload_plot(
     points: Sequence[BenchmarkPoint],
@@ -615,7 +671,7 @@ def create_payload_plot(
     x_positions = list(range(len(all_versions)))
     version_to_index = {version: index for index, version in enumerate(all_versions)}
 
-    fig, ax = plt.subplots(figsize=(3.8, 2.3))
+    fig, ax = plt.subplots(figsize=(14, 7))
     protocol_order = list(PROTOCOL_LABELS)
     bar_width = 0.8 / max(1, len(protocol_order))
     offsets = {
@@ -636,7 +692,6 @@ def create_payload_plot(
             payload_values,
             width=bar_width,
             color=protocol_colors[protocol],
-            hatch=PROTOCOL_HATCHES[protocol],
             edgecolor="black",
             linewidth=0.5,
             label=PROTOCOL_STYLES[protocol]["label"],
@@ -653,11 +708,12 @@ def create_payload_plot(
         handles,
         labels,
         loc="upper center",
-        ncol=max(1, min(3, len(labels))),
-        frameon=False,
-        bbox_to_anchor=(0.5, 1.02),
-        columnspacing=0.9,
-        handletextpad=0.4,
+        ncol=len(labels),
+        frameon=True,
+        bbox_to_anchor=(0.5, 1.05),
+        columnspacing=1.2,
+        handletextpad=0.5,
+        borderpad=0.3,
     )
 
     sns.despine(fig=fig)
