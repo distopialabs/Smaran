@@ -102,8 +102,13 @@ func main() {
 	numVersions := flag.Int("num-versions", 5, "key updates per user")
 	useCaching := flag.Bool("use_caching", false, "pass use_caching=true in Get requests")
 	runDurationSecs := flag.Int("run-duration-secs", 30, "how long the run phase lasts (seconds)")
+	runMode := flag.String("run-mode", "get", "run phase mode: 'get' or 'put'")
 	paramsDir := flag.String("params-dir", "./data/params", "directory for precomputed cryptographic parameters (samurai only)")
 	flag.Parse()
+
+	if *runMode != "get" && *runMode != "put" {
+		log.Fatalf("invalid -run-mode %q: must be 'get' or 'put'", *runMode)
+	}
 
 	if lvl := os.Getenv("LOG_LEVEL"); lvl != "" {
 		if err := logging.SetLevel(lvl); err != nil {
@@ -128,8 +133,8 @@ func main() {
 
 	log.Infof("=== KT Benchmark Client ===")
 	log.Infof("Server: %s, Protocol: %s", *addr, *protocol)
-	log.Infof("Users: %d, Versions/user: %d, Load clients: %d, Run clients: %d",
-		*numUsers, *numVersions, *numLoadClients, *numRunClients)
+	log.Infof("Users: %d, Versions/user: %d, Load clients: %d, Run clients: %d, Run mode: %s",
+		*numUsers, *numVersions, *numLoadClients, *numRunClients, *runMode)
 
 	// Load Phase: distribute users [0, numUsers-1] among load-client goroutines.
 	// See KT.md § "Benchmarking Client" — IDs are both inclusive.
@@ -161,11 +166,13 @@ func main() {
 	log.Infof("Load phase complete in %v. Sleeping 2 seconds...", time.Since(loadStart))
 	time.Sleep(2 * time.Second)
 
-	// Run Phase: each goroutine sends synchronous Get requests for run-duration-secs.
+	// Run Phase: each goroutine sends synchronous requests for run-duration-secs.
 	// See KT.md § "Run Phase".
-	log.Infof("--- Run Phase (%d clients, %ds) ---", *numRunClients, *runDurationSecs)
+	log.Infof("--- Run Phase (%d clients, %ds, mode=%s) ---", *numRunClients, *runDurationSecs, *runMode)
 	runStart := time.Now()
 	runDuration := time.Duration(*runDurationSecs) * time.Second
+	log.Infof("RUN_PHASE_START_UNIX_NANO=%d", runStart.UnixNano())
+	log.Infof("RUN_PHASE_START_RFC3339=%s", runStart.Format(time.RFC3339Nano))
 
 	metricsCh := make(chan runClientMetrics, *numRunClients)
 	var runWg sync.WaitGroup
@@ -173,7 +180,11 @@ func main() {
 		runWg.Add(1)
 		go func(clientID int) {
 			defer runWg.Done()
-			metricsCh <- runRunClient(clientID, *addr, *numUsers, *useCaching, runDuration, *protocol, precomputedData)
+			if *runMode == "put" {
+				metricsCh <- runPutClient(clientID, *addr, *numUsers, runDuration)
+			} else {
+				metricsCh <- runRunClient(clientID, *addr, *numUsers, *useCaching, runDuration, *protocol, precomputedData)
+			}
 		}(i)
 	}
 	runWg.Wait()
@@ -191,24 +202,29 @@ func main() {
 		total.TotalCommonPrefixElements += m.TotalCommonPrefixElements
 	}
 
-	log.Infof("Run phase complete in %v", time.Since(runStart))
+	runEnd := time.Now()
+	log.Infof("RUN_PHASE_END_UNIX_NANO=%d", runEnd.UnixNano())
+	log.Infof("RUN_PHASE_END_RFC3339=%s", runEnd.Format(time.RFC3339Nano))
+	log.Infof("Run phase complete in %v", runEnd.Sub(runStart))
 	log.Infof("Total requests completed: %d", total.TotalRequestsCompleted)
-	log.Infof("Total proof-gen latency: %v", total.TotalProofGenLatency)
-	log.Infof("Total verify latency: %v", total.TotalVerifyLatency)
-	log.Infof("Total latency: %v", total.TotalLatency)
-	log.Infof("Total payload: %d bytes", total.TotalPayloadSize)
-	log.Infof("Total common prefix size: %d bytes", total.TotalCommonPrefixSize)
-	log.Infof("Total proof elements: %d", total.TotalProofElements)
-	log.Infof("Total common prefix elements: %d", total.TotalCommonPrefixElements)
-	if total.TotalRequestsCompleted > 0 {
-		n := float64(total.TotalRequestsCompleted)
-		log.Infof("Avg proof-gen latency: %s", time.Duration(float64(total.TotalProofGenLatency)/n))
-		log.Infof("Avg verify latency: %s", time.Duration(float64(total.TotalVerifyLatency)/n))
-		log.Infof("Avg latency: %s", time.Duration(float64(total.TotalLatency)/n))
-		log.Infof("Avg payload: %.3f bytes", float64(total.TotalPayloadSize)/n)
-		log.Infof("Avg common prefix size: %.3f bytes", float64(total.TotalCommonPrefixSize)/n)
-		log.Infof("Avg proof elements: %.3f", float64(total.TotalProofElements)/n)
-		log.Infof("Avg common prefix elements: %.3f", float64(total.TotalCommonPrefixElements)/n)
+	if *runMode == "get" {
+		log.Infof("Total proof-gen latency: %v", total.TotalProofGenLatency)
+		log.Infof("Total verify latency: %v", total.TotalVerifyLatency)
+		log.Infof("Total latency: %v", total.TotalLatency)
+		log.Infof("Total payload: %d bytes", total.TotalPayloadSize)
+		log.Infof("Total common prefix size: %d bytes", total.TotalCommonPrefixSize)
+		log.Infof("Total proof elements: %d", total.TotalProofElements)
+		log.Infof("Total common prefix elements: %d", total.TotalCommonPrefixElements)
+		if total.TotalRequestsCompleted > 0 {
+			n := float64(total.TotalRequestsCompleted)
+			log.Infof("Avg proof-gen latency: %s", time.Duration(float64(total.TotalProofGenLatency)/n))
+			log.Infof("Avg verify latency: %s", time.Duration(float64(total.TotalVerifyLatency)/n))
+			log.Infof("Avg latency: %s", time.Duration(float64(total.TotalLatency)/n))
+			log.Infof("Avg payload: %.3f bytes", float64(total.TotalPayloadSize)/n)
+			log.Infof("Avg common prefix size: %.3f bytes", float64(total.TotalCommonPrefixSize)/n)
+			log.Infof("Avg proof elements: %.3f", float64(total.TotalProofElements)/n)
+			log.Infof("Avg common prefix elements: %.3f", float64(total.TotalCommonPrefixElements)/n)
+		}
 	}
 	log.Infof("Benchmark complete.")
 }
@@ -274,7 +290,6 @@ func runLoadClient(clientID int, addr string, userIDStart, userIDEnd, numVersion
 
 		body, _ := json.Marshal(putRequest{User: user, Key: key})
 
-		// Raw HTTP/1.1 request with keep-alive for pipelining.
 		fmt.Fprintf(bw, "POST /put HTTP/1.1\r\nHost: %s\r\nContent-Type: application/json\r\nContent-Length: %d\r\nConnection: keep-alive\r\n\r\n", addr, len(body))
 		bw.Write(body)
 
@@ -294,6 +309,80 @@ func runLoadClient(clientID int, addr string, userIDStart, userIDEnd, numVersion
 
 	received := <-responsesDone
 	log.Infof("[Client %d] done: %d/%d responses received", clientID, received, sentCount)
+}
+// runPutClient opens a persistent TCP connection and sends pipelined Put
+// requests for random users until the duration elapses. Requests are written
+// back-to-back without waiting for responses; a concurrent reader goroutine
+// drains responses asynchronously, mirroring the load phase design.
+func runPutClient(clientID int, addr string, numUsers int, duration time.Duration) runClientMetrics {
+	conn, err := net.Dial("tcp", addr)
+	if err != nil {
+		log.Errorf("[Run %d] connect failed: %v", clientID, err)
+		return runClientMetrics{}
+	}
+	defer conn.Close()
+
+	bw := bufio.NewWriterSize(conn, 256*1024)
+	br := bufio.NewReaderSize(conn, 64*1024)
+	rng := rand.New(rand.NewSource(time.Now().UnixNano() + int64(clientID)*1000))
+
+	// allSent is closed after the writer flushes its last byte. The close
+	// provides the memory barrier that makes `sent` visible to the reader.
+	allSent := make(chan struct{})
+	responsesDone := make(chan int64, 1)
+	var sent int64
+
+	// Reader goroutine: drain responses concurrently with the writer so that
+	// TCP send/recv buffers never fill and back-pressure the writer.
+	go func() {
+		var count int64
+		for {
+			resp, err := http.ReadResponse(br, nil)
+			if err != nil {
+				log.Errorf("[Run %d] read response %d: %v", clientID, count, err)
+				break
+			}
+			io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+			count++
+			// After each response, check whether writing is finished and we
+			// have drained every outstanding response.
+			select {
+			case <-allSent:
+				if count >= sent {
+					responsesDone <- count
+					return
+				}
+			default:
+			}
+		}
+		responsesDone <- count
+	}()
+
+	deadline := time.Now().Add(duration)
+	for time.Now().Before(deadline) {
+		userID := rng.Intn(numUsers)
+		user := []byte(fmt.Sprintf("user:%d", userID))
+		key := make([]byte, 64)
+		rng.Read(key)
+
+		body, _ := json.Marshal(putRequest{User: user, Key: key})
+		fmt.Fprintf(bw, "POST /put HTTP/1.1\r\nHost: %s\r\nContent-Type: application/json\r\nContent-Length: %d\r\nConnection: keep-alive\r\n\r\n", addr, len(body))
+		bw.Write(body)
+		sent++
+	}
+
+	if err := bw.Flush(); err != nil {
+		log.Errorf("[Run %d] flush: %v", clientID, err)
+	}
+
+	log.Infof("[Run %d] sent %d requests, waiting for responses...", clientID, sent)
+	close(allSent)
+
+	completed := <-responsesDone
+	log.Infof("[Run %d] done: %d/%d responses received", clientID, completed, sent)
+
+	return runClientMetrics{TotalRequestsCompleted: completed}
 }
 
 // runRunClient opens a persistent TCP connection and sends synchronous Get

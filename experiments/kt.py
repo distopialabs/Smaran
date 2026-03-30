@@ -316,7 +316,6 @@ def build_repo_prepare_commands(commit_hash: str, settings: KtExperimentSettings
             "fi"
         ),
         f"cd {settings.remote_repo_dir} && git checkout {settings.repo_branch}",
-        f"cd {settings.remote_repo_dir} && git pull --recurse-submodules",
         f"cd {settings.remote_repo_dir} && git checkout {commit_hash}",
         f"cd {settings.remote_repo_dir} && git submodule sync --recursive",
         f"cd {settings.remote_repo_dir} && git submodule update --init --recursive",
@@ -358,6 +357,7 @@ def build_bench_command(
             f"-d {settings.bench_run_duration_secs} "
             f"-e {settings.bench_num_versions} "
             f"-a {settings.bench_num_versions} "
+            f"-b {settings.server_batch_size} "
             f"-v"
             f"> {settings.remote_base_dir}/{node_name}.log 2>&1"
         )
@@ -368,6 +368,7 @@ def build_bench_command(
         f"-num-run-clients {settings.bench_num_run_clients} "
         f"-num-versions {settings.bench_num_versions} "
         f"-run-duration-secs {settings.bench_run_duration_secs} "
+        f"-run-mode put "
         f"-protocol {settings.bench_protocol} "
         f"--addr {server_ip}:{settings.server_port} "
         f"> {settings.remote_base_dir}/{node_name}.log 2>&1"

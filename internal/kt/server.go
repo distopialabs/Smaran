@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sync/atomic"
+	"time"
 )
 
 // PutRequest is the JSON body for POST /put.
@@ -36,17 +38,21 @@ type KTHandler struct {
 	protocol Protocol
 	optiks   *OptiksServer
 	samurai  *SamuraiKTServer
+	completedPut atomic.Uint64
 }
 
 // NewKTHandler creates an HTTP handler for the given protocol.
 func NewKTHandler(protocol Protocol, batchSize uint64, paramsDir string) *KTHandler {
-	h := &KTHandler{protocol: protocol}
+	h := &KTHandler{
+		protocol: protocol,
+	}
 	switch protocol {
 	case ProtocolOptiks:
 		h.optiks = NewOptiksServer(batchSize)
 	case ProtocolSamurai:
 		h.samurai = NewSamuraiKTServer(batchSize, paramsDir)
 	}
+	h.startPutLogger()
 	return h
 }
 
@@ -55,6 +61,26 @@ func (h *KTHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/put", h.handlePut)
 	mux.HandleFunc("/get", h.handleGet)
 	mux.HandleFunc("/get_commitment", h.handleGetCommitment)
+}
+
+func (h *KTHandler) startPutLogger() {
+	go func() {
+		ticker := time.NewTicker(1 * time.Second)
+		defer ticker.Stop()
+
+		var prev uint64
+		for range ticker.C {
+			total := h.completedPut.Load()
+			last1s := total - prev
+			prev = total
+
+			log.Infof(
+				"put completed total=%d last_1s=%d",
+				total,
+				last1s,
+			)
+		}
+	}()
 }
 
 // handlePut handles POST /put.
@@ -76,6 +102,7 @@ func (h *KTHandler) handlePut(w http.ResponseWriter, r *http.Request) {
 	case ProtocolSamurai:
 		h.samurai.Put(req.User, req.Key)
 	}
+	h.completedPut.Add(1)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
