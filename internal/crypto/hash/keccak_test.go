@@ -10,6 +10,48 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 )
 
+func BenchmarkBLS12381Pairing(b *testing.B) {
+	_, _, g1Aff, g2Aff := bls.Generators()
+
+	P := []bls.G1Affine{g1Aff}
+	Q := []bls.G2Affine{g2Aff}
+
+	b.Run("Step1_MillerLoop", func(b *testing.B) {
+		for b.Loop() {
+			bls.MillerLoop(P, Q)
+		}
+	})
+
+	mlResult, _ := bls.MillerLoop(P, Q)
+
+	b.Run("Step2_FinalExponentiation", func(b *testing.B) {
+		for b.Loop() {
+			bls.FinalExponentiation(&mlResult)
+		}
+	})
+
+	b.Run("Step3_Pair", func(b *testing.B) {
+		for b.Loop() {
+			bls.Pair(P, Q)
+		}
+	})
+
+	b.Run("Step4_PairingCheck_1Pair", func(b *testing.B) {
+		for b.Loop() {
+			bls.PairingCheck(P, Q)
+		}
+	})
+
+	P2 := []bls.G1Affine{g1Aff, g1Aff}
+	Q2 := []bls.G2Affine{g2Aff, g2Aff}
+
+	b.Run("Step5_PairingCheck_2Pairs", func(b *testing.B) {
+		for b.Loop() {
+			bls.PairingCheck(P2, Q2)
+		}
+	})
+}
+
 func BenchmarkKeccakToG1AffineRoundtrip(b *testing.B) {
 	input := make([]byte, 64)
 	rand.Read(input)
