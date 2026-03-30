@@ -9,18 +9,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Sequence, Tuple
 
-try:
-    import matplotlib
-
-    matplotlib.use("Agg")
-
-    import matplotlib.pyplot as plt
-    import seaborn as sns
-except ImportError as exc:  # pragma: no cover
-    raise SystemExit(
-        "This script requires matplotlib and seaborn. "
-        "Install them before running `experiments/kt_put_plot.py`."
-    ) from exc
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import matplotlib.ticker
 
 
 PROTOCOL_LABELS = {
@@ -30,9 +22,9 @@ PROTOCOL_LABELS = {
 }
 
 PROTOCOL_STYLES = {
-    "samurai": {"color": "#e66101", "marker": "o", "label": "Smaran"},
-    "optiks": {"color": "#5e3c99", "marker": "s", "label": "Optiks"},
-    "coniks": {"color": "#4daf4a", "marker": "^", "label": "Coniks"},
+    "samurai": {"color": "#0072B2", "marker": "o", "label": "Smaran"},
+    "optiks":  {"color": "#D55E00", "marker": "s", "label": "Optiks"},
+    "coniks":  {"color": "#009E73", "marker": "^", "label": "Coniks"},
 }
 
 RUN_PHASE_START_PATTERN = re.compile(r"RUN_PHASE_START_UNIX_NANO=(\d+)")
@@ -49,6 +41,7 @@ CONIKS_PATTERNS = {
 @dataclass(frozen=True)
 class BenchmarkPoint:
     protocol: str
+    num_users: int
     num_versions: int
     total_requests: int
     run_duration_seconds: float
@@ -59,7 +52,7 @@ class BenchmarkPoint:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Plot KT benchmark PUT throughput versus number of versions."
+            "Plot KT benchmark PUT throughput versus number of users."
         )
     )
     parser.add_argument(
@@ -146,6 +139,9 @@ def load_benchmark_point(run_dir: Path) -> BenchmarkPoint:
     applied = config.get("applied_sweeping_parameters", {})
 
     protocol = str(applied.get("bench_protocol", experiment.get("bench_protocol", ""))).lower()
+    num_users = int(
+        applied.get("bench_num_users", experiment.get("bench_num_users", 0))
+    )
     num_versions = int(
         applied.get("bench_num_versions", experiment.get("bench_num_versions", 0))
     )
@@ -161,6 +157,7 @@ def load_benchmark_point(run_dir: Path) -> BenchmarkPoint:
 
     return BenchmarkPoint(
         protocol=protocol,
+        num_users=num_users,
         num_versions=num_versions,
         total_requests=total_requests,
         run_duration_seconds=run_duration_seconds,
@@ -190,7 +187,7 @@ def load_points(sweep_root: Path) -> List[BenchmarkPoint]:
     points = [load_benchmark_point(run_dir) for run_dir in iter_run_dirs(sweep_root)]
     if not points:
         raise ValueError(f"No benchmark runs found in {sweep_root}")
-    return sorted(points, key=lambda point: (point.protocol, point.num_versions))
+    return sorted(points, key=lambda point: (point.protocol, point.num_users))
 
 
 def load_points_from_summary_csv(summary_csv: Path) -> List[BenchmarkPoint]:
@@ -200,6 +197,7 @@ def load_points_from_summary_csv(summary_csv: Path) -> List[BenchmarkPoint]:
     required_columns = {
         "run_dir",
         "protocol",
+        "num_users",
         "num_versions",
         "total_requests",
         "run_duration_seconds",
@@ -217,6 +215,7 @@ def load_points_from_summary_csv(summary_csv: Path) -> List[BenchmarkPoint]:
         points.append(
             BenchmarkPoint(
                 protocol=protocol,
+                num_users=int(row["num_users"]),
                 num_versions=int(row["num_versions"]),
                 total_requests=int(row["total_requests"]),
                 run_duration_seconds=float(row["run_duration_seconds"]),
@@ -226,25 +225,25 @@ def load_points_from_summary_csv(summary_csv: Path) -> List[BenchmarkPoint]:
         )
     if not points:
         raise ValueError(f"No benchmark rows found in {summary_csv}")
-    return sorted(points, key=lambda point: (point.protocol, point.num_versions))
+    return sorted(points, key=lambda point: (point.protocol, point.num_users))
 
 
 def configure_plot_style() -> None:
-    sns.set_theme(style="whitegrid", context="paper")
-    plt.rcParams.update(
-        {
-            "font.family": "serif",
-            "font.size": 10,
-            "axes.titlesize": 11,
-            "axes.labelsize": 12,
-            "xtick.labelsize": 10,
-            "ytick.labelsize": 10,
-            "legend.fontsize": 9,
-            "pdf.fonttype": 42,
-            "ps.fonttype": 42,
-            "lines.linewidth": 1.6,
-        }
-    )
+    plt.rcParams.update({
+        "text.usetex":         True,
+        "text.latex.preamble": r"\usepackage{amsmath}\usepackage{times}",
+        "font.family":         "serif",
+        "font.size":           70,
+        "axes.titlesize":      70,
+        "axes.labelsize":      70,
+        "xtick.labelsize":     65,
+        "ytick.labelsize":     70,
+        "legend.fontsize":     70,
+        "axes.spines.top":     False,
+        "axes.spines.right":   False,
+        "axes.grid":           False,
+        "figure.dpi":          150,
+    })
 
 
 def create_throughput_plot(
@@ -253,56 +252,96 @@ def create_throughput_plot(
 ) -> None:
     configure_plot_style()
 
+    def _x_formatter(x, pos):
+        x = int(x)
+        if x >= 100_000:
+            m = x / 1_000_000
+            if m < 1:
+                return f"0.{int(m * 10)}M"
+            return f"{m:g}M"
+        if x >= 1_000:
+            return f"{int(x / 1000)}k"
+        return str(x)
+
+    def _y_formatter(x, pos):
+        if x >= 1000:
+            return f"{int(x / 1000)}k"
+        if x == 0:
+            return "0"
+        return f"{x:.10f}".rstrip("0").rstrip(".")
+
     grouped: Dict[str, List[BenchmarkPoint]] = {protocol: [] for protocol in PROTOCOL_LABELS}
     for point in points:
         grouped[point.protocol].append(point)
 
-    all_versions = sorted({point.num_versions for point in points})
-    version_to_index = {version: index for index, version in enumerate(all_versions)}
+    all_users = sorted({point.num_users for point in points})
 
-    fig, ax = plt.subplots(figsize=(3.6, 2.2))
+    _BRK_MARKER = [(-1, -1), (1, 1)]
+    _BRK_KW = dict(markersize=20, color="k", mec="k", mew=3, clip_on=False, linestyle="none")
 
-    for protocol, protocol_points in grouped.items():
-        if not protocol_points:
-            continue
+    fig, (ax_top, ax_bot) = plt.subplots(
+        2, 1, sharex=True, figsize=(30, 12),
+        gridspec_kw={"height_ratios": [1, 1]},
+    )
+    fig.subplots_adjust(hspace=0.2)
 
-        protocol_points = sorted(protocol_points, key=lambda p: p.num_versions)
-        style = PROTOCOL_STYLES[protocol]
-        xs = [version_to_index[point.num_versions] for point in protocol_points]
-        ys = [point.throughput_qps for point in protocol_points]
+    for ax in (ax_top, ax_bot):
+        for protocol, protocol_points in grouped.items():
+            if not protocol_points:
+                continue
+            protocol_points = sorted(protocol_points, key=lambda p: p.num_users)
+            style = PROTOCOL_STYLES[protocol]
+            xs = [point.num_users for point in protocol_points]
+            ys = [point.throughput_qps for point in protocol_points]
+            ax.plot(
+                xs, ys,
+                marker=style["marker"],
+                markersize=25,
+                linewidth=10,
+                markeredgewidth=2,
+                color=style["color"],
+                label=style["label"],
+            )
 
-        ax.plot(
-            xs,
-            ys,
-            marker=style["marker"],
-            markersize=4,
-            color=style["color"],
-            label=style["label"],
-        )
+    ax_top.set_ylim(20_000, 150_000)
+    ax_bot.set_ylim(0, 500)
 
-    ax.set_ylabel("Throughput (req/s)")
-    ax.set_xlabel("Number of versions")
+    ax_top.spines["bottom"].set_visible(False)
+    ax_bot.spines["top"].set_visible(False)
+    ax_top.tick_params(bottom=False)
 
-    x_positions = list(range(len(all_versions)))
-    ax.set_xticks(x_positions)
-    ax.set_xticklabels([str(v) for v in all_versions], rotation=30)
-    ax.grid(True, which="major", axis="y", linestyle="--", linewidth=0.5, alpha=0.65)
-    ax.grid(True, which="major", axis="x", linestyle="--", linewidth=0.35, alpha=0.25)
+    # y-break diagonal markers
+    ax_top.plot([0], [0], marker=_BRK_MARKER, transform=ax_top.transAxes, **_BRK_KW)
+    ax_bot.plot([0], [1], marker=_BRK_MARKER, transform=ax_bot.transAxes, **_BRK_KW)
 
-    handles, labels = ax.get_legend_handles_labels()
+    ax_top.set_xscale("log")
+    ax_top.set_xticks(all_users)
+    ax_top.xaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(_x_formatter))
+    ax_top.yaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(_y_formatter))
+    ax_bot.yaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(_y_formatter))
+    ax_top.grid(True, which="both", linestyle="--", linewidth=3, alpha=0.7)
+    ax_bot.grid(True, which="both", linestyle="--", linewidth=3, alpha=0.7)
+
+    for ax in (ax_top, ax_bot):
+        ax.spines["left"].set_linewidth(5)
+        ax.spines["bottom"].set_linewidth(5)
+
+    fig.supylabel("Throughput (ops/s)", x=0.025)
+    ax_bot.set_xlabel("Number of Users")
+
+    handles, labels = ax_top.get_legend_handles_labels()
     fig.legend(
         handles,
         labels,
         loc="upper center",
+        bbox_to_anchor=(0.5, 1.04),
         ncol=max(1, len(labels)),
-        frameon=False,
-        bbox_to_anchor=(0.5, 1.01),
-        columnspacing=1.1,
-        handletextpad=0.4,
+        frameon=True,
+        edgecolor="black",
+        fontsize=plt.rcParams["legend.fontsize"] * 0.75,
+        columnspacing=0.3,
     )
 
-    sns.despine(fig=fig)
-    fig.subplots_adjust(top=0.84, left=0.17, right=0.99, bottom=0.30)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output_path, format="pdf", bbox_inches="tight")
     plt.close(fig)
@@ -315,6 +354,7 @@ def write_summary_csv(points: Sequence[BenchmarkPoint], output_dir: Path) -> Pat
         "run_dir",
         "protocol",
         "protocol_label",
+        "num_users",
         "num_versions",
         "total_requests",
         "run_duration_seconds",
@@ -330,6 +370,7 @@ def write_summary_csv(points: Sequence[BenchmarkPoint], output_dir: Path) -> Pat
                     "run_dir": str(point.run_dir),
                     "protocol": point.protocol,
                     "protocol_label": PROTOCOL_LABELS[point.protocol],
+                    "num_users": point.num_users,
                     "num_versions": point.num_versions,
                     "total_requests": point.total_requests,
                     "run_duration_seconds": f"{point.run_duration_seconds:.6f}",
@@ -346,7 +387,7 @@ def print_summary(points: Sequence[BenchmarkPoint], summary_path: Path) -> None:
     print("Parsed runs:")
     for point in points:
         print(
-            f"  {PROTOCOL_LABELS[point.protocol]:7s} | versions={point.num_versions:4d} "
+            f"  {PROTOCOL_LABELS[point.protocol]:7s} | users={point.num_users:8d} "
             f"| throughput={point.throughput_qps:12.2f} req/s "
             f"| total_requests={point.total_requests:10d} "
             f"| duration={point.run_duration_seconds:.3f}s"
