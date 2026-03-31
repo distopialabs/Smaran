@@ -24,10 +24,11 @@ import pandas as pd
 
 # Okabe-Ito colorblind-safe palette
 PROTOCOL_STYLE = {
-    "samurai":    {"color": "#0072B2", "label": "Smaran (w/o MPT)",      "marker": "o"},
-    "samuraimpt": {"color": "#CC79A7", "label": "Smaran",  "marker": "s"},
+    "samurai":    {"color": "#0072B2", "label": "Smaran",      "marker": "o"},
+    "samuraimpt": {"color": "#CC79A7", "label": "Smaran+MPT",  "marker": "s"},
     "merkle":     {"color": "#D55E00", "label": "MPT",       "marker": "^"},
     "verkle":     {"color": "#009E73", "label": "Verkle",       "marker": "D"},
+    "cauchy":     {"color": "#E69F00", "label": "Cauchy",       "marker": "P"},
 }
 _AUTO_COLORS  = ["#E69F00", "#CC79A7", "#F0E442", "#000000", "#999999"]
 _AUTO_MARKERS = ["P", "X", "v", "p", "h"]
