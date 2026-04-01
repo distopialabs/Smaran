@@ -17,7 +17,7 @@ import matplotlib.ticker
 
 PROTOCOL_LABELS = {
     "optimus": "Smaran",
-    "non_optimus":     "Smaran (w/o commitment storage)",
+    "non_optimus":     "Smaran (w/o archival storage)",
     "verkle":     "Verkle",
 }
 
@@ -173,7 +173,7 @@ def _kib_formatter(x, pos):
 
 PAYLOAD_YTICKS = [1, 5, 10, 50, 100, 500, 1000, 1500]
 THROUGHPUT_YTICKS = [1, 10, 100, 500]
-LATENCY_YTICKS = [10, 100, 1_000, 10_000, 60_000, 300_000]
+LATENCY_YTICKS = [100, 200, 500, 1_000, 2_000, 5_000]
 
 
 def _rps_formatter(x, pos):
@@ -266,7 +266,7 @@ def _plot_metric(
         handles,
         labels,
         loc="upper center",
-        bbox_to_anchor=(0.5, 1.04),
+        bbox_to_anchor=(0.5, 1.02),
         ncol=max(1, len(labels)),
         frameon=True,
         edgecolor="black",
@@ -455,7 +455,7 @@ def create_all_plots(points: List[ProofBenchmarkPoint], output_dir: Path) -> Non
             "Latency",
             _ms_unit_formatter,
             clients_dir / "dl_query_latency_response_verify.pdf",
-            ylim_top=300_000,
+            ylim_top=5_000,
             yticks=LATENCY_YTICKS,
         )
 
