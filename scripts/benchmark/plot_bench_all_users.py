@@ -302,7 +302,7 @@ def plot_line_charts(
     def _add_legend(fig, handles, labels):
         fig.legend(
             handles, labels,
-            loc="upper center", bbox_to_anchor=(0.5, 1.04),
+            loc="upper center", bbox_to_anchor=(0.5, 1.0),
             ncol=len(handles), frameon=True, edgecolor="black",
             fontsize=plt.rcParams["legend.fontsize"]*.75,
             columnspacing=0.3,
