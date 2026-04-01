@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import math
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -525,6 +526,7 @@ def create_single_plot(
         ax.set_yticks(yticks)
         ax.set_yticklabels([str(int(t)) if t == int(t) else str(t) for t in yticks])
         ax.yaxis.set_minor_locator(NullLocator())
+        ax.set_ylim(top=max(yticks))
     if y_formatter is not None:
         ax.yaxis.set_major_formatter(FuncFormatter(y_formatter))
 
@@ -536,7 +538,7 @@ def create_single_plot(
         ncol=max(1, len(labels)),
         frameon=True,
         edgecolor="black",
-        bbox_to_anchor=(0.5, 1.04),
+        bbox_to_anchor=(0.5, 1.01),
         columnspacing=0.3,
         fontsize=plt.rcParams["legend.fontsize"] * 0.75,
     )
@@ -544,6 +546,14 @@ def create_single_plot(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output_path, format="pdf", bbox_inches="tight")
     plt.close(fig)
+
+
+def _snap_ylim_top_to_tick(ax: plt.Axes) -> None:
+    """Snap the top y-limit to the next major tick so a grid line appears there."""
+    _, top = ax.get_ylim()
+    top = max(top, 1.0)
+    snapped = 10.0 ** math.ceil(math.log10(top))
+    ax.set_ylim(top=snapped)
 
 
 def create_latency_breakdown_plot(
@@ -568,7 +578,7 @@ def create_latency_breakdown_plot(
     x_positions = list(range(len(all_versions)))
     version_to_index = {version: index for index, version in enumerate(all_versions)}
 
-    fig, ax = plt.subplots(figsize=(40, 12))
+    fig, ax = plt.subplots(figsize=(30, 12))
     protocol_order = list(PROTOCOL_LABELS)
     bar_width = 0.8 / max(1, len(protocol_order))
     offsets = {
@@ -613,6 +623,7 @@ def create_latency_breakdown_plot(
     apply_y_scale(ax, "symlog")
     ax.spines["left"].set_linewidth(5)
     ax.spines["bottom"].set_linewidth(5)
+    _snap_ylim_top_to_tick(ax)
 
     handles, labels = ax.get_legend_handles_labels()
     fig.legend(

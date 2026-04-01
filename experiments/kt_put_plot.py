@@ -329,15 +329,15 @@ def create_throughput_plot(
         ax.spines["left"].set_linewidth(5)
         ax.spines["bottom"].set_linewidth(5)
 
-    fig.supylabel("Throughput (ops/s)", x=0.025)
-    ax_bot.set_xlabel("Number of Users")
+    fig.supylabel("Throughput (ops/s)", x=0.02)
+    ax_bot.set_xlabel("Number of Users", labelpad=20)
 
     handles, labels = ax_top.get_legend_handles_labels()
     fig.legend(
         handles,
         labels,
         loc="upper center",
-        bbox_to_anchor=(0.5, 1.04),
+        bbox_to_anchor=(0.5, 1.015),
         ncol=max(1, len(labels)),
         frameon=True,
         edgecolor="black",
