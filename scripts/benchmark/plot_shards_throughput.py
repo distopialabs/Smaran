@@ -224,7 +224,7 @@ def plot_bar_chart(
     bar_width  = 0.8 / n_shards
     x_positions = np.arange(n_groups)
 
-    fig, ax = plt.subplots(figsize=(max(30, 5 * n_groups), 8))
+    fig, ax = plt.subplots(figsize=(max(30, 5 * n_groups), 12))
 
     for i, (shard_n, _) in enumerate(shards):
         color   = _SHARD_COLORS[i % len(_SHARD_COLORS)]
@@ -262,7 +262,7 @@ def plot_bar_chart(
 
     legend = ax.legend(
         loc="lower center",
-        bbox_to_anchor=(0.5, 1.0),
+        bbox_to_anchor=(0.5, 0.96),
         frameon=True,
         edgecolor="black",
         fontsize=plt.rcParams["legend.fontsize"] * 0.75,
