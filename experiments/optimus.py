@@ -23,7 +23,7 @@ PROTOCOL_LABELS = {
 
 PROTOCOL_STYLES = {
     "optimus": {"color": "#0072B2", "marker": "o", "label": "Smaran"},
-    "non_optimus":     {"color": "#D55E00", "marker": "s", "label": "Smaran (w/o commitment storage)"},
+    "non_optimus":     {"color": "#D55E00", "marker": "s", "label": "Smaran (w/o archival storage)"},
     "verkle":     {"color": "#009E73", "marker": "^", "label": "Verkle"},
 }
 
@@ -208,7 +208,7 @@ def _plot_metric(
     annotate: bool = False,
 ) -> None:
     configure_plot_style()
-    fig, ax = plt.subplots(figsize=(30, 12))
+    fig, ax = plt.subplots(figsize=(30, 12.5))
 
     for protocol, proto_points in points_by_protocol.items():
         if not proto_points:
@@ -266,7 +266,7 @@ def _plot_metric(
         handles,
         labels,
         loc="upper center",
-        bbox_to_anchor=(0.5, 1.02),
+        bbox_to_anchor=(0.5, 1.01),
         ncol=max(1, len(labels)),
         frameon=True,
         edgecolor="black",
@@ -454,7 +454,7 @@ def create_all_plots(points: List[ProofBenchmarkPoint], output_dir: Path) -> Non
             lambda p: p.avg_response_ms + p.avg_verify_ms,
             "Latency",
             _ms_unit_formatter,
-            clients_dir / "dl_query_latency_response_verify.pdf",
+            clients_dir / "storage.pdf",
             ylim_top=5_000,
             yticks=LATENCY_YTICKS,
         )
