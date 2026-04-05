@@ -32,6 +32,7 @@ func benchIngestCmd() *cli.Command {
 			&cli.StringFlag{Name: "cpuprofile", Value: "", Usage: "Write CPU profile to file"},
 			&cli.BoolFlag{Name: "skip-mpt", Value: false, Usage: "Skip MPT and run samurai-only (KZG) benchmark"},
 			&cli.StringFlag{Name: "output-dir", Value: benchutil.DefaultOutputDir, Usage: "Root directory for benchmark output"},
+			&cli.IntFlag{Name: "shards", Value: 1000, Usage: "Number of shards to use"},
 		},
 		Action: func(c *cli.Context) error {
 			if cpuprof := c.String("cpuprofile"); cpuprof != "" {
@@ -81,7 +82,7 @@ func benchIngestCmd() *cli.Command {
 				log.Fatalf("failed to setup crypto params: %v", err)
 			}
 
-			shardsNum := 1000
+			shardsNum := c.Int("shards")
 			shardedSamuraiStores, err := ingest.SetupDatabases(shardsNum, filepath.Join(dbDir, "db"))
 			if err != nil {
 				log.Fatalf("failed to setup databases: %v", err)

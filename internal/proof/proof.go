@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"sync"
+	"time"
 
 	// Added safe import
 	fr "github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
@@ -201,6 +202,10 @@ func GetNewProofRange(account common.Address, startingVersion, endingVersion uin
 			domain.FFTInverse(ys1, fft.DIF)
 			fft.BitReverse(ys1)
 			P := polynomial.Polynomial(ys1)
+
+			witnessCostStart := time.Now()
+			witnessCost := time.Since(witnessCostStart)
+			fmt.Printf("Witness cost: %dms\n", witnessCost.Milliseconds())
 
 			// Use cached commitment from tree rebuild instead of re-fetching from DB
 			commitKey := fmt.Sprintf("%d:%d", layer, idx)
