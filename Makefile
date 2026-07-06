@@ -20,11 +20,11 @@ build: coniks setup-coniks-server setup-coniks-client
 
 
 coniks:
-	$(MAKE) -C coniks-history-extension
-	cp coniks-history-extension/build/coniksbench $(BUILD_DIR)/
-	cp coniks-history-extension/build/coniksserver $(BUILD_DIR)/
-	cp coniks-history-extension/build/coniksbot $(BUILD_DIR)/
-	cp coniks-history-extension/build/coniksclient $(BUILD_DIR)/
+	$(MAKE) -C Coniks
+	cp Coniks/build/coniksbench $(BUILD_DIR)/
+	cp Coniks/build/coniksserver $(BUILD_DIR)/
+	cp Coniks/build/coniksbot $(BUILD_DIR)/
+	cp Coniks/build/coniksclient $(BUILD_DIR)/
 
 clean:
 	rm -rf $(BUILD_DIR)
