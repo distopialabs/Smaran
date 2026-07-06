@@ -1,4 +1,4 @@
-# Samurai
+# Smaran
 
 ## Introduction
 ...
