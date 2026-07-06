@@ -36,7 +36,7 @@ pc.defineParameter(
     "useImage",
     "Boot from the pre-built Smaran image (recommended)",
     portal.ParameterType.BOOLEAN,
-    True,
+    False,
 )
 pc.defineParameter(
     "imageURN",
