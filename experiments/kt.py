@@ -368,7 +368,6 @@ def build_bench_command(
         f"-num-run-clients {settings.bench_num_run_clients} "
         f"-num-versions {settings.bench_num_versions} "
         f"-run-duration-secs {settings.bench_run_duration_secs} "
-        f"-run-mode put "
         f"-protocol {settings.bench_protocol} "
         f"--addr {server_ip}:{settings.server_port} "
         f"> {settings.remote_base_dir}/{node_name}.log 2>&1"
