@@ -62,7 +62,7 @@ def render(profile_name: str, out_path: Path) -> None:
     is_put = prof["mode"] == "put"
 
     remote_dir = _env("KT_REMOTE_DIR")
-    bench_binary_base = f"{remote_dir}/Smaran/bin/ktbench"
+    bench_binary_base = "/tmp/bin/ktbench"
     bench_binary = bench_binary_base + (" -run-mode put" if is_put else "")
 
     if prof["axis"] == "versions":
