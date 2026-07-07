@@ -46,9 +46,9 @@ saves a PDF to `<repo>/output/`.
 
 | Script | Figure | Sweep axis | Human time | Compute time |
 |---|---|---|---|---|
-| `KeyTransparencyScripts/run_fig4a.sh` | 4a — latency vs versions   | versions ∈ {2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2047} | ~10 min | ~60–75 min |
-| `KeyTransparencyScripts/run_fig4b.sh` | 4b — throughput vs versions | same sweep as 4a *(reuses cache if 4a ran first)* | ~10 min | ~60–75 min (or ~30 s if cached) |
-| `KeyTransparencyScripts/run_fig4c.sh` | 4c — payload vs versions   | same sweep as 4a *(reuses cache if 4a ran first)* | ~10 min | ~60–75 min (or ~30 s if cached) |
+| `KeyTransparencyScripts/run_fig4a.sh` | 4a — latency vs versions   | versions ∈ {2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2047} | ~10 min | **~80 min (measured, r6615+c6420)** |
+| `KeyTransparencyScripts/run_fig4b.sh` | 4b — throughput vs versions | same sweep as 4a *(reuses cache if 4a ran first)* | ~10 min | **~80 min if fresh; ~5 s if cached** |
+| `KeyTransparencyScripts/run_fig4c.sh` | 4c — payload vs versions   | same sweep as 4a *(reuses cache if 4a ran first)* | ~10 min | **~80 min if fresh; ~5 s if cached** |
 | `KeyTransparencyScripts/run_fig5.sh`  | 5  — put throughput vs users | users ∈ {10k, 30k, 100k, 200k, 500k, 1M} | ~15 min | ~90–120 min |
 
 If you only care about Figure 4 as a whole, run **`run_fig4a.sh`** first,
@@ -61,9 +61,9 @@ Total end-to-end for all four figures: **~2.5–3.5 hours of compute + ~45 min o
 
 | Script | Figure | Reduced sweep | Human time | Compute time |
 |---|---|---|---|---|
-| `QuickTesting-KeyTransparency/run_fig4a_quick.sh` | 4a | versions ∈ {2, 16, 128, 256, 2047}         | ~5 min  | ~25–35 min |
-| `QuickTesting-KeyTransparency/run_fig4b_quick.sh` | 4b | same (cached from 4a_quick)                | ~5 min  | ~25–35 min (or ~30 s if cached) |
-| `QuickTesting-KeyTransparency/run_fig4c_quick.sh` | 4c | same (cached from 4a_quick)                | ~5 min  | ~25–35 min (or ~30 s if cached) |
+| `QuickTesting-KeyTransparency/run_fig4a_quick.sh` | 4a | versions ∈ {2, 16, 128, 256, 2047}         | ~5 min  | **~36 min (measured)** |
+| `QuickTesting-KeyTransparency/run_fig4b_quick.sh` | 4b | same (cached from 4a_quick)                | ~5 min  | **~36 min if fresh; ~5 s if cached** |
+| `QuickTesting-KeyTransparency/run_fig4c_quick.sh` | 4c | same (cached from 4a_quick)                | ~5 min  | **~36 min if fresh; ~5 s if cached** |
 | `QuickTesting-KeyTransparency/run_fig5_quick.sh`  | 5  | users ∈ {10k, 200k, 1M}                    | ~10 min | ~40–60 min |
 
 Total end-to-end for all four quick figures: **~65–95 min of compute + ~25 min of human time**.
