@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Shared runner used by run_fig*.sh scripts. Not called directly.
 #
-# Required env from caller: FIGURE (4a/4b/4c/5), PROFILE (fig4_full/fig4_quick/
-# fig5_full/fig5_quick), CACHE_KEY.
+# Required env from caller: FIGURE (4a/4b/4c/5), TEMPLATE (path to configs/*.toml),
+# CACHE_KEY.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -25,7 +25,9 @@ python3 -c "import tomli, matplotlib, seaborn, pandas" 2>/dev/null || {
 TMPCFG="$(mktemp --suffix=.toml)"
 trap 'rm -f "$TMPCFG"' EXIT
 
-python3 "$SCRIPTS_ROOT/lib/render_config.py" --profile "$PROFILE" --out "$TMPCFG"
+python3 "$SCRIPTS_ROOT/lib/render_config.py" \
+  --template "$SCRIPTS_ROOT/configs/$TEMPLATE" \
+  --out "$TMPCFG"
 
 OUTPUT_DIR="${KT_OUTPUT_DIR:-$REPO_ROOT/output}"
 

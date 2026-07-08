@@ -35,21 +35,21 @@ PROTOCOL_LABELS = {
 # Bar plots: colors remain consistent, and hatches provide colorblind-safe distinction.
 PROTOCOL_STYLES = {
     "samurai": {
-        "color": "#e66101",   # orange
+        "color": "#0072B2",   # blue (paper Fig 4/5)
         "marker": "o",
         "linestyle": "-",
         "hatch": "///",
         "label": "Smaran",
     },
     "optiks": {
-        "color": "#5e3c99",   # purple
+        "color": "#D55E00",   # orange (paper Fig 4/5)
         "marker": "s",
         "linestyle": "-",
         "hatch": "\\\\\\",
         "label": "Optiks",
     },
     "coniks": {
-        "color": "#1b9e77",   # teal
+        "color": "#009E73",   # green (paper Fig 4/5)
         "marker": "^",
         "linestyle": "-",
         "hatch": "xxx",
@@ -621,12 +621,6 @@ def create_payload_plot(
     version_to_index = {version: index for index, version in enumerate(all_versions)}
 
     fig, ax = plt.subplots(figsize=(14, 7))
-    protocol_order = list(PROTOCOL_LABELS)
-    bar_width = 0.8 / max(1, len(protocol_order))
-    offsets = {
-        protocol: (index - (len(protocol_order) - 1) / 2) * bar_width
-        for index, protocol in enumerate(protocol_order)
-    }
 
     for protocol, protocol_points in grouped.items():
         if not protocol_points:
@@ -634,17 +628,18 @@ def create_payload_plot(
 
         protocol_points = sorted(protocol_points, key=lambda p: p.num_versions)
         style = PROTOCOL_STYLES[protocol]
-        xs = [version_to_index[point.num_versions] + offsets[protocol] for point in protocol_points]
+        xs = [version_to_index[point.num_versions] for point in protocol_points]
         payload_values = [point.avg_payload_kib for point in protocol_points]
 
-        ax.bar(
+        ax.plot(
             xs,
             payload_values,
-            width=bar_width,
+            marker=style["marker"],
+            markersize=14,
+            markeredgewidth=1.5,
+            linestyle=style["linestyle"],
+            linewidth=4.0,
             color=style["color"],
-            hatch=style["hatch"],
-            edgecolor="black",
-            linewidth=0.7,
             label=style["label"],
         )
 

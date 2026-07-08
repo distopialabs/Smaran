@@ -1,0 +1,37 @@
+# Fig 4a/4b/4c — Monitoring-query sweep (Key Transparency, §7.1 of paper).
+# Sweeps versions in {2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2047}
+# across three protocols {samurai/Smaran, optiks, coniks} at 10K users.
+#
+# [nodes.*] is filled in at runtime from KeyTransparencyScripts/nodes.env.
+# Everything below is Shubham's proven cluster.toml with sweep values
+# updated to the paper's exact Fig 4 axis.
+
+[experiment]
+repo_url = "https://github.com/distopialabs/Smaran"
+remote_base_dir = "@REMOTE_BASE_DIR@"
+remote_repo_dir = "@REMOTE_REPO_DIR@"
+remote_bin_dir  = "@REMOTE_BIN_DIR@"
+remote_tmp_dir  = "/tmp/"
+server_node = "node1"
+server_addr = "0.0.0.0:3191"
+server_port = 3191
+server_log_path = "@REMOTE_BASE_DIR@/server.log"
+repo_branch = "@REPO_BRANCH@"
+build_command = "make"
+server_binary = "/tmp/bin/ktserver"
+server_process_name = "ktserver"
+server_batch_size = 1024
+bench_binary = "/tmp/bin/ktbench"
+bench_num_users = 10000
+bench_num_load_clients = 10
+bench_num_run_clients = 10
+bench_num_versions = 20
+coniks_num_versions_divider = 1
+bench_run_duration_secs = 90
+bench_protocol = "samurai"
+local_logs_dir = "logs"
+server_startup_wait_seconds = 60.0
+
+[sweeping_parameters]
+bench_protocol = ["samurai", "optiks", "coniks"]
+bench_num_versions = [2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2047]
