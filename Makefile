@@ -20,6 +20,7 @@ build: coniks setup-coniks-server setup-coniks-client
 
 
 coniks:
+	mkdir -p $(BUILD_DIR)
 	$(MAKE) -C Coniks
 	cp Coniks/build/coniksbench $(BUILD_DIR)/
 	cp Coniks/build/coniksserver $(BUILD_DIR)/
