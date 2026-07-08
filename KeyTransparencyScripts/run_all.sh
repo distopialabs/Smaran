@@ -11,7 +11,9 @@ echo "==========================================================="
 REPO_SRC=/opt/Smaran
 REPO_DST="$HOME/Smaran"
 
-[ -d "$REPO_DST" ] || cp -r "$REPO_SRC" "$REPO_DST"
+# Always sync from the pre-installed /opt copy (idempotent, reruns are safe)
+mkdir -p "$REPO_DST"
+rsync -a --delete --exclude="logs/" --exclude="output/" "$REPO_SRC/" "$REPO_DST/"
 cd "$REPO_DST"
 
 [ -e /usr/local/bin/go ] || sudo ln -sf /usr/local/go/bin/go /usr/local/bin/go
