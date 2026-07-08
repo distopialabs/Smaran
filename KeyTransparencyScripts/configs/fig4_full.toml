@@ -34,4 +34,4 @@ server_startup_wait_seconds = 60.0
 
 [sweeping_parameters]
 bench_protocol = ["samurai", "optiks", "coniks"]
-bench_num_versions = [2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2047]
+bench_num_versions = [2, 16, 32, 64, 128, 256, 512, 700, 1024, 1500, 2047]
