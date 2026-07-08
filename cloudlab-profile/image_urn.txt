@@ -1,18 +1,1 @@
-PLACEHOLDER — no image snapshotted yet.
-
-To create the image:
-1. Instantiate the profile with 'Boot from pre-built image' unchecked.
-2. On node0, run:
-     cd ~/Smaran
-     ./KeyTransparencyScripts/install_coniks.sh
-     ./KeyTransparencyScripts/install_optiks.sh
-     ./KeyTransparencyScripts/install_smaran.sh
-3. CloudLab web UI: Experiment -> node0 -> Create Disk Image.
-4. Wait for snapshot to complete (~10-15 min).
-5. Replace the contents of this file with the URN CloudLab hands you.
-   Expected format:
-     urn:publicid:IDN+utah.cloudlab.us+image+distopialabs-PG0//smaran-ae:0
-6. Commit and push.
-
-Do the same for node1 (or use the same image URN for both — the installed
-binaries are identical).
+urn:publicid:IDN+clemson.cloudlab.us+image+distopialabs-PG0:smaran-kt-ae

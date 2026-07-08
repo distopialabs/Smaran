@@ -27,22 +27,22 @@ import geni.rspec.pg as pg
 
 pc = portal.Context()
 
-# Fill this in AFTER you snapshot a working install. Placeholder URN below.
-# Format: urn:publicid:IDN+utah.cloudlab.us+image+<project>//<image-name>:<version>
-IMAGE_URN_PLACEHOLDER = "urn:publicid:IDN+utah.cloudlab.us+image+distopialabs-PG0//smaran-ae:0"
+# Snapshotted from a fully-prepared node0 (Ubuntu 22.04 + Go 1.24 + apt/python deps
+# + /opt/Smaran source and pre-built binaries).
+SMARAN_KT_IMAGE_URN = "urn:publicid:IDN+clemson.cloudlab.us+image+distopialabs-PG0:smaran-kt-ae"
 CLEAN_UBUNTU_URN = "urn:publicid:IDN+emulab.net+image+emulab-ops//UBUNTU22-64-STD"
 
 pc.defineParameter(
     "useImage",
     "Boot from the pre-built Smaran image (recommended)",
     portal.ParameterType.BOOLEAN,
-    False,
+    True,
 )
 pc.defineParameter(
     "imageURN",
     "Disk image URN (only used if 'useImage' is checked)",
     portal.ParameterType.STRING,
-    IMAGE_URN_PLACEHOLDER,
+    SMARAN_KT_IMAGE_URN,
 )
 pc.defineParameter(
     "serverHW", "Hardware type for the server node",
