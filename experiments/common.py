@@ -436,6 +436,12 @@ class RemoteCluster:
             str(node.port),
             "-o",
             "IdentitiesOnly=yes",
+            "-o",
+            "StrictHostKeyChecking=no",
+            "-o",
+            "UserKnownHostsFile=/dev/null",
+            "-o",
+            "LogLevel=ERROR",
         ]
         ssh_command = " ".join(shlex.quote(part) for part in ssh_parts)
         remote_target = f"{node.username}@{node.ip}:{shlex.quote(destination if upload else source)}"
