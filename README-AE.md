@@ -1,257 +1,152 @@
-# Smaran — Artifact Evaluation
+# Smaran — Artifact Evaluation (Reviewer Guide)
 
-This document is the **entry point for SOSP artifact-evaluation reviewers**.
-It reproduces **Figures 4a, 4b, 4c, and 5** of the Smaran paper — the four
-Key-Transparency experiments in §7.1.
+**What this evaluates**: The Key-Transparency experiments from §7.1 of the Smaran paper — Figures **4a, 4b, 4c, 5**.
 
-## Scope
+**Total time**: ~35 minutes of your attention + ~90 minutes of compute.
 
-This artifact reproduces the **Key-Transparency (KT) experiments** in the
-paper's §7.1 only. The paper's §7.2 Decentralized-Ledger experiments
-(Figures 6 and 7) are **out of scope** for this artifact.
-
-## Time budget — read this before starting
-
-Following the hierarchy recommended by
-[Padhye's AE tips](https://blog.padhye.org/Artifact-Evaluation-Tips-for-Authors/#tip-2-estimate-human--compute-time-and-declare-it-upfront):
-
-```
-Smaran — Key Transparency Artifact
-# Overview
-* Provision cluster        (10 human-minutes +  10 compute-minutes)
-* Install everything       ( 5 human-minutes +   5 compute-minutes)
-* Quick-turnaround (all 4) (10 human-minutes +  90 compute-minutes)   RECOMMENDED
-* Full sweeps      (all 4) (15 human-minutes + 200 compute-minutes)   OPTIONAL
-* Validate output          (10 human-minutes +   0 compute-minutes)
-```
-
-**Fastest path to a signed-off review: quick turnaround.** Total:
-~35 human-minutes + ~1h 45m compute-time. Reproduces the paper's trend
-faithfully with a reduced sweep.
-
-**Full sweeps** match the exact sweep points in the paper. Only run these
-if you have ~3.5 hours of compute to spare and want side-by-side match.
-
-## Two ways to run
-
-### Path A — Pre-built CloudLab image (recommended)
-
-Skip installation entirely. Instantiate the profile in
-[`cloudlab-profile/`](cloudlab-profile/) with `useImage=checked` and the URN
-in [`cloudlab-profile/image_urn.txt`](cloudlab-profile/image_urn.txt).
-
-*Status of the image*: **LIVE**. URN: `urn:publicid:IDN+clemson.cloudlab.us+image+distopialabs-PG0:smaran-kt-ae`.
-
-On CloudLab: **Experiments → Instantiate a Profile → smaran-kt-ae**. The
-`Boot from the pre-built Smaran image` checkbox is already checked by
-default. Click Next → Finish and you skip the entire install step —
-just `cp -r /opt/Smaran ~/Smaran` and go straight to running experiments.
-
-### Path B — Install from source
-
-Provision two Ubuntu 22.04 machines that can SSH each other, then run the
-installers. Detailed in the sections below.
+**Public artifact**: <https://github.com/distopialabs/Smaran/tree/artifact-eval>
 
 ---
 
-## 1. Provision cluster  *(10 human-min + 10 compute-min)*
+## Step 1 — Get two CloudLab nodes (~10 min)
 
-Both nodes must be able to SSH to each other. The paper uses CloudLab
-Clemson with two node types:
+1. Log in at <https://www.cloudlab.us>. If you don't have a CloudLab account, sign up (free for academics, ~24 hr approval): <https://www.cloudlab.us/signup.php>.
+2. Click **Experiments → Instantiate a Profile**.
+3. In the search box, type `smaran-kt-ae` and select it (project `DistopiaLabs`).
+4. Click **Instantiate**. Leave defaults:
+   - `Boot from the pre-built Smaran image (recommended)` — **checked** (saves you the install phase).
+   - `serverHW = r6615`, `clientHW = c6420`.
+   - Cluster: Clemson.
+5. Click **Next → Finish**. Wait ~5–10 minutes until status = **Ready**.
+6. Click the **List View** tab. Copy the two SSH commands (for `node0` and `node1`).
 
-| Role   | Recommended hardware | Purpose               |
-|--------|----------------------|-----------------------|
-| server | `r6615` (AMD EPYC 9354P, 32 cores, 192 GiB RAM) | runs `ktserver` |
-| client | `c6420` (Intel Xeon Gold 6142m, 16 cores)        | runs `ktbench`  |
+## Step 2 — Set up the environment (~2 min)
 
-**Steps on CloudLab:**
+SSH into **`node0`** (the first hostname):
 
-1. Log in to <https://www.cloudlab.us>.
-2. **Experiments → Create Experiment Profile** → upload
-   [`cloudlab-profile/profile.py`](cloudlab-profile/profile.py). Save as `smaran-ae`.
-3. Click **Instantiate**. On the parameter form:
-   - `Boot from the pre-built Smaran image` — **unchecked** (for Path B).
-   - Keep `serverHW=r6615`, `clientHW=c6420`.
-   - Cluster: **Clemson**.
-4. Click **Next → Finish**. Wait ~5–10 min for status = **Ready**.
-5. On the **List View** tab, note both SSH commands. `node0` is the server
-   (r6615); `node1` is the client (c6420).
-
-**Side effects**: creates a fresh CloudLab experiment tied to your account.
-No files on your local machine.
-
----
-
-## 2. Install everything  *(5 human-min + 5 compute-min)*
-
-**Skip this section entirely if using Path A (the pre-built image).**
-
-SSH into **both nodes** and run the same three installers on each. The
-installers are idempotent — re-running is safe.
-
-**On `node0` (server):**
 ```bash
+ssh <your-cloudlab-username>@clnodeXXX.clemson.cloudlab.us
+```
+
+Once on `node0`, paste this block:
+
+```bash
+# Fetch the artifact-eval branch of the code
 git clone --branch artifact-eval --recurse-submodules \
     https://github.com/distopialabs/Smaran.git ~/Smaran
 cd ~/Smaran
 
+# Set up inter-node SSH so node0 can drive experiments on node1
+[ -f ~/.ssh/id_ed25519 ] || ssh-keygen -t ed25519 -N '' -f ~/.ssh/id_ed25519
+cat ~/.ssh/id_ed25519.pub >> ~/.ssh/authorized_keys
+cat ~/.ssh/id_ed25519.pub | ssh -o StrictHostKeyChecking=accept-new node1 "cat >> ~/.ssh/authorized_keys"
+ssh-keyscan -H node0 node1 >> ~/.ssh/known_hosts 2>/dev/null
+sudo ln -sf /usr/local/go/bin/go /usr/local/bin/go
+
+# Configure the runner (defaults are fine on CloudLab)
+cp KeyTransparencyScripts/nodes.env.template KeyTransparencyScripts/nodes.env
+```
+
+That's it — you skip the install step because the image already has Go, Python packages, and apt dependencies baked in.
+
+**If you unchecked the "Boot from pre-built image" option at Instantiate**, you have a plain Ubuntu 22.04 machine. Then also run:
+```bash
 ./KeyTransparencyScripts/install_coniks.sh    # prints "Installing Coniks"
 ./KeyTransparencyScripts/install_optiks.sh    # prints "Installing Optiks"
 ./KeyTransparencyScripts/install_smaran.sh    # prints "Installing Smaran"
-
-# Enable inter-node SSH so node0 can drive the sweep:
-[ -f ~/.ssh/id_ed25519 ] || ssh-keygen -t ed25519 -N '' -f ~/.ssh/id_ed25519
-cat ~/.ssh/id_ed25519.pub >> ~/.ssh/authorized_keys
-cat ~/.ssh/id_ed25519.pub | ssh node1 "cat >> ~/.ssh/authorized_keys"
-sudo ln -sf /usr/local/go/bin/go /usr/local/bin/go   # for non-interactive SSH
-
-# Configure the run:
-cp KeyTransparencyScripts/nodes.env.template KeyTransparencyScripts/nodes.env
-# Defaults point at node0/node1 with your SSH key — no edits usually needed.
 ```
 
-**On `node1` (client):** same three installers. Or just wait — the
-experiment script auto-distributes binaries built on node0.
+## Step 3 — Run the experiments (~90 min compute total)
 
-**Side effects (per node)**:
-- Installs Go 1.24 to `/usr/local/go/`
-- Installs apt packages: `build-essential`, `git`, `make`, `python3-pip`,
-  `protobuf-compiler`, `rsync`
-- Installs Python packages to `~/.local/lib/python3.10/site-packages/`
-  (from `experiments/requirements.txt`)
-- Produces binaries in `~/Smaran/bin/`:
-  - `ktserver`, `ktbench` (Smaran + OPTIKS)
-  - `samurai`, `proofc`, `makedataset` (Smaran tooling)
-  - `coniksserver`, `coniksclient`, `coniksbench`, `coniksbot` (CONIKS)
-
----
-
-## 3. Run experiments
-
-Each script prints:
-- `Running experiment Figure <yy>` on its first line.
-- `Running <Coniks|Optiks|Smaran> with <x> versions` (or `<x> users` for
-  Fig 5) before each datapoint.
-- `Plotting` at the end, followed by `Saved: <path>`.
-
-### 3a. Quick turnaround  *(10 human-min + 90 compute-min)* — RECOMMENDED
-
-Reduced sweep points, keeps the trends. From `node0`:
+From `node0`, run these one after another:
 
 ```bash
 cd ~/Smaran
-./QuickTesting-KeyTransparency/run_fig4a_quick.sh   # ~36 min, versions ∈ {2,16,128,256,2047}
-./QuickTesting-KeyTransparency/run_fig4b_quick.sh   # ~2 s  (cached from 4a_quick)
-./QuickTesting-KeyTransparency/run_fig4c_quick.sh   # ~2 s  (cached from 4a_quick)
-./QuickTesting-KeyTransparency/run_fig5_quick.sh    # ~40–60 min, users ∈ {10k, 200k, 1M}
+
+./QuickTesting-KeyTransparency/run_fig4a_quick.sh   # ~35 min, versions {2, 16, 128, 256, 2047}
+./QuickTesting-KeyTransparency/run_fig4b_quick.sh   # ~5 s (cached from 4a)
+./QuickTesting-KeyTransparency/run_fig4c_quick.sh   # ~5 s (cached from 4a)
+./QuickTesting-KeyTransparency/run_fig5_quick.sh    # ~45 min, users {10k, 200k, 1M}
 ```
 
-Cache mechanism: Figures 4a/4b/4c share a single experimental sweep. The
-first one you run does the full sweep; the next two only re-plot.
-Set `KT_FORCE_RERUN=1` to force a fresh sweep.
+**What each script prints:**
+- First line: `Running experiment Figure <yy>`
+- Per data point: `Running <Coniks|Optiks|Smaran> with <x> versions` (or `users` for Fig 5)
+- On finish: `Plotting`, then `Saved: /users/.../Smaran/output/figXX.pdf`
 
-### 3b. Full sweeps  *(15 human-min + 200 compute-min)* — OPTIONAL
+**Where the PDFs go:**
+```
+~/Smaran/output/
+  ├── fig4a_latency.pdf
+  ├── fig4b_throughput.pdf
+  ├── fig4c_payload.pdf
+  └── fig5_put_throughput.pdf
+```
 
-Exact paper sweep points. Same caching behaviour.
+## Step 4 — Compare against the paper
+
+Copy the PDFs to your laptop (from **your laptop's** terminal):
+```bash
+mkdir -p ~/Desktop/smaran-ae-output
+scp <your-cloudlab-username>@clnodeXXX.clemson.cloudlab.us:~/Smaran/output/*.pdf ~/Desktop/smaran-ae-output/
+open ~/Desktop/smaran-ae-output/*.pdf
+```
+
+Compare each PDF to the paper's Figures 4a/4b/4c and 5. Absolute numbers depend on hardware; the **qualitative shape and protocol ordering** are what to check:
+
+| Figure | Trend to look for |
+|---|---|
+| **4a — Latency vs versions** | Coniks flat line ~15 ms. Optiks rises linearly, crossing above Smaran around 128 versions. Smaran near-flat ~25–40 ms. |
+| **4b — Throughput vs versions** | Coniks flat ~600 qps. Optiks drops steeply. Smaran gentle decline. |
+| **4c — Payload vs versions** | Optiks payload grows steeply; Smaran grows much slower. Coniks may be zero (its bench binary does not emit payload). |
+| **5 — Put throughput vs users** | Optiks highest, Smaran middle, Coniks lowest — all roughly flat with user count. Broken y-axis expected. |
+
+If shapes match, the artifact reproduces the paper's key claims.
+
+**Also produced**: CSV summaries at `~/Smaran/logs/<latest-sweep>/output/kt_query_summary.csv` (Fig 4) and `kt_put_summary.csv` (Fig 5), one row per (protocol, sweep-value) with throughput / latency / payload numbers.
+
+---
+
+## If you want the full sweeps (optional, ~3 extra hours)
+
+The scripts in `KeyTransparencyScripts/` (without `_quick`) run every point from the paper's Fig 4 (11 versions) and Fig 5 (6 user counts):
 
 ```bash
-./KeyTransparencyScripts/run_fig4a.sh   # ~80 min, versions ∈ {2,4,8,16,32,64,128,256,512,1024,2047}
+./KeyTransparencyScripts/run_fig4a.sh   # ~80 min
 ./KeyTransparencyScripts/run_fig4b.sh   # ~5 s (cached)
 ./KeyTransparencyScripts/run_fig4c.sh   # ~5 s (cached)
-./KeyTransparencyScripts/run_fig5.sh    # ~90–120 min, users ∈ {10k, 30k, 100k, 200k, 500k, 1M}
+./KeyTransparencyScripts/run_fig5.sh    # ~90–120 min
 ```
 
-### Side effects (per experiment script)
-- Writes a fresh sweep directory at `~/Smaran/logs/<ISO-timestamp>/`.
-- Under that directory, one subdir per `(protocol, x)` datapoint containing
-  `config_used.json` and `node2.log` (raw ktbench/coniksbench output).
-- Populates a plot directory `~/Smaran/logs/<sweep>/output/` with
-  intermediate PDFs and `kt_query_summary.csv` / `kt_put_summary.csv`.
-- Copies the target subfigure PDF to `~/Smaran/output/<figNN>.pdf`.
-- Caches the "sweep-done" marker under `~/Smaran/logs/ae_cache/<profile>/latest`
-  as a symlink to the completed sweep dir.
-
-Nothing outside `~/Smaran/` is written or modified.
+Same output format, PDFs replace the quick ones in `~/Smaran/output/`.
 
 ---
 
-## 4. Validate  *(10 human-min)*
+## Claim-to-figure mapping
 
-Open the four PDFs under `~/Smaran/output/`:
-
-```
-output/
-  fig4a_latency.pdf         — reproduces Figure 4a (latency vs versions)
-  fig4b_throughput.pdf      — reproduces Figure 4b (throughput vs versions)
-  fig4c_payload.pdf         — reproduces Figure 4c (payload vs versions)
-  fig5_put_throughput.pdf   — reproduces Figure 5  (put throughput vs users)
-```
-
-### Claim ↔ evidence mapping
-
-| Paper claim (§7.1) | Reproducing figure/file | Expected qualitative shape |
+| Paper claim | Script | Output PDF |
 |---|---|---|
-| "Smaran reduces end-to-end latency by 99.1% relative to CONIKS and by 82.5% relative to OPTIKS" at 2047 versions | Fig 4a → `output/fig4a_latency.pdf` and `kt_query_summary.csv` | Optiks rises linearly; Smaran near-flat; Coniks flat |
-| "Smaran delivers 113× higher throughput than CONIKS and 5.7× higher than OPTIKS" at 2047 versions | Fig 4b → `output/fig4b_throughput.pdf` | Optiks drops steeply; Smaran gentle decline; Coniks flat |
-| "Smaran's payload at 2047 versions is 97.0% lower than CONIKS and 95.2% lower than OPTIKS" | Fig 4c → `output/fig4c_payload.pdf` | Optiks payload grows ~1000×; Smaran ~50× across the sweep |
-| "Smaran yields about 130× higher throughput than CONIKS at 10K users…and about 115.6× at 1M users" | Fig 5 → `output/fig5_put_throughput.pdf` | Smaran between CONIKS (low) and OPTIKS (high) across all user counts |
-
-**Absolute numbers depend on hardware.** The qualitative shape and the
-protocol-ordering are what to check.
-
-### Human-readable summary tables
-
-Every sweep also drops a CSV alongside the PDFs:
-- `logs/<sweep>/output/kt_query_summary.csv` (Fig 4)
-- `logs/<sweep>/output/kt_put_summary.csv`   (Fig 5)
-
-Columns include `protocol`, `num_versions` (or `num_users`),
-`throughput_qps`, `avg_latency_ms`, `avg_payload_kib`, etc. Open in a
-spreadsheet or plain-text viewer.
+| Smaran cuts monitoring-query latency 99.1% vs Coniks and 82.5% vs Optiks at 2047 versions | `run_fig4a_quick.sh` | `fig4a_latency.pdf` |
+| Smaran delivers 113× throughput vs Coniks and 5.7× vs Optiks at 2047 versions | `run_fig4b_quick.sh` | `fig4b_throughput.pdf` |
+| Smaran's response payload is 97.0% lower than Coniks and 95.2% lower than Optiks | `run_fig4c_quick.sh` | `fig4c_payload.pdf` |
+| Smaran yields ~130× higher key-update throughput than Coniks at 10K users, ~115× at 1M users | `run_fig5_quick.sh` | `fig5_put_throughput.pdf` |
 
 ---
 
-## Terminology and cross-references
+## Common issues
 
-- The paper calls the new system **Smaran**; historic module names in the
-  Go code use `samurai` (an earlier working name). The plotting layer
-  maps `samurai → Smaran` in all output labels. If you read the source,
-  wherever you see `samurai`, it is Smaran.
-- `bench_protocol` values in configs and logs:
-  `samurai == Smaran`, `optiks == OPTIKS`, `coniks == CONIKS`.
+| Issue | Fix |
+|---|---|
+| `Permission denied (publickey)` when a script tries to SSH between nodes | Re-run the SSH setup block in Step 2. |
+| Script says `no free nodes of type r6615/c6420` at Instantiate time | Try again in a few hours, or reserve via <https://www.cloudlab.us/reserve.php>. Alternatively substitute `r6525` for either type on the parameter form. |
+| Port 3191 already in use | An earlier `ktserver` didn't shut down. Run `pkill ktserver` on node0. |
+| An experiment hangs partway or you Ctrl-C it | Delete `~/Smaran/logs/<the failing sweep>/` and re-run the script. Cache only recognizes completed sweeps. |
+| Smaran throughput comes out at 0 for the 1M-user point | The KZG precomputation was still running when the client tried to connect. Bump `server_startup_wait_seconds` in `KeyTransparencyScripts/configs/fig5_quick.toml` from 60 to 120 and re-run. |
 
-## Reusing / extending the artifact
+---
 
-- Change sweep points by editing
-  [`KeyTransparencyScripts/lib/render_config.py`](KeyTransparencyScripts/lib/render_config.py).
-  The `FIGURE_PROFILES` dict controls every experiment's sweep values.
-- Change per-datapoint duration:
-  `KT_RUN_DURATION=180 ./KeyTransparencyScripts/run_fig4a.sh` (default 90 s).
-- Change which hosts the sweep uses: set `KT_SERVER_HOST`, `KT_CLIENT_HOST`,
-  `KT_SSH_USER`, `KT_SSH_KEY` in `KeyTransparencyScripts/nodes.env`. See
-  `nodes.env.template` for the full list.
+## When you're done
 
-## Recovery from partial runs
+Terminate the CloudLab experiment (**Experiments → My Experiments → Terminate**) to free the nodes.
 
-- Each installer is idempotent — re-run safely.
-- If an experiment crashes mid-sweep: delete
-  `~/Smaran/logs/<the failing sweep>/` and re-run the script. Cache is
-  keyed on a *completed* sweep only; a partial sweep is discarded.
-- To force a fresh sweep even if a cached completed run exists:
-  `KT_FORCE_RERUN=1 ./run_figXX.sh`.
-
-## Troubleshooting
-
-| Symptom | Cause | Fix |
-|---|---|---|
-| `Permission denied (publickey)` when running an experiment | node0 can't SSH into itself or node1 | Re-run the inter-node SSH setup in section 2. |
-| `go: command not found` during the sweep | Non-interactive SSH doesn't see `/usr/local/go/bin` | `sudo ln -sf /usr/local/go/bin/go /usr/local/bin/go` on the server node. |
-| `ValueError: Could not find avg_latency` from the plotter | ktbench ran in put-mode when Fig 4 needed get-mode. Should not happen on `artifact-eval` branch. | Ensure you are on `artifact-eval` branch (`git rev-parse --abbrev-ref HEAD`). |
-| `no free nodes of type r6615/c6420` on Instantiate | CloudLab is contended | Either wait, reserve via <https://www.cloudlab.us/reserve.php>, or substitute (e.g. r6525 client). |
-| Port 3191 already in use | Prior ktserver did not shut down | `pkill ktserver` on the server node. |
-
-## Getting help
-
-- Repo: <https://github.com/distopialabs/Smaran>
-- File an issue tagged `artifact-eval` if a reviewer step fails and this
-  README does not resolve it.
+If any step fails, open an issue at <https://github.com/distopialabs/Smaran/issues> or contact the authors.
