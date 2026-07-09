@@ -316,9 +316,8 @@ def build_repo_prepare_commands(commit_hash: str, settings: KtExperimentSettings
             "fi"
         ),
         f"cd {settings.remote_repo_dir} && git checkout {settings.repo_branch}",
-        f"cd {settings.remote_repo_dir} && git checkout {commit_hash}",
         f"cd {settings.remote_repo_dir} && git submodule sync --recursive",
-        f"cd {settings.remote_repo_dir} && git submodule update --init --recursive",
+        f"cd {settings.remote_repo_dir} && git submodule update --init --recursive --force",
         f"cd {settings.remote_repo_dir} && {settings.build_command}",
     ]
 
