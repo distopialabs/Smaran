@@ -56,18 +56,35 @@ That's it — you skip the install step because the image already has Go, Python
 ./KeyTransparencyScripts/install_smaran.sh    # prints "Installing Smaran"
 ```
 
-## Step 3 — Run the experiments (~90 min compute total)
+## Step 3 — Run the experiments
 
-From `node0`, run these one after another:
+Two paths — pick one. Both produce the same 4 PDFs; "full" uses every point from the paper, "quick" uses a reduced sweep that still shows the same trends.
+
+### Path A: Quick sweep (~90 min compute total) — recommended for AE
+
+Fig 4 sweeps 5 version counts {2, 16, 128, 256, 2047}. Fig 5 sweeps 3 user counts {10k, 0.2M, 1M}.
 
 ```bash
 cd ~/Smaran
-
-./QuickTesting-KeyTransparency/run_fig4a_quick.sh   # ~35 min, versions {2, 16, 128, 256, 2047}
+./QuickTesting-KeyTransparency/run_fig4a_quick.sh   # ~35 min
 ./QuickTesting-KeyTransparency/run_fig4b_quick.sh   # ~5 s (cached from 4a)
 ./QuickTesting-KeyTransparency/run_fig4c_quick.sh   # ~5 s (cached from 4a)
-./QuickTesting-KeyTransparency/run_fig5_quick.sh    # ~45 min, users {10k, 200k, 1M}
+./QuickTesting-KeyTransparency/run_fig5_quick.sh    # ~45 min
 ```
+
+### Path B: Full sweep (~3 h compute total) — paper reproduction
+
+Fig 4 sweeps 11 version counts {2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2047}. Fig 5 sweeps 6 user counts {10k, 50k, 100k, 200k, 500k, 1M}.
+
+```bash
+cd ~/Smaran
+./KeyTransparencyScripts/run_fig4a.sh               # ~80 min
+./KeyTransparencyScripts/run_fig4b.sh               # ~5 s (cached from 4a)
+./KeyTransparencyScripts/run_fig4c.sh               # ~5 s (cached from 4a)
+./KeyTransparencyScripts/run_fig5.sh                # ~90–120 min
+```
+
+Both paths write PDFs to `~/Smaran/output/` and CSV summaries to `~/Smaran/logs/<latest-sweep>/output/`.
 
 **What each script prints:**
 - First line: `Running experiment Figure <yy>`
@@ -113,22 +130,6 @@ If shapes match, the artifact reproduces the paper's key claims.
 
 **Also produced**: CSV summaries at `~/Smaran/logs/<latest-sweep>/output/kt_query_summary.csv` (Fig 4) and `kt_put_summary.csv` (Fig 5), one row per (protocol, sweep-value) with throughput / latency / payload numbers.
 
----
-
-## If you want the full sweeps (optional, ~3 extra hours)
-
-The scripts in `KeyTransparencyScripts/` (without `_quick`) run every point from the paper's Fig 4 (11 versions) and Fig 5 (6 user counts):
-
-```bash
-./KeyTransparencyScripts/run_fig4a.sh   # ~80 min
-./KeyTransparencyScripts/run_fig4b.sh   # ~5 s (cached)
-./KeyTransparencyScripts/run_fig4c.sh   # ~5 s (cached)
-./KeyTransparencyScripts/run_fig5.sh    # ~90–120 min
-```
-
-Same output format, PDFs replace the quick ones in `~/Smaran/output/`.
-
----
 
 ## Claim-to-figure mapping
 
