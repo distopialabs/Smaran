@@ -14,6 +14,7 @@ Generates benchmark graphs from ingestion CSV files and proof summary text files
 | `ingestion-summary` | G7–G9 | Per-protocol sets of ingestion CSVs across k-user scales |
 | `proof-summary` | G10–G13 | Per-protocol sets of proof summary CSV files across range sizes |
 | `update-timeseries` | G14–G15 | One or more update metrics CSVs |
+| `proof-throughput-timeseries` | G16–G17 | One or more server bench log CSVs (from open-loop benchmarks) |
 
 ---
 
@@ -245,6 +246,94 @@ python scripts/benchmark/plot_bench.py update-timeseries \
 
 ---
 
+## Subcommand 5: `proof-throughput-timeseries`
+
+Plots proof request throughput and latency time-series from server-side bench log CSVs. These CSVs are produced by the Samurai server when run with `--bench --bench-output <path>`. Multiple inputs are overlaid for comparison.
+
+```
+python plot_bench.py proof-throughput-timeseries \
+  --input LABEL:CSV_PATH \
+  [--input LABEL:CSV_PATH ...] \
+  [options]
+```
+
+### Additional Options
+
+| Flag | Default | Description |
+|---|---|---|
+| `--input` | required, repeatable | `label:csv_path` pair — label identifies the run in the legend |
+| `--window` | `5.0` | Rolling window size in seconds |
+| `--graphs` | `all` | Comma-separated subset to produce, e.g. `G16,G17`, or `all` |
+
+### Expected CSV Format
+
+```
+start_at_ns,completed_at_ns
+```
+
+Produced by `BenchLogger` in `internal/benchutil/benchlog.go`. Each row represents one completed proof request with nanosecond-precision timestamps.
+
+### Graphs Produced
+
+| Graph | File | Y-axis | Derivation |
+|---|---|---|---|
+| **G16** | `G16_proof_throughput` | Throughput (req/s) | Count of requests completed per window / window size |
+| **G17** | `G17_proof_latency` | Latency (ms) | Mean of `(completed_at_ns − start_at_ns) / 1e6` per window |
+
+### Examples
+
+```bash
+# Single run
+python scripts/benchmark/plot_bench.py proof-throughput-timeseries \
+  --input "samuraimpt:benchmark_output/samuraimpt/openloop_range50000_clients8_20260327_143012.csv" \
+  --output-dir benchmark_output/plots --format png
+
+# Compare two runs (different client counts)
+python scripts/benchmark/plot_bench.py proof-throughput-timeseries \
+  --input "4-clients:openloop_range50000_clients4.csv" \
+  --input "8-clients:openloop_range50000_clients8.csv" \
+  --warmup 5 --cooldown 5 \
+  --output-dir benchmark_output/plots --format pdf
+```
+
+### Open-Loop Benchmark Workflow
+
+The open-loop benchmark measures maximum server throughput by firing requests at a fixed rate:
+
+1. **Start the server** with bench logging:
+   ```bash
+   ./bin/samurai serve --db-dir /data/db --bench --bench-output bench_server.csv
+   ```
+
+2. **Run the client** with desired load:
+   ```bash
+   ./bin/proofc openloop \
+     --server-addr localhost:50051 \
+     --num-clients 8 \
+     --rps-per-client 10 \
+     --max-concurrent 100 \
+     --range-size 50000 \
+     --accounts-list accounts.csv \
+     --duration 60s
+   ```
+
+3. **Sweep multiple configurations** using the provided script:
+   ```bash
+   bash scripts/benchmark/run_openloop_bench.sh
+   ```
+   This iterates over range sizes and client counts, producing separate server CSVs per combination.
+
+4. **Generate plots**:
+   ```bash
+   python scripts/benchmark/plot_bench.py proof-throughput-timeseries \
+     --input "samuraimpt:bench_server.csv" \
+     --output-dir plots --warmup 5 --cooldown 5
+   ```
+
+The client prints a summary to stdout showing sent/completed/dropped/error counts. Drops indicate server saturation (semaphore full — more than `--max-concurrent` requests in-flight per connection).
+
+---
+
 ## Output File Names
 
 | Graph | Filename |
@@ -264,6 +353,8 @@ python scripts/benchmark/plot_bench.py update-timeseries \
 | G13 | `G13_throughput_vs_range.{ext}` |
 | G14 | `G14_update_throughput_measured.{ext}` |
 | G15 | `G15_update_latency_measured.{ext}` |
+| G16 | `G16_proof_throughput.{ext}` |
+| G17 | `G17_proof_latency.{ext}` |
 
 ---
 

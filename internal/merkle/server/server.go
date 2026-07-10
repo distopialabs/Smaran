@@ -6,11 +6,15 @@ import (
 	"log"
 	"math/big"
 	"net"
+	"os"
+	"os/signal"
 	"strconv"
+	"syscall"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	proofpb "github.com/nepal80m/samurai/api/proto/merkle/v1"
+	"github.com/nepal80m/samurai/internal/benchutil"
 	"github.com/nepal80m/samurai/internal/merkle/meta"
 	"github.com/nepal80m/samurai/internal/merkle/proof"
 	st "github.com/nepal80m/samurai/internal/merkle/state"
@@ -23,16 +27,28 @@ import (
 // ProofServer implements the gRPC ProofServiceServer interface.
 type ProofServer struct {
 	proofpb.UnimplementedProofServiceServer
-	store *st.MPTStateStore
+	store    *st.MPTStateStore
+	benchLog *benchutil.BenchLogger
 }
 
 // NewProofServer creates a new ProofServer.
-func NewProofServer(store *st.MPTStateStore) *ProofServer {
-	return &ProofServer{store: store}
+func NewProofServer(store *st.MPTStateStore, benchLog *benchutil.BenchLogger) *ProofServer {
+	return &ProofServer{store: store, benchLog: benchLog}
 }
 
 // GetRangeProof streams account proofs for each block in the range.
 func (s *ProofServer) GetRangeProof(req *proofpb.GetRangeProofRequest, stream proofpb.ProofService_GetRangeProofServer) error {
+	var benchStartNs int64
+	if s.benchLog != nil {
+		benchStartNs = time.Now().UnixNano()
+		defer func() {
+			s.benchLog.Log(benchutil.BenchRecord{
+				StartNs:     benchStartNs,
+				CompletedNs: time.Now().UnixNano(),
+			})
+		}()
+	}
+
 	if req.Account == "" {
 		return status.Error(codes.InvalidArgument, "account address is required")
 	}
@@ -133,15 +149,34 @@ func (s *ProofServer) GetInfo(ctx context.Context, req *proofpb.GetInfoRequest) 
 	}, nil
 }
 
-// ListenAndServe starts the gRPC server.
-func ListenAndServe(addr string, server *ProofServer) error {
+// ListenAndServe starts the gRPC server with graceful shutdown on SIGINT/SIGTERM.
+func ListenAndServe(addr string, server *ProofServer, opts ...grpc.ServerOption) error {
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
 		return fmt.Errorf("failed to listen on %s: %w", addr, err)
 	}
 
-	grpcServer := grpc.NewServer()
+	grpcServer := grpc.NewServer(opts...)
 	proofpb.RegisterProofServiceServer(grpcServer, server)
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		sig := <-sigCh
+		log.Printf("received %v, shutting down gracefully...", sig)
+		done := make(chan struct{})
+		go func() {
+			grpcServer.GracefulStop()
+			close(done)
+		}()
+		select {
+		case <-done:
+			log.Println("graceful shutdown complete")
+		case <-time.After(5 * time.Second):
+			log.Println("graceful shutdown timed out, forcing exit")
+			os.Exit(1)
+		}
+	}()
 
 	log.Printf("gRPC server listening on %s", addr)
 	return grpcServer.Serve(lis)

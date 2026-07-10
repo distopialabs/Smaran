@@ -18,6 +18,7 @@ This produces six binaries in `bin/`:
 | `samurai` | Samurai (KZG + MPT) — ingest blocks, generate proofs, serve gRPC |
 | `merkle` | Baseline MPT — ingest, proof gen, gRPC server |
 | `verkle` | Baseline Verkle tree — ingest, proof gen, gRPC server |
+| `verklekzg` | Verkle-KZG tree (BLS12-381 + KZG commitments) — ingest, proof gen, gRPC server |
 | `proofc` | gRPC proof client for samurai |
 | `merkle-proofc` | gRPC proof client for merkle |
 | `verkle-proofc` | gRPC proof client for verkle |
@@ -61,17 +62,18 @@ samurai ingest --db-dir /data/local/tmp/samurai --blocks-dir data/blocks --n 100
 
 ```bash
 # Full pipeline (samurai + MPT)
-samurai bench-ingest --duration 5m --k-users 1000 --accounts-list account_stats_all.csv
+samurai bench-ingest --n 50000 --duration 15m --k-users 1000 --accounts-list account_stats_all.csv
 
 # Samurai-only (KZG commitments, no MPT bottleneck)
-samurai bench-ingest --skip-mpt --duration 5m --k-users 1000 --accounts-list account_stats_all.csv
+samurai bench-ingest --skip-mpt --n 50000 --duration 15m --k-users 1000 --accounts-list account_stats_all.csv
 ```
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--db-dir` | `/data/local/tmp/bench-samurai` | Root directory for databases (wiped on each run) |
 | `--blocks-dir` | `data/blocks` | Path to block dataset directory |
-| `--duration` | `5m` | How long to run the benchmark |
+| `--n` | `50000` | Number of blocks to ingest |
+| `--duration` | `15m` | Deadline/timeout for the benchmark |
 | `--k-users` | `0` | Top-K hot accounts (0 = all, no filtering) |
 | `--accounts-list` | `account_stats_all.csv` | CSV with accounts sorted by update count desc |
 | `--cpuprofile` | | Write CPU profile to file |
@@ -126,14 +128,15 @@ merkle ingest --db-dir /data/local/merkle --blocks-dir data/blocks --n 100000
 #### `merkle bench-ingest`
 
 ```bash
-merkle bench-ingest --db-dir /data/local/tmp/bench-merkle --duration 5m --k-users 1000 --fresh
+merkle bench-ingest --db-dir /data/local/tmp/bench-merkle --n 50000 --duration 15m --k-users 1000 --fresh
 ```
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--db-dir` | *(required)* | Path to state database directory |
 | `--blocks-dir` | `data/blocks` | Path to blocks data directory |
-| `--duration` | `5m` | How long to run the benchmark |
+| `--n` | `50000` | Number of blocks to ingest |
+| `--duration` | `15m` | Deadline/timeout for the benchmark |
 | `--k-users` | `0` | Top-K hot accounts (0 = all, no filtering) |
 | `--accounts-list` | `account_stats_all.csv` | CSV with accounts sorted by update count desc |
 | `--fresh` | `false` | Delete existing DB and start from scratch |
@@ -195,7 +198,7 @@ verkle ingest --db-dir /data/local/verkle --blocks-dir data/blocks --n 100000
 #### `verkle bench-ingest`
 
 ```bash
-verkle bench-ingest --db-dir /data/local/tmp/bench-verkle --duration 5m --k-users 1000
+verkle bench-ingest --db-dir /data/local/tmp/bench-verkle --n 50000 --duration 15m --k-users 1000
 ```
 
 | Flag | Default | Description |
@@ -204,7 +207,8 @@ verkle bench-ingest --db-dir /data/local/tmp/bench-verkle --duration 5m --k-user
 | `--blocks-dir` | `data/blocks` | Path to block dataset directory |
 | `--db-backend` | `pebble` | DB backend: pebble or leveldb |
 | `--flush-every` | `1000` | Reload tree every N blocks for memory management |
-| `--duration` | `5m` | Benchmark duration |
+| `--n` | `50000` | Number of blocks to ingest |
+| `--duration` | `15m` | Deadline/timeout for the benchmark |
 | `--k-users` | `0` | Top-K hot accounts (0 = all, no filtering) |
 | `--accounts-list` | `account_stats_all.csv` | CSV with accounts sorted by update count desc |
 | `--output-dir` | `/data/local/benchmark_output` | Root directory for benchmark output |
@@ -216,6 +220,62 @@ Output: `{output-dir}/verkle/ingestion_{kUsers}_{timestamp}.csv`
 ```bash
 verkle serve --db-dir /data/local/verkle --port 50053
 ```
+
+---
+
+### `verklekzg`
+
+Subcommand-based CLI for the Verkle-KZG tree system (BLS12-381 + KZG commitments).
+
+```
+verklekzg <command> [flags]
+```
+
+| Command | Description |
+|---------|-------------|
+| `ingest` | Ingest block data into a Verkle-KZG trie |
+| `bench-ingest` | Ingestion benchmark with block count and deadline |
+| `getproof` | Generate a Verkle-KZG proof for an account |
+| `verifyproof` | Verify a Verkle-KZG proof |
+| `serve` | Start the gRPC range proof server |
+
+#### `verklekzg ingest`
+
+```bash
+verklekzg ingest --db-dir /data/local/verklekzg --blocks-dir data/blocks --n 100000
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--db-dir` | `/data/local/tmp/verklekzg` | Path to persistent DB directory |
+| `--blocks-dir` | `data/blocks` | Path to dataset block segments |
+| `--n` | `1000` | Number of blocks to ingest |
+| `--db-backend` | `pebble` | DB backend: pebble or leveldb |
+| `--flush-every` | `1000` | Reload tree from DB every N blocks |
+| `--fresh` | `false` | Delete existing DB and start from scratch |
+| `--params-dir` | `data/params/verklekzg` | Directory for precomputed SRS/barycentric files |
+
+#### `verklekzg bench-ingest`
+
+```bash
+verklekzg bench-ingest --db-dir /data/local/tmp/bench-verklekzg --n 50000 --duration 15m --k-users 1000
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--db-dir` | `/data/local/tmp/bench-verklekzg` | Path to persistent DB directory |
+| `--blocks-dir` | `data/blocks` | Path to dataset block segments |
+| `--db-backend` | `pebble` | DB backend: pebble or leveldb |
+| `--flush-every` | `1000` | Reload tree every N blocks |
+| `--n` | `50000` | Number of blocks to ingest |
+| `--duration` | `15m` | Deadline/timeout for the benchmark |
+| `--k-users` | `0` | Top-K hot accounts (0 = all) |
+| `--accounts-list` | `account_stats_all.csv` | CSV with hot accounts sorted by update count desc |
+| `--fresh` | `true` | Delete existing DB and start from scratch |
+| `--output-dir` | `/data/local/benchmark_output` | Root directory for benchmark output |
+| `--params-dir` | `data/params/verklekzg` | Directory for precomputed SRS/barycentric files |
+
+Output: `{output-dir}/verklekzg/ingestion_{kUsers}_{timestamp}.csv`
 
 ---
 
@@ -262,13 +322,14 @@ All benchmark output is written under `{output-dir}/<protocol>/` (default `outpu
 | `samuraimpt` | `{output-dir}/samuraimpt/` | Samurai + MPT (default) |
 | `merkle` | `{output-dir}/merkle/` | Baseline MPT |
 | `verkle` | `{output-dir}/verkle/` | Baseline Verkle tree |
+| `verklekzg` | `{output-dir}/verklekzg/` | Verkle-KZG tree |
 
 | Type | File pattern | Example |
 |------|-------------|---------|
 | Ingestion | `ingestion_{kUsers}_{timestamp}.csv` | `samuraimpt/ingestion_1000_20260321_143022.csv` |
 | Ingestion (samurai-only) | `ingestion_{kUsers}_{timestamp}.csv` | `samurai/ingestion_1000_20260321_143022.csv` |
 | Update metrics | `update_metrics_{kUsers}_{timestamp}.csv` | `samurai/update_metrics_1000_20260321_143022.csv` |
-| Proof | `proof_range{rangeSize}_{timestamp}.txt` | `merkle/proof_range50000_20260321_150000.txt` |
+| Proof | `proof_range{rangeSize}_{timestamp}.csv` | `merkle/proof_range50000_20260321_150000.csv` |
 
 ### Ingestion CSV columns
 
@@ -354,9 +415,9 @@ go run ./cmd/tools/debug_version --datadir /data/local/samurai/db/ --account 0x.
 | `make build-verkle` | Build `verkle`, `verkle-proofc` |
 | `make clean` | Remove build artifacts |
 | `make bench-ingest` | Run ingestion benchmarks for all three protocols |
-| `make bench-ingest-samurai` | Run samurai ingestion benchmark (5m) |
-| `make bench-ingest-merkle` | Run merkle ingestion benchmark (5m) |
-| `make bench-ingest-verkle` | Run verkle ingestion benchmark (5m) |
+| `make bench-ingest-samurai` | Run samurai ingestion benchmark |
+| `make bench-ingest-merkle` | Run merkle ingestion benchmark |
+| `make bench-ingest-verkle` | Run verkle ingestion benchmark |
 | `make bench-proof` | Run proof benchmarks for all three protocols |
 | `make bench-proof-samurai` | Run samurai proof benchmark (configurable via `RANGE_SIZE`, `NUM_CLIENTS`, `BENCH_DURATION`) |
 | `make bench-proof-merkle` | Run merkle proof benchmark |

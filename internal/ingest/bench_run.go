@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/nepal80m/samurai/internal/benchutil"
-	"github.com/nepal80m/samurai/internal/dataset"
 	"golang.design/x/chann"
 )
 
@@ -50,8 +49,7 @@ func BenchRun(cfg Config, benchCfg BenchConfig, csvPath string) error {
 	}
 	defer csvWriter.Close()
 
-	// --- configure deadline and block range ---
-	cfg.Blocks.End = dataset.LAST_BLOCK
+	// --- configure deadline ---
 	deadline := time.Now().Add(benchCfg.Duration)
 
 	// --- setup update-level metrics collector ---
@@ -98,8 +96,8 @@ func BenchRun(cfg Config, benchCfg BenchConfig, csvPath string) error {
 	}()
 
 	benchStart := time.Now()
-	log.Printf("[bench] starting benchmark: duration=%s startBlock=%d kUsers=%d output=%s",
-		benchCfg.Duration, cfg.Blocks.Start, benchCfg.KUsers, csvPath)
+	log.Printf("[bench] starting benchmark: duration=%s startBlock=%d endBlock=%d kUsers=%d output=%s",
+		benchCfg.Duration, cfg.Blocks.Start, cfg.Blocks.End, benchCfg.KUsers, csvPath)
 
 	// --- run producer ---
 	prodErr := produceBlocks(cfg, blockInfoCh, queues)
@@ -118,10 +116,6 @@ func BenchRun(cfg Config, benchCfg BenchConfig, csvPath string) error {
 	// --- interpret producer result ---
 	if prodErr != nil && !errors.Is(prodErr, errBenchDeadline) {
 		return fmt.Errorf("producer error: %w", prodErr)
-	}
-
-	if prodErr == nil && time.Now().Before(deadline) {
-		return fmt.Errorf("ran out of blocks (reached block %d) before benchmark duration elapsed", dataset.LAST_BLOCK)
 	}
 
 	wallSec := time.Since(benchStart).Seconds()
@@ -154,8 +148,7 @@ func BenchRunSamuraiOnly(cfg Config, benchCfg BenchConfig, csvPath string) error
 	}
 	defer csvWriter.Close()
 
-	// --- configure deadline and block range ---
-	cfg.Blocks.End = dataset.LAST_BLOCK
+	// --- configure deadline ---
 	deadline := time.Now().Add(benchCfg.Duration)
 
 	// --- setup update-level metrics collector ---
@@ -202,8 +195,8 @@ func BenchRunSamuraiOnly(cfg Config, benchCfg BenchConfig, csvPath string) error
 	}()
 
 	benchStart := time.Now()
-	log.Printf("[bench] starting samurai-only benchmark: duration=%s startBlock=%d kUsers=%d output=%s",
-		benchCfg.Duration, cfg.Blocks.Start, benchCfg.KUsers, csvPath)
+	log.Printf("[bench] starting samurai-only benchmark: duration=%s startBlock=%d endBlock=%d kUsers=%d output=%s",
+		benchCfg.Duration, cfg.Blocks.Start, cfg.Blocks.End, benchCfg.KUsers, csvPath)
 
 	// --- run producer ---
 	prodErr := produceBlocks(cfg, blockInfoCh, queues)
@@ -222,10 +215,6 @@ func BenchRunSamuraiOnly(cfg Config, benchCfg BenchConfig, csvPath string) error
 	// --- interpret producer result ---
 	if prodErr != nil && !errors.Is(prodErr, errBenchDeadline) {
 		return fmt.Errorf("producer error: %w", prodErr)
-	}
-
-	if prodErr == nil && time.Now().Before(deadline) {
-		return fmt.Errorf("ran out of blocks (reached block %d) before benchmark duration elapsed", dataset.LAST_BLOCK)
 	}
 
 	wallSec := time.Since(benchStart).Seconds()

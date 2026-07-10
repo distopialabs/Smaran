@@ -33,7 +33,8 @@ func ServeCmd() *cli.Command {
 			if err != nil {
 				return err
 			}
-			samuraiStores, err := SetupSamuraiStores(dbDir)
+			numShards := NUM_SHARDS
+			samuraiStores, err := SetupSamuraiStores(dbDir, numShards)
 			if err != nil {
 				return err
 			}

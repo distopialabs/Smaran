@@ -21,7 +21,8 @@ func benchIngestCmd() *cli.Command {
 			&cli.StringFlag{Name: "blocks-dir", Value: "data/blocks", Usage: "Path to dataset block segments"},
 			&cli.StringFlag{Name: "db-backend", Value: "pebble", Usage: "DB backend: pebble or leveldb"},
 			&cli.IntFlag{Name: "flush-every", Value: 1000, Usage: "Reload tree every N blocks"},
-			&cli.DurationFlag{Name: "duration", Value: 5 * time.Minute, Usage: "Benchmark duration (e.g. 5m, 10m, 1h)"},
+			&cli.Uint64Flag{Name: "n", Value: 50000, Usage: "Number of blocks to ingest"},
+			&cli.DurationFlag{Name: "duration", Value: 15 * time.Minute, Usage: "Deadline/timeout for the benchmark"},
 			&cli.IntFlag{Name: "k-users", Value: 0, Usage: "Top-K hot accounts (0 = all)"},
 			&cli.StringFlag{Name: "accounts-list", Value: "account_stats_all.csv", Usage: "CSV with hot accounts sorted by update count descending"},
 			&cli.BoolFlag{Name: "fresh", Value: true, Usage: "Delete existing DB and start from scratch"},
@@ -55,7 +56,7 @@ func benchIngestCmd() *cli.Command {
 			}
 
 			startBlock := dataset.FIRST_BLOCK
-			endBlock := startBlock + 10_000_000
+			endBlock := startBlock + c.Uint64("n") - 1
 
 			return ingest.RunBench(ingest.BenchConfig{
 				BlocksDir:         blocksDir,

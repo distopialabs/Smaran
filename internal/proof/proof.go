@@ -3,7 +3,6 @@ package proof
 import (
 	"errors"
 	"fmt"
-	"log"
 	"math"
 	"sync"
 	"time"
@@ -18,6 +17,7 @@ import (
 	"github.com/nepal80m/samurai/internal/crypto/polynomial"
 	"github.com/nepal80m/samurai/internal/db"
 	"github.com/nepal80m/samurai/internal/tree"
+	"github.com/nepal80m/samurai/internal/utils"
 
 	bls "github.com/consensys/gnark-crypto/ecc/bls12-381"
 )
@@ -127,6 +127,23 @@ func BlockRangeToVersionRange(account common.Address, startingBlock uint64, endi
 	return startingVersion, endingVersion, nil
 }
 
+// GetLatestTopLayerCommitmentAsRangeProof returns the latest top-layer commitment
+// formatted as a single-element RangeProof slice. Used when the current balance
+// covers the entire query range (cbInfo.StartBlock <= queryStartBlock), so no
+// KZG range proof is needed — only the commitment for MPT hash verification.
+func GetLatestTopLayerCommitmentAsRangeProof(account common.Address, cbInfo *tree.CurrentBalance, sdb *db.SamuraiStore) []*RangeProof {
+	batchIdx := (cbInfo.Version - 1) / (tree.L1BatchSize * utils.PowUint64(tree.L2BatchSize, tree.MaxLayer-1))
+	commitment := tree.GetBatchCommitment(account, tree.MaxLayer, batchIdx, sdb.StateDB)
+	return []*RangeProof{{
+		Idx:                  int(batchIdx),
+		Layer:                tree.MaxLayer,
+		Commitment:           commitment,
+		Proof:                bls.G1Affine{},
+		BlockRange:           nil,
+		DependentCommitments: nil,
+	}}
+}
+
 // GetNewProofRange generates range proofs for a given account and version range.
 func GetNewProofRange(account common.Address, startingVersion, endingVersion uint64, precomputedData *config.PrecomputedData, db *db.SamuraiStore) ([]*RangeProof, []*tree.HistoricalBalance) {
 	reqCommits := findCommitmentsCoveringRange(int(startingVersion), int(endingVersion))
@@ -140,9 +157,9 @@ func GetNewProofRange(account common.Address, startingVersion, endingVersion uin
 		lxRequiredBatchIdxs[uint64(reqCommit.layer)] = append(lxRequiredBatchIdxs[uint64(reqCommit.layer)], uint64(reqCommit.idx))
 		// fmt.Printf("layer: %d, idx: %d\n", reqCommit.layer, reqCommit.idx)
 	}
-	start := time.Now()
+	// start := time.Now()
 	requiredTreeBatchesMap, requiredHBInfos, cachedCommitments := RebuildSegmentTreeForProof(account, lxRequiredBatchIdxs, startingVersion, endingVersion, db, precomputedData)
-	log.Printf("Time taken to rebuild segment tree: %dms", time.Since(start).Milliseconds())
+	// log.Printf("Time taken to rebuild segment tree: %dms", time.Since(start).Milliseconds())
 
 	allRangeProofs := make([]*RangeProof, len(reqCommits))
 	var wg sync.WaitGroup
@@ -185,6 +202,10 @@ func GetNewProofRange(account common.Address, startingVersion, endingVersion uin
 			domain.FFTInverse(ys1, fft.DIF)
 			fft.BitReverse(ys1)
 			P := polynomial.Polynomial(ys1)
+
+			witnessCostStart := time.Now()
+			witnessCost := time.Since(witnessCostStart)
+			fmt.Printf("Witness cost: %dms\n", witnessCost.Milliseconds())
 
 			// Use cached commitment from tree rebuild instead of re-fetching from DB
 			commitKey := fmt.Sprintf("%d:%d", layer, idx)
