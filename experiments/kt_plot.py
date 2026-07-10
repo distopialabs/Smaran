@@ -15,7 +15,7 @@ try:
     matplotlib.use("Agg")
 
     import matplotlib.pyplot as plt
-    from matplotlib.ticker import LogLocator, NullFormatter
+    from matplotlib.ticker import FixedLocator, FuncFormatter, LogLocator, NullFormatter, NullLocator
     import seaborn as sns
 except ImportError as exc:  # pragma: no cover
     raise SystemExit(
@@ -439,28 +439,44 @@ def configure_plot_style() -> None:
     )
 
 
-def apply_y_scale(ax: plt.Axes, scale: str) -> None:
-    if scale == "symlog":
-        ax.set_yscale("symlog", linthresh=1.0, linscale=1.0, base=10)
-        ax.set_ylim(bottom=0)
-        ax.grid(True, which="major", axis="y", linestyle="--", linewidth=1.2, alpha=0.45)
-        ax.grid(True, which="minor", axis="y", linestyle="--", linewidth=0.8, alpha=0.20)
-    elif scale == "log":
-        ax.set_yscale("log")
+
+def _latency_ms_formatter(v, pos):
+    if v <= 0: return '0'
+    if v == 5000: return '5s'
+    if v >= 1000: return f'{int(v/1000)}s'
+    return f'{int(v)}ms'
+
+def _throughput_formatter(v, pos):
+    if v <= 0: return '0'
+    if v >= 1_000_000: return f'{v/1_000_000:g}M'
+    if v >= 1_000:     return f'{v/1_000:g}k'
+    return f'{v:g}'
+
+def _plain_formatter(v, pos):
+    if v <= 0: return '0'
+    return f'{int(v):d}' if v == int(v) else f'{v:g}'
+
+def apply_y_scale(ax: plt.Axes, scale: str, y_formatter=None, y_ticks=None) -> None:
+    ax.set_yscale("log")
+    if y_ticks is not None:
+        ax.set_yticks(y_ticks)
+        if y_formatter is not None:
+            ax.set_yticklabels([y_formatter(v, None) for v in y_ticks])
+        ax.yaxis.set_minor_locator(NullLocator())
+    else:
         ax.yaxis.set_major_locator(LogLocator(base=10.0))
         ax.yaxis.set_minor_locator(LogLocator(base=10.0, subs=tuple(range(2, 10))))
         ax.yaxis.set_minor_formatter(NullFormatter())
-        ax.grid(True, which="major", axis="y", linestyle="--", linewidth=1.2, alpha=0.45)
-        ax.grid(True, which="minor", axis="y", linestyle="--", linewidth=0.8, alpha=0.20)
-    else:
-        ax.grid(True, which="major", axis="y", linestyle="--", linewidth=1.2, alpha=0.45)
+        if y_formatter is not None:
+            ax.yaxis.set_major_formatter(FuncFormatter(y_formatter))
+    ax.grid(True, which="major", axis="y", linestyle="--", linewidth=1.0, alpha=0.35)
 
 
-def style_axis(ax: plt.Axes, x_values: Sequence[int], *, y_scale: str) -> None:
+def style_axis(ax: plt.Axes, x_values: Sequence[int], *, y_scale: str, y_formatter=None, y_ticks=None) -> None:
     x_positions = list(range(len(x_values)))
     ax.set_xticks(x_positions)
-    ax.set_xticklabels([str(v) for v in x_values], rotation=25, ha="right")
-    apply_y_scale(ax, y_scale)
+    ax.set_xticklabels([str(v) for v in x_values], rotation=45, ha="right")
+    apply_y_scale(ax, y_scale, y_formatter=y_formatter, y_ticks=y_ticks)
     ax.grid(True, which="major", axis="x", linestyle="--", linewidth=1.0, alpha=0.35)
 
 
@@ -471,6 +487,9 @@ def create_single_plot(
     ylabel: str,
     value_attr: str,
     y_scale: str,
+    y_formatter=None,
+    y_lim=None,
+    y_ticks=None,
 ) -> None:
     configure_plot_style()
 
@@ -480,7 +499,7 @@ def create_single_plot(
 
     all_versions = sorted({point.num_versions for point in points})
     version_to_index = {version: index for index, version in enumerate(all_versions)}
-    fig, ax = plt.subplots(figsize=(14, 7))
+    fig, ax = plt.subplots(figsize=(22, 7))
 
     for protocol, protocol_points in grouped.items():
         if not protocol_points:
@@ -505,7 +524,9 @@ def create_single_plot(
 
     ax.set_ylabel(ylabel)
     ax.set_xlabel("Number of versions")
-    style_axis(ax, all_versions, y_scale=y_scale)
+    style_axis(ax, all_versions, y_scale=y_scale, y_formatter=y_formatter, y_ticks=y_ticks)
+    if y_lim is not None:
+        ax.set_ylim(*y_lim)
 
     handles, labels = ax.get_legend_handles_labels()
     fig.legend(
@@ -514,16 +535,16 @@ def create_single_plot(
         loc="upper center",
         ncol=len(labels),
         frameon=True,
-        bbox_to_anchor=(0.5, 1.05),
+        bbox_to_anchor=(0.5, 1.0),
         columnspacing=1.2,
         handletextpad=0.5,
         borderpad=0.3,
     )
 
     sns.despine(fig=fig)
-    fig.subplots_adjust(top=0.84, left=0.14, right=0.99, bottom=0.32)
+    fig.subplots_adjust(top=0.86, left=0.14, right=0.99, bottom=0.32)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(output_path, format="pdf", bbox_inches="tight")
+    fig.savefig(output_path, format="pdf")
     plt.close(fig)
 
 
@@ -594,16 +615,16 @@ def create_latency_breakdown_plot(
         loc="upper center",
         ncol=3,
         frameon=True,
-        bbox_to_anchor=(0.5, 1.10),
+        bbox_to_anchor=(0.5, 1.0),
         columnspacing=1.4,
         handletextpad=0.6,
         borderpad=0.35,
     )
 
     sns.despine(fig=fig)
-    fig.subplots_adjust(top=0.80, left=0.14, right=0.99, bottom=0.24)
+    fig.subplots_adjust(top=0.86, left=0.14, right=0.99, bottom=0.24)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(output_path, format="pdf", bbox_inches="tight")
+    fig.savefig(output_path, format="pdf")
     plt.close(fig)
 
 
@@ -620,7 +641,7 @@ def create_payload_plot(
     all_versions = sorted({point.num_versions for point in points})
     version_to_index = {version: index for index, version in enumerate(all_versions)}
 
-    fig, ax = plt.subplots(figsize=(14, 7))
+    fig, ax = plt.subplots(figsize=(22, 7))
 
     for protocol, protocol_points in grouped.items():
         if not protocol_points:
@@ -643,9 +664,10 @@ def create_payload_plot(
             label=style["label"],
         )
 
-    ax.set_ylabel("Payload (KiB)")
+    ax.set_ylabel("Avg Payload (KiB)")
     ax.set_xlabel("Number of versions")
-    style_axis(ax, all_versions, y_scale="log")
+    style_axis(ax, all_versions, y_scale="log", y_formatter=_plain_formatter, y_ticks=[1, 10, 100, 1000, 10000])
+    ax.set_ylim(0.5, 15000)
 
     handles, labels = ax.get_legend_handles_labels()
     fig.legend(
@@ -654,16 +676,16 @@ def create_payload_plot(
         loc="upper center",
         ncol=len(labels),
         frameon=True,
-        bbox_to_anchor=(0.5, 1.05),
+        bbox_to_anchor=(0.5, 1.0),
         columnspacing=1.2,
         handletextpad=0.5,
         borderpad=0.3,
     )
 
     sns.despine(fig=fig)
-    fig.subplots_adjust(top=0.78, left=0.17, right=0.99, bottom=0.30)
+    fig.subplots_adjust(top=0.86, left=0.17, right=0.99, bottom=0.30)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(output_path, format="pdf", bbox_inches="tight")
+    fig.savefig(output_path, format="pdf")
     plt.close(fig)
 
 
@@ -677,16 +699,22 @@ def create_plots(points: Sequence[BenchmarkPoint], output_dir: Path) -> Tuple[Pa
     create_single_plot(
         points,
         throughput_path,
-        ylabel="Throughput",
+        ylabel="Throughput (ops/s)",
         value_attr="throughput_qps",
-        y_scale="symlog",
+        y_scale="log",
+        y_formatter=_throughput_formatter,
+        y_lim=(0.5, 20000),
+        y_ticks=[1, 10, 100, 1000, 10000],
     )
     create_single_plot(
         points,
         latency_path,
-        ylabel="Latency (ms)",
+        ylabel="Avg Latency",
         value_attr="avg_latency_ms",
-        y_scale="symlog",
+        y_scale="log",
+        y_formatter=_latency_ms_formatter,
+        y_lim=(0.5, 8000),
+        y_ticks=[1, 10, 100, 1000, 5000],
     )
     create_latency_breakdown_plot(points, latency_breakdown_path)
     create_payload_plot(points, payload_path)
