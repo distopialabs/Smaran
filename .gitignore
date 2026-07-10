@@ -18,3 +18,7 @@ tmp-db-dir/
 cpu.prof
 bin/
 tmp-*
+
+proofc
+asim-dev-notes
+test-output-plots

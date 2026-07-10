@@ -19,13 +19,13 @@ OUTPUT_DIR=${OUTPUT_DIR:-/data/local/proof_benchmark_output}
 NUM_CLIENTS=${NUM_CLIENTS:-32}
 COOLDOWN=${COOLDOWN:-10}
 # ass numclient postfix to output dir
-OUTPUT_DIR=${OUTPUT_DIR}/numclients${NUM_CLIENTS}
+OUTPUT_DIR=${OUTPUT_DIR}/numclients${NUM_CLIENTS}/non_optimus
 
 PARAMS_DIR=${PARAMS_DIR:-./data/params}
 STATE_ROOT=${STATE_ROOT:-0x23d8d542bf8049c57540df2b673db6287aa9a0191a85eaf1049d1c89c9d965a2}
 
 # Set USE_OLD=1 to pass proofc --old (slow path).
-USE_OLD=${USE_OLD:-0}
+USE_OLD=${USE_OLD:-1}
 
 # One duration per range size (must be the same length).
 RANGE_SIZES=(${RANGE_SIZES:-1 100 500 1000 5000 7000 50000 200000 600000 1200000 2600000})
