@@ -283,7 +283,7 @@ def create_throughput_plot(
         2, 1, sharex=True, figsize=(30, 12),
         gridspec_kw={"height_ratios": [1, 1]},
     )
-    fig.subplots_adjust(hspace=0.2)
+    fig.subplots_adjust(hspace=0.2, left=0.16, right=0.98)
 
     for ax in (ax_top, ax_bot):
         for protocol, protocol_points in grouped.items():
@@ -303,8 +303,10 @@ def create_throughput_plot(
                 label=style["label"],
             )
 
-    ax_top.set_ylim(20_000, 150_000)
-    ax_bot.set_ylim(0, 500)
+    ax_top.set_ylim(30_000, 130_000)
+    ax_top.set_yticks([30_000, 60_000, 90_000, 120_000])
+    ax_bot.set_ylim(0, 700)
+    ax_bot.set_yticks([0, 200, 400, 600])
 
     ax_top.spines["bottom"].set_visible(False)
     ax_bot.spines["top"].set_visible(False)
@@ -326,7 +328,7 @@ def create_throughput_plot(
         ax.spines["left"].set_linewidth(5)
         ax.spines["bottom"].set_linewidth(5)
 
-    fig.supylabel("Throughput (ops/s)", x=0.025)
+    fig.supylabel("Throughput (ops/s)", x=0.02)
     ax_bot.set_xlabel("Number of Users")
 
     handles, labels = ax_top.get_legend_handles_labels()
