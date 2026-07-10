@@ -12,14 +12,14 @@ key_path = "/Users/shubham_mishra/.ssh/id_ed25519"
 
 [experiment]
 repo_url = "https://github.com/distopialabs/Samurai"
-remote_base_dir = "/data/shubham_mishra" # Change this key
-remote_repo_dir = "/data/shubham_mishra/Samurai" # Change this key
-remote_bin_dir = "/data/shubham_mishra/Samurai/bin" # Change this key
+remote_base_dir = "/home/eecs/shubham_mishra/experiment" # Change this key
+remote_repo_dir = "/home/eecs/shubham_mishra/experiment/Samurai" # Change this key
+remote_bin_dir = "/home/eecs/shubham_mishra/experiment/Samurai/bin" # Change this key
 remote_tmp_dir = "/tmp/"
 server_node = "node1"
 server_addr = "0.0.0.0:3191"
 server_port = 3191
-server_log_path = "/data/shubham_mishra/server.log" # Change this key
+server_log_path = "/home/eecs/shubham_mishra/experiment/server.log" # Change this key
 repo_branch = "main"
 build_command = "make"
 server_binary = "/tmp/bin/ktserver"
@@ -37,6 +37,6 @@ local_logs_dir = "logs"
 server_startup_wait_seconds = 2.0
 
 [sweeping_parameters]
-bench_protocol = ["samurai", "optiks", "coniks"]
-# bench_protocol = ["coniks"]
+# bench_protocol = ["samurai", "optiks", "coniks"]
+bench_protocol = ["coniks"]
 bench_num_versions = [1, 16, 32, 64, 128, 256, 512, 700, 1024, 1500, 2047]
