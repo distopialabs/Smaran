@@ -22,3 +22,8 @@ tmp-*
 proofc
 asim-dev-notes
 test-output-plots
+
+# local assistant/tooling state
+.agents/
+.claude/
+CONTEXT.md
