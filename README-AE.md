@@ -96,10 +96,18 @@ Compare each PDF to the paper's Figures 4a/4b/4c and 5. Absolute numbers depend 
 
 | Figure | Trend to look for |
 |---|---|
-| **4a — Latency vs versions** | Coniks flat line ~15 ms. Optiks rises linearly, crossing above Smaran around 128 versions. Smaran near-flat ~25–40 ms. |
-| **4b — Throughput vs versions** | Coniks flat ~600 qps. Optiks drops steeply. Smaran gentle decline. |
-| **4c — Payload vs versions** | Optiks payload grows steeply; Smaran grows much slower. Coniks may be zero (its bench binary does not emit payload). |
-| **5 — Put throughput vs users** | Optiks highest, Smaran middle, Coniks lowest — all roughly flat with user count. Broken y-axis expected. |
+| **4a — Latency vs versions** | All three protocols rise with versions. Coniks steepest (reaches ~5s at 2047). Optiks rises linearly through mid range. Smaran near-flat ~25–40 ms up to 512 versions, then climbs to ~200 ms at 2047. |
+| **4b — Throughput vs versions** | All three drop with versions. Optiks highest at low versions (~10k qps at 2), crosses below Smaran around 128–256 versions, then declines. Smaran near-flat until 512, then declines. Coniks lowest at every point. |
+| **4c — Payload vs versions** | Optiks and Coniks payloads grow steeply and track closely (100s → 1000s KiB). Smaran grows much more slowly (single KiB → ~100 KiB). |
+| **5 — Put throughput vs users** | Broken y-axis: upper panel shows Optiks and Smaran in the tens-of-thousands of ops/s range with mild decline as users grow; lower panel shows Coniks flat at ~640 ops/s across the sweep. |
+
+### Data notes
+
+Absolute numbers differ from paper because hardware and measurement conditions differ:
+
+- **Single run per point.** The paper averages **three runs**; the AE quick sweep runs each point once to fit in ~90 min. Consequence: individual points may show noise (see Fig 4a at 700/1500 versions, Fig 5 Optiks between 50k and 1M). The overall trend is unaffected.
+- **Coniks fork.** The submodule is  (fork of official CONIKS with a Merkle-tree extension for versioned queries). Its per-request cost characteristics differ from the paper's official CONIKS in Fig 5, which is why our Fig 5 Coniks line is flat while the paper's declines. Fig 4 (monitoring queries) matches paper shape.
+- **Coniks bench patch.**  fixes a race condition in the fork's bench (opens the monitor TCP connection *after* the load phase completes, so it isn't idle-killed). Applied automatically by .
 
 If shapes match, the artifact reproduces the paper's key claims.
 
