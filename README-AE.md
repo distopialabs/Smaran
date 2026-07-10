@@ -1,4 +1,4 @@
-# Smaran — Artifact Evaluation
+# Smaran — Artifact Evaluation for KT
 
 Reproduces Figures **4a, 4b, 4c, and 5** from §7.1 of the Smaran paper.
 
@@ -95,7 +95,7 @@ If at Step 1 you unchecked the pre-built image (plain Ubuntu 22.04 boot), run th
 - **Coniks fork.** The submodule is `coniks-history-extension` (fork of official CONIKS). Its per-request cost is user-count-independent, which is why our Fig 5 Coniks line is flat while the paper's declines. Fig 4 shape matches the paper.
 
 ## Troubleshooting
-
+`
 | Issue | Fix |
 |---|---|
 | `Permission denied (publickey)` between nodes | Re-run the SSH block in Step 2. |
