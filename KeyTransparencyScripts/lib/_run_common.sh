@@ -17,6 +17,11 @@ if [ -f "$NODES_ENV" ]; then
 fi
 
 # Ensure python deps present for kt.py + plotters.
+# Auto-reset stale state from any prior run (idempotent, safe if nothing running)
+sudo pkill -9 coniksserver ktserver ktbench coniksbench 2>/dev/null || true
+sudo rm -f /tmp/coniks.sock 2>/dev/null || true
+ssh -o StrictHostKeyChecking=no -o LogLevel=ERROR node1   'sudo pkill -9 -f "coniks\|ktserver\|ktbench" 2>/dev/null; sudo rm -f /tmp/coniks.sock'   2>/dev/null || true
+
 python3 -c "import tomli, matplotlib, seaborn, pandas" 2>/dev/null || {
   echo "  installing python dependencies (one-time)"
   python3 -m pip install --quiet --user -r "$REPO_ROOT/experiments/requirements.txt"

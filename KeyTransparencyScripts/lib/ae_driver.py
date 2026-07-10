@@ -93,7 +93,12 @@ def run_sweep(config_path: Path, is_put: bool) -> Path:
     sweep_root = kt_module.create_experiment_dir(settings.local_logs_dir)
     print(f"Sweep results directory: {sweep_root}", flush=True)
 
-    for combo in order_combos(sweep_parameters):
+    import time as _time
+    combos = list(order_combos(sweep_parameters))
+    total = len(combos)
+    sweep_start = _time.time()
+
+    for i, combo in enumerate(combos, start=1):
         run_settings = kt_module.build_sweep_settings(settings, combo)
         run_settings = kt_module.apply_num_versions_divider(run_settings)
         combo_for_path = dict(combo)
@@ -105,7 +110,16 @@ def run_sweep(config_path: Path, is_put: bool) -> Path:
             x = int(combo["bench_num_users"])
         else:
             x = int(combo["bench_num_versions"])
-        print(running_line(protocol, x, is_put), flush=True)
+
+        eta = ""
+        if i > 1:
+            elapsed = _time.time() - sweep_start
+            avg_sec = elapsed / (i - 1)
+            remaining_sec = int(avg_sec * (total - i + 1))
+            eta = f" [{i}/{total}, ~{remaining_sec // 60} min remaining]"
+        else:
+            eta = f" [{i}/{total}]"
+        print(running_line(protocol, x, is_put) + eta, flush=True)
 
         run_dir = sweep_root / kt_module.format_sweep_dir_name(combo_for_path)
         kt_module.run_experiment_with_settings(
