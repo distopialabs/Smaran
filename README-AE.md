@@ -92,7 +92,6 @@ If at Step 1 you unchecked the pre-built image (plain Ubuntu 22.04 boot), run th
 ## Data notes
 
 - **Single run per point.** The paper averages 3 runs; the AE runs each point once to fit in ~3 h. Individual points may look noisy (Fig 4a Smaran at 700/1500 versions; Fig 5 Optiks between 50k–1M). Overall trends are unaffected.
-- **Coniks fork.** The submodule is `coniks-history-extension` (fork of official CONIKS). Its per-request cost is user-count-independent, which is why our Fig 5 Coniks line is flat while the paper's declines. Fig 4 shape matches the paper.
 
 ## Troubleshooting
 `
