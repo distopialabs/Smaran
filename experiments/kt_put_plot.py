@@ -230,7 +230,7 @@ def load_points_from_summary_csv(summary_csv: Path) -> List[BenchmarkPoint]:
 
 def configure_plot_style() -> None:
     plt.rcParams.update({
-        "text.usetex":         True,
+        "text.usetex":         False,
         "text.latex.preamble": r"\usepackage{amsmath}\usepackage{times}",
         "font.family":         "serif",
         "font.size":           70,
