@@ -303,7 +303,7 @@ def create_throughput_plot(
                 label=style["label"],
             )
 
-    ax_top.set_ylim(30_000, 130_000)
+    ax_top.set_ylim(30_000, 220_000)
     ax_top.set_yticks([30_000, 60_000, 90_000, 120_000])
     ax_bot.set_ylim(0, 700)
     ax_bot.set_yticks([0, 200, 400, 600])
