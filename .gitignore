@@ -1,6 +1,7 @@
 __pycache__
 .vscode/
-data/
+data/*
+!data/params/
 profiles/
 logs/
 temp/
@@ -11,7 +12,6 @@ venv/
 *.png
 benchmark_output/
 venv
-data/
 samurai-data
 tmp-bench-db-dir/
 tmp-db-dir/
@@ -22,6 +22,9 @@ tmp-*
 proofc
 asim-dev-notes
 test-output-plots
+
+# artifact-evaluation runs write here (never committed)
+results/
 
 # local assistant/tooling state
 .agents/

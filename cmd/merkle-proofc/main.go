@@ -210,6 +210,7 @@ func benchCmd() *cli.Command {
 
 					clientConn, err := grpc.NewClient(cfg.ServerAddr,
 						grpc.WithTransportCredentials(insecure.NewCredentials()),
+						grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(100*1024*1024)),
 					)
 					if err != nil {
 						log.Printf("client %d: dial failed: %v", clientID, err)
@@ -240,6 +241,9 @@ func benchCmd() *cli.Command {
 								stats.TotalClientErrors++
 							} else {
 								stats.TotalServerErrors++
+								if stats.TotalServerErrors <= 3 {
+									log.Printf("client %d: server error: %v", clientID, reqErr)
+								}
 							}
 							continue
 						}

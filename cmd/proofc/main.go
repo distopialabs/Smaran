@@ -269,6 +269,9 @@ func benchCmd() *cli.Command {
 								stats.TotalClientErrors++
 							} else {
 								stats.TotalServerErrors++
+								if stats.TotalServerErrors <= 3 {
+									log.Printf("client %d: server error: %v", clientID, reqErr)
+								}
 							}
 							continue
 						}
