@@ -230,7 +230,7 @@ def load_points_from_summary_csv(summary_csv: Path) -> List[BenchmarkPoint]:
 
 def configure_plot_style() -> None:
     plt.rcParams.update({
-        "text.usetex":         True,
+        "text.usetex":         False,
         "text.latex.preamble": r"\usepackage{amsmath}\usepackage{times}",
         "font.family":         "serif",
         "font.size":           70,
@@ -283,7 +283,7 @@ def create_throughput_plot(
         2, 1, sharex=True, figsize=(30, 12),
         gridspec_kw={"height_ratios": [1, 1]},
     )
-    fig.subplots_adjust(hspace=0.2)
+    fig.subplots_adjust(hspace=0.2, left=0.16, right=0.98)
 
     for ax in (ax_top, ax_bot):
         for protocol, protocol_points in grouped.items():
@@ -303,10 +303,9 @@ def create_throughput_plot(
                 label=style["label"],
             )
 
-    ax_top.set_ylim(30_000, 120_000)
-    ax_bot.set_ylim(0, 700)
-
+    ax_top.set_ylim(30_000, 220_000)
     ax_top.set_yticks([30_000, 60_000, 90_000, 120_000])
+    ax_bot.set_ylim(0, 700)
     ax_bot.set_yticks([0, 200, 400, 600])
 
     ax_top.spines["bottom"].set_visible(False)
@@ -330,14 +329,14 @@ def create_throughput_plot(
         ax.spines["bottom"].set_linewidth(5)
 
     fig.supylabel("Throughput (ops/s)", x=0.02)
-    ax_bot.set_xlabel("Number of Users", labelpad=20)
+    ax_bot.set_xlabel("Number of Users")
 
     handles, labels = ax_top.get_legend_handles_labels()
     fig.legend(
         handles,
         labels,
         loc="upper center",
-        bbox_to_anchor=(0.5, 1.015),
+        bbox_to_anchor=(0.5, 1.04),
         ncol=max(1, len(labels)),
         frameon=True,
         edgecolor="black",

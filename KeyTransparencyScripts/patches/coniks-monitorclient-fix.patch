@@ -1,0 +1,48 @@
+From abb7344746f02bb5e0c4b75115c21f244c3ef6fb Mon Sep 17 00:00:00 2001
+From: AE Fix <ae@smaran.local>
+Date: Thu, 9 Jul 2026 15:10:32 -0400
+Subject: [PATCH] bench: create monitorClient after load phase (fix idle-conn
+ death)
+
+---
+ cli/coniksbench/internal/cmd/run.go | 17 +++++++++--------
+ 1 file changed, 9 insertions(+), 8 deletions(-)
+
+diff --git a/cli/coniksbench/internal/cmd/run.go b/cli/coniksbench/internal/cmd/run.go
+index 8036724..9421c4a 100644
+--- a/cli/coniksbench/internal/cmd/run.go
++++ b/cli/coniksbench/internal/cmd/run.go
+@@ -213,14 +213,6 @@ func benchWorker(
+ 	}
+ 	defer regClient.Close()
+ 
+-	monitorClient, err := testutil.NewPersistentClient(conf.Address)
+-	if err != nil {
+-		log.Printf("[worker %d] connect (monitor) failed: %v", id, err)
+-		wg.Done()
+-		return
+-	}
+-	defer monitorClient.Close()
+-
+ 	// ---- Load phase ----
+ 	for j := 0; id+j*N <= k; j++ {
+ 		userIdx := id + j*N
+@@ -242,6 +234,15 @@ func benchWorker(
+ 	wg.Wait()
+ 	<-startRun
+ 
++	// Monitor client is created here (after load + advance-epoch complete)
++	// so its TCP connection is not dead by the time we use it.
++	monitorClient, err := testutil.NewPersistentClient(conf.Address)
++	if err != nil {
++		log.Printf("[worker %d] connect (monitor) failed: %v", id, err)
++		return
++	}
++	defer monitorClient.Close()
++
+ 	// ---- Run phase ----
+ 	rng := mathrand.New(mathrand.NewSource(time.Now().UnixNano() + int64(id)))
+ 	zipf := mathrand.NewZipf(rng, 1.1, 1, uint64(k-1))
+-- 
+2.34.1
+
