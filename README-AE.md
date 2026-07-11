@@ -1,126 +1,187 @@
 # Smaran — Artifact Evaluation
 
-Reproduces Figures **4a, 4b, 4c, and 5** from §7.1 of the Smaran paper.
+Reproduces the paper's evaluation figures. Two application domains:
 
-**Total time:** ~30 min human attention + ~3 hours unattended compute.
-
-**Public artifact:** <https://github.com/distopialabs/Smaran/tree/artifact-eval>
-
-**Reference outputs:** the four PDFs our team produced live under [`reference_pdfs/`](reference_pdfs/) — glance at those first so you know the shape to expect.
+- **Key Transparency (§7.1)** — Figs 4a, 4b, 4c, 5
+- **Decentralized Ledger (§7.2)** — Figs 6, 7
 
 ---
 
-## Fastest path: one command from your laptop
+## Navigation
 
-After you finish Step 1 below (provisioning a CloudLab experiment), run this on **your laptop**:
+Click a leaf to jump to the exact instructions for that path.
 
-```bash
-curl -sLO https://raw.githubusercontent.com/distopialabs/Smaran/artifact-eval/run_ae.sh
-bash run_ae.sh <cloudlab-username> <node0-hostname> full   # or 'quick' for ~90 min
+```
+Start
+  │
+  ├── 1. Provision CloudLab              →  §1
+  │
+  └── 2. Pick an experiment domain
+        │
+        ├── Key Transparency (§7.1)      →  §2-KT
+        │     │
+        │     ├── Full sweep (~3 h)      →  §KT-Full
+        │     │     ├── Automated        →  §KT-Full-Auto
+        │     │     └── Manual           →  §KT-Full-Manual
+        │     │
+        │     ├── Quick sweep (~90 min)  →  §KT-Quick
+        │     │     ├── Automated        →  §KT-Quick-Auto
+        │     │     └── Manual           →  §KT-Quick-Manual
+        │     │
+        │     └── Smoke test (~3 min)    →  §KT-Smoke
+        │
+        └── Decentralized Ledger (§7.2)  →  §2-DL
 ```
 
-That single command SSHes into node0, clones the repo, sets up inter-node SSH, runs all four experiments, and copies the PDFs back to `~/Desktop/smaran-ae-output/` on your laptop.
-
-If you'd rather step through it manually, follow Steps 2–4 below.
+Jump list:
+[Provision CloudLab](#1-provision-cloudlab)  |
+[KT overview](#2-kt-key-transparency-71)  |
+[KT Full](#kt-full-sweep-3-hours)  |
+[KT Quick](#kt-quick-sweep-90-min)  |
+[KT Smoke](#kt-smoke-test-3-min)  |
+[DL](#2-dl-decentralized-ledger-72)
 
 ---
 
-## 1. Provision CloudLab nodes (~10 min)
+## 1. Provision CloudLab
+
+<a id="1-provision-cloudlab"></a>
+
+Time budget: **~10 min human, ~10 min compute.**
 
 1. Log in at <https://www.cloudlab.us>. (Free for academics; sign up at <https://www.cloudlab.us/signup.php>.)
-2. **Experiments → Instantiate a Profile** → search `smaran-kt-ae` (project `DistopiaLabs`) → **Instantiate**.
-3. Keep defaults:
-   - **Boot from pre-built image** ✓ (skips install)
-   - `serverHW = r6615`, `clientHW = c6420`
-   - Cluster: **Clemson**
+2. **Experiments → Instantiate a Profile** → search `smaran-kt-ae` in project `DistopiaLabs` → **Instantiate**.
+3. Keep defaults: **Boot from pre-built image** ✓, `serverHW = r6615`, `clientHW = c6420`, Cluster = **Clemson**.
 4. Wait ~10 min for status = **Ready**. Copy the SSH command for **node0**.
+5. SSH into node0 and run the setup script:
 
-## 2. Set up node0 (~2 min)
+   ```bash
+   git clone --branch kt --recurse-submodules https://github.com/distopialabs/Smaran.git ~/Smaran
+   cd ~/Smaran
+   ./setup_cloudlab.sh
+   ```
 
-SSH into node0 and paste:
+   `setup_cloudlab.sh` verifies the environment, sets up inter-node SSH, and then asks whether you want to run KT or DL. Pick the one you care about, and it will chain into the right runner.
+
+---
+
+## 2-KT. Key Transparency (§7.1)
+
+<a id="2-kt-key-transparency-71"></a>
+
+Pick a sweep depth. All three land the resulting PDFs in `~/Smaran/output/`.
+
+| Path | Total time | What it does |
+|---|---|---|
+| [Full](#kt-full-sweep-3-hours) | ~3 hours | Every point from the paper. Fig 4: 11 versions. Fig 5: 6 user counts. |
+| [Quick](#kt-quick-sweep-90-min) | ~90 min | Reduced point set that still shows the same qualitative shape. |
+| [Smoke](#kt-smoke-test-3-min) | ~3 min | One-point test that validates the whole pipeline before you commit to a real sweep. Recommended first. |
+
+The fastest way is: `./setup_cloudlab.sh` → pick KT → pick your sweep depth. The subsections below give the manual-step equivalent if you want to run individual scripts by hand.
+
+---
+
+### KT Full sweep (~3 hours)
+
+<a id="kt-full-sweep-3-hours"></a>
+
+Sweeps versions `{2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2047}` (Figs 4a/4b/4c) and users `{10k, 50k, 100k, 200k, 500k, 1M}` (Fig 5).
+
+#### KT Full — Automated
+
+<a id="kt-full-auto"></a>
 
 ```bash
-git clone --branch artifact-eval --recurse-submodules \
-    https://github.com/distopialabs/Smaran.git ~/Smaran
 cd ~/Smaran
-
-[ -f ~/.ssh/id_ed25519 ] || ssh-keygen -t ed25519 -N '' -f ~/.ssh/id_ed25519
-cat ~/.ssh/id_ed25519.pub >> ~/.ssh/authorized_keys
-cat ~/.ssh/id_ed25519.pub | ssh -o StrictHostKeyChecking=accept-new node1 "cat >> ~/.ssh/authorized_keys"
-ssh-keyscan -H node0 node1 >> ~/.ssh/known_hosts 2>/dev/null
-sudo ln -sf /usr/local/go/bin/go /usr/local/bin/go
-cp KeyTransparencyScripts/nodes.env.template KeyTransparencyScripts/nodes.env
+./run_kt.sh
+# choose option [1] FULL
 ```
 
-### 2a. Optional 3-minute smoke test
-
-Before spending 3 h on the full sweep, run a smoke test to confirm your environment works end-to-end:
+Or from your laptop, one command end-to-end:
 
 ```bash
+curl -sLO https://raw.githubusercontent.com/distopialabs/Smaran/kt/run_ae.sh
+bash run_ae.sh <cloudlab-user> <node0-host> full
+```
+
+The laptop-side version SSHes in, runs the setup, runs all four figures, and copies the PDFs back to `~/Desktop/smaran-ae-output/`.
+
+#### KT Full — Manual (individual scripts)
+
+<a id="kt-full-manual"></a>
+
+```bash
+cd ~/Smaran
+./KeyTransparencyScripts/run_fig4a.sh   # ~80 min
+./KeyTransparencyScripts/run_fig4b.sh   # ~5 s (uses Fig 4a's cache)
+./KeyTransparencyScripts/run_fig4c.sh   # ~5 s (uses Fig 4a's cache)
+./KeyTransparencyScripts/run_fig5.sh    # ~90-120 min
+```
+
+---
+
+### KT Quick sweep (~90 min)
+
+<a id="kt-quick-sweep-90-min"></a>
+
+Sweeps versions `{2, 16, 128, 256, 2047}` (Figs 4a/4b/4c) and users `{10k, 0.2M, 1M}` (Fig 5). Same protocol ordering and qualitative shape as the full sweep, in a fraction of the time.
+
+#### KT Quick — Automated
+
+<a id="kt-quick-auto"></a>
+
+```bash
+cd ~/Smaran
+./run_kt.sh
+# choose option [2] QUICK
+```
+
+Or from your laptop:
+
+```bash
+bash run_ae.sh <cloudlab-user> <node0-host> quick
+```
+
+#### KT Quick — Manual (individual scripts)
+
+<a id="kt-quick-manual"></a>
+
+```bash
+cd ~/Smaran
+./QuickTesting-KeyTransparency/run_fig4a_quick.sh   # ~35 min
+./QuickTesting-KeyTransparency/run_fig4b_quick.sh   # ~5 s (cached)
+./QuickTesting-KeyTransparency/run_fig4c_quick.sh   # ~5 s (cached)
+./QuickTesting-KeyTransparency/run_fig5_quick.sh    # ~45 min
+```
+
+---
+
+### KT Smoke test (~3 min)
+
+<a id="kt-smoke-test-3-min"></a>
+
+Runs one sweep point for each of the three protocols. Fastest way to catch build or environment issues before starting a real sweep.
+
+```bash
+cd ~/Smaran
 ./KeyTransparencyScripts/smoke_test.sh
 ```
 
-Expected: prints `Running experiment Figure 4a`, three `Running <protocol> with 2 versions` lines, `Plotting`, then `Saved: ~/Smaran/output/fig4a_latency.pdf`. Finishes in ~3 minutes. If this fails, don't start the full sweep.
-
-## 3. Run the experiments (~3 hours)
-
-```bash
-./KeyTransparencyScripts/run_fig4a.sh   # ~80 min — versions {2,4,8,16,32,64,128,256,512,1024,2047}
-./KeyTransparencyScripts/run_fig4b.sh   # ~5 s (cached from 4a)
-./KeyTransparencyScripts/run_fig4c.sh   # ~5 s (cached from 4a)
-./KeyTransparencyScripts/run_fig5.sh    # ~90–120 min — users {10k,50k,100k,200k,500k,1M}
-```
-
-Each per-point line prints a running ETA, e.g. `Running Optiks with 128 versions [4/15, ~26 min remaining]`.
-
-PDFs land in `~/Smaran/output/`:
-`fig4a_latency.pdf`, `fig4b_throughput.pdf`, `fig4c_payload.pdf`, `fig5_put_throughput.pdf`.
-
-## 4. Verify against paper
-
-Automated shape check (runs in ~1 s):
-
-```bash
-python3 ~/Smaran/KeyTransparencyScripts/verify.py
-```
-
-Reports pass/fail on each qualitative claim from §7.1 (protocol ordering, monotonicity, key ratios). Exit code 0 = all shape checks pass.
-
-Then eyeball the PDFs:
-
-```bash
-# on your laptop
-scp <user>@<node0-host>:'~/Smaran/output/*.pdf' ~/Desktop/smaran-ae-output/
-open ~/Desktop/smaran-ae-output/*.pdf
-```
-
-Compare against `reference_pdfs/` in the repo — trend + protocol ordering are the evaluation criteria (absolute numbers depend on hardware).
-
-| Figure | Trend |
-|---|---|
-| **4a Latency** | Coniks steepest rise, reaches ~5 s at 2047. Optiks linear rise. Smaran near-flat then climbs. |
-| **4b Throughput** | Optiks highest at low versions, crosses below Smaran near 128–256. Smaran near-flat then declines. Coniks lowest throughout. |
-| **4c Payload** | Optiks and Coniks track together, growing steeply. Smaran grows slowly. |
-| **5 Put throughput** | Broken y-axis. Upper: Optiks and Smaran in the tens of thousands ops/s with mild decline. Lower: Coniks flat at ~640 ops/s. |
+Expected output: `Running experiment Figure 4a`, three `Running <protocol> with 2 versions` lines, `Plotting`, `Saved: .../fig4a_latency.pdf`. If any of that is missing, don't start a real sweep — fix the underlying issue first.
 
 ---
 
-## Optional: quick sweep (~90 min instead of ~3 h)
+## 2-DL. Decentralized Ledger (§7.2)
 
-Fewer sweep points, same shape. Substitute the quick versions for Step 3:
+<a id="2-dl-decentralized-ledger-72"></a>
 
-```bash
-./QuickTesting-KeyTransparency/run_fig4a_quick.sh   # ~35 min — versions {2,16,128,256,2047}
-./QuickTesting-KeyTransparency/run_fig4b_quick.sh   # ~5 s (cached)
-./QuickTesting-KeyTransparency/run_fig4c_quick.sh   # ~5 s (cached)
-./QuickTesting-KeyTransparency/run_fig5_quick.sh    # ~45 min — users {10k,200k,1M}
-```
+*[Placeholder — the Decentralized-Ledger portion is authored separately. Instructions will land in this section when that portion is merged.]*
 
-Or from your laptop: `bash run_ae.sh <user> <host> quick`.
+---
 
-## Optional: install from source
+## Install from source (skip the CloudLab image)
 
-If at Step 1 you unchecked the pre-built image, run these before Step 3:
+If at Step 1 you unchecked the pre-built image, run these before starting any experiment:
 
 ```bash
 ./KeyTransparencyScripts/install_coniks.sh    # prints "Installing Coniks"
@@ -128,20 +189,33 @@ If at Step 1 you unchecked the pre-built image, run these before Step 3:
 ./KeyTransparencyScripts/install_smaran.sh    # prints "Installing Smaran"
 ```
 
----
+## Verify + compare
+
+After any KT sweep finishes:
+
+```bash
+# Automated shape-check against the paper's qualitative claims
+python3 KeyTransparencyScripts/verify.py
+
+# Copy PDFs to your laptop (from your laptop's terminal)
+scp <user>@<node0-host>:'~/Smaran/output/*.pdf' ~/Desktop/smaran-ae-output/
+open ~/Desktop/smaran-ae-output/*.pdf
+```
+
+Reference PDFs from our own runs live in [`reference_pdfs/`](reference_pdfs/) for direct comparison.
 
 ## Data notes
 
-- **Single run per point.** The paper averages 3 runs; the AE runs each point once to fit in ~3 h. Individual points may show noise (Fig 4a Smaran at 700/1500 versions; Fig 5 Optiks between 50k–1M). Overall trends are unaffected.
-- **Coniks fork.** The submodule is `coniks-history-extension` (fork of official CONIKS). Its per-request cost is user-count-independent, which is why our Fig 5 Coniks line is flat while the paper's declines. Fig 4 shape matches the paper.
+- **Single run per point.** Paper averages 3 runs. Individual points may show noise; overall trend is unaffected.
+- **Coniks fork.** Submodule is `coniks-history-extension` (fork of official CONIKS). Its per-request cost is user-count-independent, which is why our Fig 5 Coniks line is flat.
 
 ## Troubleshooting
 
-The run scripts auto-clean stale processes and `/tmp/coniks.sock` at start, so most previously-common failures are handled automatically. Remaining issues:
+Every experiment script auto-cleans stale processes and `/tmp/coniks.sock` at start. Remaining issues:
 
 | Issue | Fix |
 |---|---|
-| `Permission denied (publickey)` between nodes | Re-run the SSH block in Step 2. |
-| `no free nodes of type r6615/c6420` at Instantiate | Switch to `r6525` / `r6520` on the profile form. |
+| `Permission denied (publickey)` between nodes | Re-run `./setup_cloudlab.sh`. |
+| `no free nodes of type r6615/c6420` | Switch to `r6525` / `r6520` on the profile form. |
 | Experiment hangs > 5 min | Ctrl-C, delete latest `~/Smaran/logs/2026-*`, re-run. |
 | Something else | Open an issue at <https://github.com/distopialabs/Smaran/issues>. |
