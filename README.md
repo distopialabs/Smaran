@@ -46,7 +46,7 @@ All experiment output (logs, figures) is written under **`results/`**
   figures (`smaran-paper-logs.tar.gz`). Outside CloudLab, the block dataset
   is also downloadable from Zenodo (link TBD).
 
-## Install (one-time, ~15 min + dataset acquisition)
+## Install (one-time, ~5 min + dataset acquisition)
 
 ```bash
 ./DecentralizedLedgerScripts/install_merkle.sh
@@ -60,7 +60,7 @@ Go 1.25, LaTeX + Python plotting stack, all binaries in `bin/`, `/data/local`
 made writable, and the dataset located (set `SMARAN_DATASET_DIR=<dir>` if it
 is mounted somewhere unusual).
 
-## Tier 0 — kick the tires (~5 min)
+## Tier 0 — kick the tires (~2 min)
 
 ```bash
 ./DecentralizedLedgerScripts/plot_paper_figures.sh
@@ -103,8 +103,9 @@ Notes that apply to both tiers:
 - **Ingested databases are cached** under `/data/local/artifact-dbs` and
   reused across runs (Figure 7b reuses Figure 6's Smaran database).
 - **Smaran runs have a fixed setup cost:** creating/opening its ~1000 shard
-  databases takes several minutes before ingestion or serving begins, and
-  again at teardown. The scripts say so while you wait — this is normal.
+  databases adds a delay before ingestion or serving begins (about a minute
+  on NVMe/SSD storage, several minutes on slower disks), and again at
+  teardown. The scripts say so while you wait — this is normal.
 - Absolute numbers at quick scale are far below the paper's (small ingest
   window, short durations); the *trends* are what to check.
 
@@ -112,19 +113,19 @@ Notes that apply to both tiers:
 
 | Script | Quick | Full scale (extrapolated) |
 |---|---|---|
-| `plot_paper_figures.sh` | ~5 min | — |
-| `run_fig6a.sh` (first of 6a/6b/6c) | ~45–60 min (mostly one-time ingest + Smaran startup) | one-time full ingest per protocol: tens of hours; then ~25 min benchmarking per protocol |
-| `run_fig6b.sh` / `run_fig6c.sh` (cached) | ~2 min | ~2 min |
-| `run_fig7a.sh` | ~1 h (dominated by Smaran shard setup per point) | ~19 h (15 min × 15 points + Smaran overhead) |
-| `run_fig7b.sh` | ~30–45 min (reuses fig6 DB) | ~1.5 h benchmarking after fig6's ingest |
-| `run_fig7c.sh` | ~30–45 min | ~5 h (5 min × 30 points + shard setup) |
+| `plot_paper_figures.sh` | ~1 min | — |
+| `run_fig6a.sh` (first of 6a/6b/6c) | ~15 min (one-time ingest per protocol; ~7 min re-run on cached databases) | one-time full ingest per protocol: tens of hours; then ~25 min benchmarking per protocol |
+| `run_fig6b.sh` / `run_fig6c.sh` (cached) | seconds (re-plot from the cached sweep) | seconds |
+| `run_fig7a.sh` | ~11 min | ~19 h (15 min × 15 points + Smaran overhead) |
+| `run_fig7b.sh` | ~9 min (reuses fig6's database) | ~1.5 h benchmarking after fig6's ingest |
+| `run_fig7c.sh` | ~12 min | ~5 h (5 min × 30 points + shard setup) |
 
 Full-scale figures need the complete 2.6M-block window ingested once per
 protocol; these estimates are extrapolations from measured small-scale runs
-and the paper logs' recorded durations. **Caveat:** the quick-tier numbers
-were measured on an HDD-backed node, where Smaran's shard-database
-setup/teardown dominates; on SSD-backed storage (the recommended CloudLab
-hardware) they should be materially lower and will be re-measured there.
+and the paper logs' recorded durations. Quick-tier numbers were measured on
+an SSD (NVMe)-backed CloudLab node — the recommended hardware; slower
+storage inflates them considerably, chiefly through Smaran's shard-database
+setup/teardown.
 
 ## Tier 2 — full-scale experiments
 
