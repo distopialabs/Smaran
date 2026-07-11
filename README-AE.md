@@ -173,8 +173,6 @@ Before Menu 2, run:
 
 The Decentralized-Ledger portion of the artifact lives on a separate branch: <https://github.com/distopialabs/Smaran/tree/timing_debug>. Follow the README there to reproduce Figures 6 and 7.
 
-The two portions are on separate branches because their Smaran cores have diverged in ways that would need architectural reconciliation to unify. That reconciliation is queued for after the AE deadline; the split does not affect the correctness of either portion.
-
 ---
 
 ## Troubleshooting
