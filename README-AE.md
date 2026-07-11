@@ -14,14 +14,13 @@ You will run **exactly three commands total** (git clone, cd, and `./setup_cloud
 ## Step 1 · Instantiate the CloudLab profile 💻 (on your laptop)
 
 1. Log in at <https://www.cloudlab.us>. (Free for academics; sign up at <https://www.cloudlab.us/signup.php>.)
-2. **Experiments → Instantiate a Profile**.
-3. Search for `smaran-kt-ae` in project `DistopiaLabs`. Click **Next**.
-4. Keep the defaults on the parameter form:
+2. Open the profile directly: <https://www.cloudlab.us/p/DistopiaLabs/smaran-kt-ae>. Click **Instantiate**.
+3. Keep the defaults on the parameter form:
    - **Boot from pre-built image** ✓  *(saves ~30 min of installation)*
    - `serverHW = r6615`, `clientHW = c6420`
    - Cluster: **Clemson**
-5. Click **Next → Finish**. Wait ~10 minutes until status = **Ready**.
-6. Click **List View**. You will see two nodes: **node0** (server, r6615) and **node1** (client, c6420). Copy the SSH command for **node0** — it looks like:
+4. Click **Next → Finish**. Wait ~10 minutes until status = **Ready**.
+5. Click **List View**. You will see two nodes: **node0** (server, r6615) and **node1** (client, c6420). Copy the SSH command for **node0** — it looks like:
 
    ```
    ssh <your-cloudlab-username>@clnodeXXX.clemson.cloudlab.us
