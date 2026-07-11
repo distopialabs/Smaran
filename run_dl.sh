@@ -27,9 +27,4 @@ echo
 echo 'Reference:'
 echo '   https://github.com/distopialabs/Smaran/tree/timing_debug'
 echo
-echo 'Note: the KT and DL portions are on separate branches because their'
-echo 'Smaran cores have diverged in ways that need architectural reconciliation'
-echo 'to unify. That reconciliation is queued for after the AE deadline; the'
-echo 'split does not affect the correctness of either portion.'
-echo
 exit 0
