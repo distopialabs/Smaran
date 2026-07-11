@@ -11,7 +11,7 @@ echo '  Smaran Artifact Evaluation - CloudLab setup'
 echo '======================================================='
 echo
 
-# 1. Ensure repo on artifact-eval / kt branch (whichever is public-facing)
+# 1. Ensure repo on KT-artifact / kt branch (whichever is public-facing)
 cd "$REPO"
 echo '[1/4] Repo:' "$REPO" '(' "$(git branch --show-current)" '@' "$(git log -1 --format=%h)" ')'
 

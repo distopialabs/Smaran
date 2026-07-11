@@ -7,7 +7,7 @@
 #
 # What it does:
 #   1) SSH into node0
-#   2) Clone the artifact-eval branch and set up inter-node SSH
+#   2) Clone the KT-artifact branch and set up inter-node SSH
 #   3) Run all four figures
 #   4) scp PDFs back to ~/Desktop/smaran-ae-output/ on your laptop
 set -euo pipefail
@@ -44,7 +44,7 @@ echo '[2/4] Setting up node0...'
 ssh "${USER}@${HOST}" "MODE='$MODE' bash -s" <<'REMOTE'
 set -euo pipefail
 if [ ! -d ~/Smaran/.git ]; then
-  git clone --branch artifact-eval --recurse-submodules \
+  git clone --branch KT-artifact --recurse-submodules \
       https://github.com/distopialabs/Smaran.git ~/Smaran
 fi
 cd ~/Smaran

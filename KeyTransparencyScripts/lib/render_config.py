@@ -24,7 +24,7 @@ DEFAULTS = {
     "KT_SSH_USER": os.environ.get("USER", ""),
     "KT_SSH_KEY": os.path.expanduser("~/.ssh/id_ed25519"),
     "KT_REMOTE_DIR": "/users/" + os.environ.get("USER", "shistuu"),
-    "KT_REPO_BRANCH": "artifact-eval",
+    "KT_REPO_BRANCH": "KT-artifact",
 }
 
 
