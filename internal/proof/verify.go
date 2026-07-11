@@ -55,8 +55,14 @@ func VerifyNewRangeProofs(account common.Address, startingVersion, endingVersion
 		// Determine the top-layer commitment hash based on response case.
 		var topLayerCommitmentHash common.Hash
 
+		if currentBalance == nil {
+			return fmt.Errorf("MPT proof present but server sent no current balance — cannot verify trust anchor")
+		}
+
 		if currentBalance.Version == 0 {
-			// Case: version==0, no historical data. topLayerCommitmentHash stays empty (zero hash).
+			// Case: version==0, no historical data. The MPT leaf commits to the hash of a
+			// zero KZG commitment (see tree.CalculateFinalCommitment), not the zero hash.
+			topLayerCommitmentHash = hash.CommitmentToHash(gnark_kzg.Digest{})
 		} else if len(balanceInfos) == 0 {
 			// Case: top-layer commitment only (current balance covers query range).
 			// The server sends a single RangeProof at MaxLayer containing the commitment.
