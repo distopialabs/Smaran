@@ -39,7 +39,7 @@ Paste the SSH command you just copied into your terminal. You are now on **node0
 On node0, run these three commands:
 
 ```bash
-git clone --branch kt --recurse-submodules https://github.com/distopialabs/Smaran.git ~/Smaran
+git clone --branch KT-artifact --recurse-submodules https://github.com/distopialabs/Smaran.git ~/Smaran
 cd ~/Smaran
 ./setup_cloudlab.sh
 ```
@@ -141,7 +141,7 @@ Compare against the paper's Figures 4a/4b/4c/5. Reference PDFs from our own runs
 If you'd rather skip logging into node0 yourself, run this on your laptop after Step 1:
 
 ```bash
-curl -sLO https://raw.githubusercontent.com/distopialabs/Smaran/kt/run_ae.sh
+curl -sLO https://raw.githubusercontent.com/distopialabs/Smaran/KT-artifact/run_ae.sh
 chmod +x run_ae.sh
 bash run_ae.sh <your-cloudlab-username> <node0-hostname> full   # or 'quick'
 ```
