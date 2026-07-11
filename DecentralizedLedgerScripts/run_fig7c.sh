@@ -13,6 +13,11 @@ echo "Running experiment Figure 7c"
 LOGS="$RESULTS_DIR/fig7c/logs"
 OUT="$RESULTS_DIR/fig7c"
 
+# The plot reads every ingestion log under $LOGS; logs from an earlier or
+# aborted run (or different SHARDS_LIST/K_USERS_LIST) must not leak into
+# this one.
+rm -rf "$LOGS"
+
 for shards in "${SHARDS_LIST[@]}"; do
     for k in "${K_USERS_LIST[@]}"; do
         echo "Running Smaran with $shards shards ($k users)"

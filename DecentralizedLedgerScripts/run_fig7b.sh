@@ -12,6 +12,10 @@ echo "Running experiment Figure 7b"
 LOGS="$RESULTS_DIR/fig7b/logs"
 OUT="$RESULTS_DIR/fig7b"
 
+# The plot reads every proof_range*.csv under $LOGS; logs from an earlier or
+# aborted run (or different RANGES_7B) must not leak into this one.
+rm -rf "$LOGS"
+
 run_proof_sweep smaran "$LOGS/raw/optimus" optimus "${RANGES_7B[@]}"
 run_proof_sweep smaran "$LOGS/raw/non_optimus" non_optimus "${RANGES_7B[@]}"
 

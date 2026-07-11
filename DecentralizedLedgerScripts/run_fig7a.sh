@@ -11,6 +11,10 @@ echo "Running experiment Figure 7a"
 LOGS="$RESULTS_DIR/fig7a/logs"
 OUT="$RESULTS_DIR/fig7a"
 
+# The plot reads every ingestion log under $LOGS; logs from an earlier or
+# aborted run (or different K_USERS_LIST) must not leak into this one.
+rm -rf "$LOGS"
+
 for proto in merkle verkle smaran; do
     for k in "${K_USERS_LIST[@]}"; do
         echo "Running $(proto_label "$proto") with $k users"

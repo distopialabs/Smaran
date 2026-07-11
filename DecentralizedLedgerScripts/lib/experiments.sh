@@ -203,6 +203,11 @@ run_fig6_pipeline() {
     if [ -f "$marker" ] && [ "${FORCE_RERUN:-0}" != "1" ]; then
         say "Reusing benchmark logs from a previous Figure 6 run ($logs; FORCE_RERUN=1 to redo)"
     else
+        # A fresh sweep must not inherit CSVs from an earlier or aborted run:
+        # the plot reads every proof_range*.csv in these dirs, and the rename
+        # step keeps whichever file got a clean name first.
+        rm -rf "$clients_dir/merkle" "$clients_dir/verkle" "$clients_dir/samuraimpt"
+        rm -f "$logs"/.complete-*
         for proto in merkle verkle smaran; do
             run_proof_sweep "$proto" "$clients_dir"
         done
