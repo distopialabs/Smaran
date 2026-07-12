@@ -65,6 +65,7 @@ maybe_detach   # exits here in the parent of a --detach run
 _experiment_cleanup() {
     local rc=$?
     stop_server
+    fetch_server_logs
     _finalize_run_state "$rc"
 }
 trap _experiment_cleanup EXIT
@@ -111,7 +112,14 @@ ensure_ingested() {
     local proto="$1"
     local db="$DB_ROOT/${proto}_n${N_BLOCKS}"
     local marker="$db/.ingest-complete"
-    if [ -f "$marker" ]; then
+    # The DB (and so the marker) lives on the server node in remote mode.
+    local have_marker=1
+    if is_remote; then
+        server_ctl "test -f '$marker'" || have_marker=0
+    else
+        [ -f "$marker" ] || have_marker=0
+    fi
+    if [ "$have_marker" = "1" ]; then
         say "Reusing ingested $(proto_label "$proto") database at $db" >&2
         echo "$db"
         return
@@ -120,9 +128,15 @@ ensure_ingested() {
     if [ "$proto" = "smaran" ]; then
         say "NOTE: Smaran creates ~1000 shard databases before ingesting — expect several minutes of setup and teardown around the ingest itself." >&2
     fi
-    rm -rf "$db"
-    (cd "$REPO_ROOT" && "$(proto_bin "$proto")" ingest --db-dir "$db" -n "$N_BLOCKS" --fresh) >&2
-    touch "$marker"
+    if is_remote; then
+        server_ctl "rm -rf '$db'"
+        server_run "cd '$REPO_ROOT' && '$(proto_bin "$proto")' ingest --db-dir '$db' -n $N_BLOCKS --fresh" >&2
+        server_ctl "touch '$marker'"
+    else
+        rm -rf "$db"
+        (cd "$REPO_ROOT" && "$(proto_bin "$proto")" ingest --db-dir "$db" -n "$N_BLOCKS" --fresh) >&2
+        touch "$marker"
+    fi
     echo "$db"
 }
 
@@ -152,10 +166,9 @@ run_proof_sweep() {
 
     local extra=()
     if [ "$proto" = "smaran" ]; then
-        local server_log="$RESULTS_DIR/server-logs/samurai_port${port}.log"
         local root
-        root="$(server_state_root "$server_log")"
-        [ -n "$root" ] || die "could not read state root from $server_log"
+        root="$(server_state_root "$SERVER_LOG")"
+        [ -n "$root" ] || die "could not read state root from $SERVER_LOG"
         extra=(--params-dir "$REPO_ROOT/data/params" --state-root "$root")
         [ "$mode" = "non_optimus" ] && extra+=(--old)
     fi
@@ -169,7 +182,7 @@ run_proof_sweep() {
         fi
         (cd "$REPO_ROOT" && "$client" bench --verify \
             "${extra[@]}" \
-            --server-addr "localhost:$port" \
+            --server-addr "$(server_host):$port" \
             --accounts-list "$accounts" \
             --num-clients "$NUM_CLIENTS" \
             --duration "$PROOF_DURATION" \
@@ -184,21 +197,48 @@ run_proof_sweep() {
 # run_ingest_bench <protocol> <k-users> <output-dir> <blocks> <duration> [shards]
 # blocks is the primary limit for fig7a (duration is a deadline); fig7c is
 # duration-limited as in the paper.
+#
+# In remote mode the benchmark runs on the server node (ssh foreground, so
+# progress streams here and Ctrl+C stops it) and writes into a server-local
+# mirror of outdir, which is rsynced back after each point — the server never
+# writes into $RESULTS_DIR directly (not shared under the CloudLab profile).
 run_ingest_bench() {
     local proto="$1" k="$2" outdir="$3" blocks="$4" duration="$5" shards="${6:-}"
-    local extra=()
-    [ "$proto" = "smaran" ] && extra+=(--skip-mpt)   # paper's ingestion numbers are samurai-only (KZG)
-    [ -n "$shards" ] && extra+=(--shards "$shards")
-    mkdir -p "$outdir"
-    (cd "$REPO_ROOT" && "$(proto_bin "$proto")" bench-ingest \
-        "${extra[@]}" \
-        --db-dir "/data/local/tmp/bench-${proto}$$" \
-        -n "$blocks" \
-        --duration "$duration" \
-        --k-users "$k" \
-        --accounts-list "$REPO_ROOT/account_stats_50k.csv" \
-        --output-dir "$outdir")
-    rm -rf "/data/local/tmp/bench-${proto}$$"
+    local tmpdb="/data/local/tmp/bench-${proto}$$"
+    if is_remote; then
+        local remote_out="$SERVER_RUN_DIR/results/${outdir#"$RESULTS_DIR"/}"
+        local extra=""
+        [ "$proto" = "smaran" ] && extra+=" --skip-mpt"   # paper's ingestion numbers are samurai-only (KZG)
+        [ -n "$shards" ] && extra+=" --shards $shards"
+        server_run "mkdir -p '$remote_out' && cd '$REPO_ROOT' && '$(proto_bin "$proto")' bench-ingest$extra --db-dir '$tmpdb' -n $blocks --duration $duration --k-users $k --accounts-list '$REPO_ROOT/account_stats_50k.csv' --output-dir '$remote_out'; rc=\$?; rm -rf '$tmpdb'; exit \$rc"
+        mkdir -p "$outdir"
+        rsync -a "$SERVER_HOST:$remote_out/" "$outdir/"
+    else
+        local extra=()
+        [ "$proto" = "smaran" ] && extra+=(--skip-mpt)   # paper's ingestion numbers are samurai-only (KZG)
+        [ -n "$shards" ] && extra+=(--shards "$shards")
+        mkdir -p "$outdir"
+        (cd "$REPO_ROOT" && "$(proto_bin "$proto")" bench-ingest \
+            "${extra[@]}" \
+            --db-dir "$tmpdb" \
+            -n "$blocks" \
+            --duration "$duration" \
+            --k-users "$k" \
+            --accounts-list "$REPO_ROOT/account_stats_50k.csv" \
+            --output-dir "$outdir")
+        rm -rf "$tmpdb"
+    fi
+}
+
+# clear_run_logs <dir>: fresh-run hygiene for ingestion figures — remove a
+# previous run's logs both locally and in the server-side mirror (stale files
+# there would otherwise be rsynced back into the fresh run).
+clear_run_logs() {
+    local dir="$1"
+    rm -rf "$dir"
+    if is_remote; then
+        server_ctl "rm -rf '$SERVER_RUN_DIR/results/${dir#"$RESULTS_DIR"/}'"
+    fi
 }
 
 # --- Cauchy (prebaked only) --------------------------------------------------

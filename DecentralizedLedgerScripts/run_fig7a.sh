@@ -13,7 +13,7 @@ OUT="$RESULTS_DIR/fig7a"
 
 # The plot reads every ingestion log under $LOGS; logs from an earlier or
 # aborted run (or different K_USERS_LIST) must not leak into this one.
-rm -rf "$LOGS"
+clear_run_logs "$LOGS"
 
 for proto in merkle verkle smaran; do
     for k in "${K_USERS_LIST[@]}"; do

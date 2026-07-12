@@ -9,6 +9,41 @@ LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$LIB_DIR/../.." && pwd)"
 RESULTS_DIR="${RESULTS_DIR:-$REPO_ROOT/results}"
 
+# Two-node (CloudLab profile) mode: the profile's startup script writes
+# /local/cluster.env on both nodes with SERVER_HOST=<server node> and
+# SMARAN_DATASET_DIR=/smaran-dataset. Without it, everything runs on this
+# machine (Path B — own server), exactly as before. SMARAN_NO_CLUSTER_ENV=1
+# ignores the file (debugging escape hatch).
+if [ -f /local/cluster.env ] && [ -z "${SMARAN_NO_CLUSTER_ENV:-}" ]; then
+    # shellcheck source=/dev/null
+    . /local/cluster.env
+fi
+
+is_remote() {
+    [ -n "${SERVER_HOST:-}" ] && [ "$SERVER_HOST" != "localhost" ] \
+        && [ "$SERVER_HOST" != "127.0.0.1" ]
+}
+
+# Host the protocol servers run on, as seen from this node.
+server_host() { if is_remote; then echo "$SERVER_HOST"; else echo localhost; fi; }
+
+SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=10)
+
+# server_ctl <cmd...>: short control command on the server node (remote mode).
+server_ctl() { ssh "${SSH_OPTS[@]}" "$SERVER_HOST" "$@"; }
+
+# server_run <cmd...>: long-running foreground command on the server node.
+# -tt ties the remote process's lifetime to this script: a client-side Ctrl+C
+# (or dying SSH session) takes the remote process down with it, and its
+# stdout streams live to this console.
+server_run() { ssh -tt "${SSH_OPTS[@]}" "$SERVER_HOST" "$@"; }
+
+# Server-local scratch for anything a remote server-side process writes
+# (logs, ingestion output). Never a repo path: under the CloudLab profile
+# each node has its own repo clone, so the client fetches these with rsync
+# at end of run instead of expecting shared storage.
+SERVER_RUN_DIR=/data/local/artifact-run
+
 # Required Go toolchain (go.mod says go 1.25).
 GO_REQUIRED_MINOR=25
 GO_TARBALL_VERSION=1.25.6
@@ -17,6 +52,7 @@ GO_TARBALL_VERSION=1.25.6
 # CloudLab profile mounts it at the first entry; the rest are fallbacks for
 # manual setups. Override with SMARAN_DATASET_DIR / SMARAN_PAPER_LOGS.
 DATASET_MOUNT_CANDIDATES=(
+    "/smaran-dataset"
     "/mydata"
     "/data/dataset"
     "/proj/distopialabs-PG0/asim/dataset"
@@ -407,28 +443,90 @@ _finalize_run_state() {
 # ---------------------------------------------------------------------------
 # Server lifecycle (used by the query-benchmark experiment scripts)
 # ---------------------------------------------------------------------------
+# In remote mode the server runs on $SERVER_HOST under nohup with a pidfile;
+# locally it is a plain shell child. Either way SERVER_PID/SERVER_LOG describe
+# the running server, and shutdown on exit/interrupt is handled by the
+# experiment-level cleanup trap in lib/experiments.sh.
 
 SERVER_PID=""
+SERVER_LOG=""
+SERVER_PIDFILE=""
+
+# Clears any process left holding the port (or recorded in the pidfile) by an
+# interrupted earlier run — double Ctrl+C or a dropped SSH session can orphan
+# a server that still holds the port and DB locks. Runs on the node given by
+# server_host, so every run starts from a clean process slate.
+_STALE_KILL_SCRIPT='
+pids="$(cat "$PIDFILE" 2>/dev/null || true) $(lsof -ti "tcp:$PORT" -sTCP:LISTEN 2>/dev/null || true)"
+live=""
+for p in $pids; do kill -0 "$p" 2>/dev/null && live="$live $p"; done
+live="$(echo "$live" | tr " " "\n" | sort -u | tr "\n" " " | sed "s/^ *//;s/ *$//")"
+if [ -n "$live" ]; then
+    echo "Clearing stale server (pid $live) left by an interrupted run"
+    kill $live 2>/dev/null || true
+    for i in $(seq 1 12); do
+        alive=0
+        for p in $live; do kill -0 "$p" 2>/dev/null && alive=1; done
+        [ "$alive" = 0 ] && break
+        sleep 5
+    done
+    for p in $live; do kill -9 "$p" 2>/dev/null || true; done
+fi
+[ -f "$PIDFILE" ] && rm -f "$PIDFILE" || true
+'
+
+# kill_stale_server <port> [pidfile]
+kill_stale_server() {
+    local port="$1" pidfile="${2:-}"
+    if is_remote; then
+        server_ctl "PORT=$port PIDFILE='$pidfile' bash -s" <<<"$_STALE_KILL_SCRIPT"
+    else
+        PORT="$port" PIDFILE="$pidfile" bash -s <<<"$_STALE_KILL_SCRIPT"
+    fi
+}
 
 # start_server <binary> <db-dir> <port> [extra args...]
 start_server() {
     local bin="$1" db="$2" port="$3"; shift 3
-    mkdir -p "$RESULTS_DIR/server-logs"
-    local log="$RESULTS_DIR/server-logs/$(basename "$bin")_port${port}.log"
-    say "Starting $(basename "$bin") server on port $port (log: $log)"
-    "$bin" serve --db-dir "$db" --port "$port" "$@" >"$log" 2>&1 &
-    SERVER_PID=$!
-    # Shutdown on exit/interrupt is handled by the experiment-level cleanup
-    # trap in lib/experiments.sh (a trap here would overwrite it).
+    local name; name="$(basename "$bin")"
+    if is_remote; then
+        local dir="$SERVER_RUN_DIR/server-logs"
+        SERVER_LOG="$dir/${name}_port${port}.log"
+        SERVER_PIDFILE="$SERVER_RUN_DIR/${name}_port${port}.pid"
+        kill_stale_server "$port" "$SERVER_PIDFILE"
+        say "Starting $name server on $SERVER_HOST port $port (log: $SERVER_LOG, fetched to $RESULTS_DIR/server-logs/ at end of run)"
+        local extra=""
+        [ $# -gt 0 ] && extra="$(printf ' %q' "$@")"
+        SERVER_PID="$(server_ctl "mkdir -p '$dir' && nohup '$bin' serve --db-dir '$db' --port $port$extra >'$SERVER_LOG' 2>&1 & echo \$! | tee '$SERVER_PIDFILE'")"
+    else
+        mkdir -p "$RESULTS_DIR/server-logs"
+        SERVER_LOG="$RESULTS_DIR/server-logs/${name}_port${port}.log"
+        kill_stale_server "$port"
+        say "Starting $name server on port $port (log: $SERVER_LOG)"
+        "$bin" serve --db-dir "$db" --port "$port" "$@" >"$SERVER_LOG" 2>&1 &
+        SERVER_PID=$!
+    fi
+}
+
+# True while the started server process is alive (either mode).
+server_alive() {
+    [ -n "$SERVER_PID" ] || return 1
+    if is_remote; then
+        server_ctl "kill -0 $SERVER_PID 2>/dev/null"
+    else
+        kill -0 "$SERVER_PID" 2>/dev/null
+    fi
 }
 
 # wait_for_server <port> <timeout-seconds> [message]
 wait_for_server() {
     local port="$1" timeout="$2" msg="${3:-server}"
-    local waited=0
-    say "Waiting for $msg to become ready on port $port (up to $((timeout / 60)) min)..."
-    while ! nc -z localhost "$port" 2>/dev/null; do
-        if [ -n "$SERVER_PID" ] && ! kill -0 "$SERVER_PID" 2>/dev/null; then
+    local host waited=0
+    host="$(server_host)"
+    say "Waiting for $msg to become ready on $host:$port (up to $((timeout / 60)) min)..."
+    while ! nc -z "$host" "$port" 2>/dev/null; do
+        # Liveness check every 30 s (it is an ssh round trip in remote mode).
+        if [ $((waited % 30)) -eq 0 ] && ! server_alive; then
             die "$msg exited before becoming ready; see $RESULTS_DIR/server-logs/"
         fi
         sleep 5
@@ -442,16 +540,50 @@ wait_for_server() {
 }
 
 stop_server() {
-    if [ -n "$SERVER_PID" ] && kill -0 "$SERVER_PID" 2>/dev/null; then
-        say "Stopping server (pid $SERVER_PID; Smaran closes ~1000 shard DBs, can take minutes)"
-        kill "$SERVER_PID"
-        wait "$SERVER_PID" 2>/dev/null || true
+    [ -n "$SERVER_PID" ] || return 0
+    if server_alive; then
+        if is_remote; then
+            say "Stopping server on $SERVER_HOST (pid $SERVER_PID; Smaran closes ~1000 shard DBs, can take minutes)"
+            server_ctl "kill $SERVER_PID 2>/dev/null" || true
+            local waited=0
+            while server_alive; do
+                sleep 5
+                waited=$((waited + 5))
+                [ $((waited % 120)) -eq 0 ] && say "  still shutting down (${waited}s elapsed)"
+                if [ "$waited" -ge 1800 ]; then
+                    say "  server still up after 30 min — force-killing"
+                    server_ctl "kill -9 $SERVER_PID 2>/dev/null" || true
+                    break
+                fi
+            done
+        else
+            say "Stopping server (pid $SERVER_PID; Smaran closes ~1000 shard DBs, can take minutes)"
+            kill "$SERVER_PID"
+            wait "$SERVER_PID" 2>/dev/null || true
+        fi
+    fi
+    if is_remote && [ -n "$SERVER_PIDFILE" ]; then
+        server_ctl "rm -f '$SERVER_PIDFILE'" || true
     fi
     SERVER_PID=""
+    SERVER_PIDFILE=""
 }
 
 # server_state_root <server-log-file>: extract the state root logged at startup
-# (needed by the Smaran proof client for verification).
+# (needed by the Smaran proof client for verification). The log lives on the
+# server node in remote mode.
 server_state_root() {
-    grep -oE 'state root: (0x[0-9a-fA-F]+)' "$1" | tail -1 | awk '{print $3}'
+    if is_remote; then
+        server_ctl "grep -oE 'state root: (0x[0-9a-fA-F]+)' '$1' | tail -1 | awk '{print \$3}'"
+    else
+        grep -oE 'state root: (0x[0-9a-fA-F]+)' "$1" | tail -1 | awk '{print $3}'
+    fi
+}
+
+# End of every run: copy server-side logs to the client's results tree so the
+# reviewer never logs into the server node. No-op in single-node mode.
+fetch_server_logs() {
+    is_remote || return 0
+    mkdir -p "$RESULTS_DIR/server-logs"
+    rsync -a "$SERVER_HOST:$SERVER_RUN_DIR/server-logs/" "$RESULTS_DIR/server-logs/" 2>/dev/null || true
 }
