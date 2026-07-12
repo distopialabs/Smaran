@@ -101,6 +101,14 @@ EOF
     chown "$CREATOR:" "$SSH_DIR/config"
 fi
 
+# --- Consistent clocks --------------------------------------------------------
+# Stock CloudLab images ship /etc/localtime set to the site's local zone (and
+# it differs between images), so the client's progress stamps and the server's
+# log lines disagree by hours in one console stream. Pin both nodes to UTC.
+# (timedatectl records the zone but won't replace the images' read-only
+# regular-file /etc/localtime, so link it directly.)
+ln -sf /usr/share/zoneinfo/Etc/UTC /etc/localtime
+
 # --- Writable working areas ---------------------------------------------------
 # Server: /data is the NVMe blockstore (ingested DBs). Client: plain dir on
 # the OS disk (paper-logs staging only — small).
