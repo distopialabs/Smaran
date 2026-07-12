@@ -259,6 +259,9 @@ def plot_line_charts(
         ax.set_xscale("log")
         ax.set_xticks(ucs)
         ax.xaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(_user_count_formatter))
+        # On narrow log ranges (quick tier: 0.1M-0.5M) matplotlib labels the
+        # minor ticks too, colliding with the major labels above.
+        ax.xaxis.set_minor_formatter(matplotlib.ticker.NullFormatter())
         if y_normal:
             ax.yaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(_y_formatter_normal))
         else:
