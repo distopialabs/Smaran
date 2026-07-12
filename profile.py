@@ -1,11 +1,12 @@
-"""Smaran artifact evaluation — two-node experiment (client + server).
+# -*- coding: utf-8 -*-
+"""Smaran artifact evaluation - two-node experiment (client + server).
 
 This profile reproduces the paper's benchmark topology:
 
-  * **node0 (client)** — where you log in. Runs the orchestration scripts,
+  * **node0 (client)** - where you log in. Runs the orchestration scripts,
     the proof clients (32 concurrent), and the plotting; every file you look
     at (logs, figure PDFs) lands under `/local/repository/results/` here.
-  * **node1 (server)** — runs ingestion and the protocol servers against
+  * **node1 (server)** - runs ingestion and the protocol servers against
     NVMe-backed databases. The scripts drive it over SSH; you never need to
     log into it.
 
@@ -18,7 +19,7 @@ boot): wait until the Startup column on the experiment page shows
 setup progress.
 
 Default node types are the paper's pair (r6615 server + c6420 client at
-Clemson). If they are unavailable, pick a fallback from the parameter lists —
+Clemson). If they are unavailable, pick a fallback from the parameter lists -
 but keep server and client in the same cluster, because the dataset is
 cluster-local (Clemson types, or the Utah pair c6525-100g + xl170).
 """
@@ -44,7 +45,7 @@ DATASET_URN = {
 
 # Per-cluster disk image with the toolchain baked in (Go, LaTeX, python
 # plotting stack; see cloudlab/IMAGE.md). The startup script installs
-# anything missing, so a stock Ubuntu 22.04 image also works — just slower
+# anything missing, so a stock Ubuntu 22.04 image also works - just slower
 # on first boot.
 # TODO(image): replace with the per-cluster snapshots once taken (IMAGE.md).
 IMAGE = {
@@ -54,7 +55,7 @@ IMAGE = {
 
 # The artifact repository, shallow-cloned to /local/repository by the
 # startup command. This profile is maintained as profile.py in that repo and
-# pasted into the CloudLab profile editor (not a repo-based profile — the
+# pasted into the CloudLab profile editor (not a repo-based profile - the
 # repo's git history exceeds CloudLab's 500 MiB clone limit), so the clone
 # is ours to do. At submission time, flip REPO_REF to the artifact tag.
 REPO_URL = "https://github.com/distopialabs/Smaran.git"
@@ -62,7 +63,7 @@ REPO_REF = "timing_debug"
 
 # Experiment-LAN addresses; setup-node.sh writes the server's address into
 # /local/cluster.env so the scripts find it (benchmark traffic crosses the
-# experiment LAN, as in the paper — not the control network).
+# experiment LAN, as in the paper - not the control network).
 SERVER_IP = "192.168.1.1"
 CLIENT_IP = "192.168.1.2"
 NETMASK = "255.255.255.0"
@@ -73,10 +74,10 @@ pc.defineParameter(
     "server_type", "Server node type (ingestion + protocol servers; needs NVMe)",
     portal.ParameterType.STRING, "r6615",
     [
-        ("r6615", "r6615 — paper's server: 32-core EPYC 9354P, 192GB, 800GB NVMe (Clemson)"),
-        ("r650", "r650 — fallback: 2x36-core Xeon 8360Y, 256GB, 1.6TB NVMe (Clemson)"),
-        ("r6525", "r6525 — fallback: 2x32-core EPYC 7543, 256GB, 1.6TB NVMe (Clemson)"),
-        ("c6525-100g", "c6525-100g — Utah: 24-core EPYC 7402P, 128GB, 1.6TB NVMe"),
+        ("r6615", "r6615 - paper's server: 32-core EPYC 9354P, 192GB, 800GB NVMe (Clemson)"),
+        ("r650", "r650 - fallback: 2x36-core Xeon 8360Y, 256GB, 1.6TB NVMe (Clemson)"),
+        ("r6525", "r6525 - fallback: 2x32-core EPYC 7543, 256GB, 1.6TB NVMe (Clemson)"),
+        ("c6525-100g", "c6525-100g - Utah: 24-core EPYC 7402P, 128GB, 1.6TB NVMe"),
     ],
     longDescription="The server ingests blocks and serves proofs from "
     "~1000 shard databases; SATA/HDD storage is painfully slow for this, so "
@@ -86,10 +87,10 @@ pc.defineParameter(
     "client_type", "Client node type (orchestration + proof clients; any ~16+ cores)",
     portal.ParameterType.STRING, "c6420",
     [
-        ("c6420", "c6420 — paper's client: 2x16-core Xeon Gold 6142, 384GB (Clemson)"),
+        ("c6420", "c6420 - paper's client: 2x16-core Xeon Gold 6142, 384GB (Clemson)"),
         ("r650", "r650 (Clemson)"),
         ("r6525", "r6525 (Clemson)"),
-        ("xl170", "xl170 — Utah: 10-core Xeon E5-2640v4, 64GB"),
+        ("xl170", "xl170 - Utah: 10-core Xeon E5-2640v4, 64GB"),
     ],
     longDescription="The client is mostly idle between benchmark points; it "
     "needs only moderate cores for the 32 concurrent proof clients. Must be "
@@ -148,7 +149,7 @@ client, client_lan = add_node("node0", params.client_type, "client", CLIENT_IP)
 bs = server.Blockstore("bsnode1", "/data")
 bs.size = "700GB"
 
-# Client <-> server experiment LAN (no shaping — line rate, as in the paper).
+# Client <-> server experiment LAN (no shaping - line rate, as in the paper).
 link = request.Link("lan0")
 link.addInterface(client_lan)
 link.addInterface(server_lan)
