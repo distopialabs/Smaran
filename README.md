@@ -86,9 +86,9 @@ ends with the figure's path under `results/`. Quick variants live in
 | `run_fig7b.sh` | archival storage impact | ~9 min (reuses fig6's DB) | ~1.5 h after fig6's ingest |
 | `run_fig7c.sh` | sharding impact | ~12 min | ~5 h |
 
-Quick-tier times were measured on the paper's NVMe-backed server node;
-slower storage inflates them considerably, chiefly through Smaran's
-shard-database setup/teardown.
+Quick-tier times are as measured end-to-end on the paper's two-node
+CloudLab pair (r6615 server + c6420 client); slower storage inflates them
+considerably, chiefly through Smaran's shard-database setup/teardown.
 
 Notes that apply to both tiers:
 
@@ -206,6 +206,12 @@ rerun).
 - **A run was interrupted / a node rebooted** — just rerun the script;
   servers left behind are cleaned up automatically and unfinished benchmark
   points are redone. `status.sh` reports a detached run whose process died.
+- **Two-node scripts report the server unreachable (`Permission denied`)
+  after you changed your SSH keys on the CloudLab portal mid-experiment** —
+  CloudLab then rewrites `~/.ssh/authorized_keys` on every node, removing the
+  experiment-internal key the setup added. SSH into node1 (your portal key
+  still works) and run
+  `cat ~/.ssh/id_cloudlab.pub >> ~/.ssh/authorized_keys` to restore it.
 - **Dataset mounted somewhere unusual** — `export SMARAN_DATASET_DIR=<dir>`.
 
 ## Code layout
