@@ -11,6 +11,23 @@ You will run **exactly three commands total** (git clone, cd, and `./setup_cloud
 
 ---
 
+## Before you start · Register an SSH key on your CloudLab account
+
+CloudLab installs your public SSH key on the nodes at boot time. If your account has no key registered before you instantiate, you will get `Permission denied (publickey)` when you try to SSH in.
+
+1. On your laptop, generate a key if you do not have one:
+   ```bash
+   ls ~/.ssh/id_ed25519.pub || ssh-keygen -t ed25519 -N '' -f ~/.ssh/id_ed25519
+   cat ~/.ssh/id_ed25519.pub
+   ```
+2. Copy the whole `ssh-ed25519 ...` line.
+3. Open <https://www.cloudlab.us/manage_profile.php?nav=ssh>, click **Add Key**, paste, save.
+4. Now you can proceed to Step 1.
+
+If you already instantiated the profile before adding a key, terminate that experiment and instantiate again — CloudLab only pushes keys at node boot.
+
+---
+
 ## Step 1 · Instantiate the CloudLab profile 💻 (on your laptop)
 
 1. Log in at <https://www.cloudlab.us>. (Free for academics; sign up at <https://www.cloudlab.us/signup.php>.)
