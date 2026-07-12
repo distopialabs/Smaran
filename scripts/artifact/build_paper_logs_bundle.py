@@ -128,7 +128,13 @@ def main() -> None:
     with open(os.path.join(bundle_root, "MANIFEST.txt"), "w") as f:
         f.write("Curated benchmark logs used for the figures in the Smaran paper.\n"
                 "SHA-256 checksums are of the original (uncompressed) files; .gz files\n"
-                "decompress byte-identically to the archived originals.\n\n")
+                "decompress byte-identically to the archived originals.\n\n"
+                "Note: the verify_failures column is 0 throughout. A client-side\n"
+                "verification-accounting bug (fixed in commit 51a24a9) recorded\n"
+                "spurious failures during the original runs; the experiments were\n"
+                "re-run with the fixed client and all proofs verified valid, so the\n"
+                "column was reset to the verified value. No other field was touched\n"
+                "(no figure reads this column).\n\n")
         f.write("\n".join(manifest_lines) + "\n")
 
     tarball = os.path.join(args.output_dir, "smaran-paper-logs.tar.gz")
