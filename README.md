@@ -29,8 +29,9 @@ sharding).
    dropdowns (kept in the same cluster — the dataset is cluster-local).
 2. **Wait until the Startup column shows `Finished` for both nodes** on the
    experiment page (~2 min after boot). The green "ready" banner appears
-   earlier, at boot — if you SSH in before setup finishes, the login banner
-   says so (`setup IN PROGRESS`, with a log to watch).
+   earlier, at boot. The SSH login banner is the authoritative signal:
+   `setup READY` means go; `IN PROGRESS` means wait (it shows a log to
+   watch); `FAILED` means see `/local/setup.log`.
 3. **SSH into `node0`** (the client — the only node you ever touch) and go to
    the repo clone:
    ```bash
