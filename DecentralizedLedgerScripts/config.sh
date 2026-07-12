@@ -54,7 +54,7 @@ INGEST_BENCH_TIMEOUT=15m            # deadline per point (both tiers)
 # Shown by the --detach launch message and the full-scale inline tip; they do
 # not affect the runs. Keep in sync with the README time table (re-measured
 # on the artifact hardware during validation).
-QUICK_EST_FIG6A="~15 min (first run; ~7 min with cached databases)"
+QUICK_EST_FIG6A="~16 min (first run; ~9 min with cached databases)"
 QUICK_EST_FIG6B="~1 min (re-plots figure 6a's cached sweep)"
 QUICK_EST_FIG6C="~1 min (re-plots figure 6a's cached sweep)"
 QUICK_EST_FIG7A="~11 min"

@@ -42,7 +42,7 @@ sharding).
    ```bash
    ./DecentralizedLedgerScripts/plot_paper_figures.sh
    ```
-5. **First real experiment** (~15 min) — one quick-scale figure end-to-end
+5. **First real experiment** (~16 min) — one quick-scale figure end-to-end
    (ingest on the server node → serve → 32 proof clients → plot):
    ```bash
    ./QuickTesting-DecentralizedLedgerScripts/run_fig6a.sh
@@ -80,7 +80,7 @@ ends with the figure's path under `results/`. Quick variants live in
 | Script | Shows | Quick | Full scale (extrapolated) |
 |---|---|---|---|
 | `plot_paper_figures.sh` | all six, from paper logs | ~1 min | — |
-| `run_fig6a.sh` (first of 6a/6b/6c) | query latency vs range | ~15 min first run; ~7 min on cached DBs | one-time full ingest per protocol: tens of hours; then ~25 min per protocol |
+| `run_fig6a.sh` (first of 6a/6b/6c) | query latency vs range | ~16 min first run; ~9 min on cached DBs | one-time full ingest per protocol: tens of hours; then ~25 min per protocol |
 | `run_fig6b.sh` / `run_fig6c.sh` | throughput / payload size | seconds (re-plot of 6a's sweep) | seconds |
 | `run_fig7a.sh` | ingestion throughput | ~11 min | ~19 h |
 | `run_fig7b.sh` | archival storage impact | ~9 min (reuses fig6's DB) | ~1.5 h after fig6's ingest |
@@ -105,12 +105,18 @@ Notes that apply to both tiers:
   nodes); rerunning redoes any unfinished work from clean state.
 - Absolute numbers at quick scale are far below the paper's (small ingest
   window, short durations); the *trends* are what to check.
+- **Quick figures omit the Cauchy baseline.** Cauchy exists only as prebaked
+  paper-scale logs (a separate Rust codebase, far too slow to rerun), which
+  would sit meaninglessly next to quick-scale numbers; Tier 0 and full-scale
+  figures include it.
 - All parameters (both tiers) are defined in one place —
   **`DecentralizedLedgerScripts/config.sh`** — and any value can be
   overridden per-run via environment variables (examples in that file).
-- Quick-scale fig7b: the optimus/non_optimus curves nearly overlap — the
-  separation needs the full-scale ingest window; this is expected at quick
-  scale, not a bug.
+- Quick-scale fig7b: the two curves nearly overlap — expected, not a bug.
+  The no-archival-storage penalty grows with the *ingested window* (the
+  paper's 2.6M blocks), not the query range: we verified both legs run
+  distinct code paths and still differ by <10% even at a 60k-block window
+  with ranges to 50k. The separation needs the full-scale ingest.
 
 ## Full-scale runs (Tier 2)
 
