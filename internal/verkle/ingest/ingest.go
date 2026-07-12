@@ -53,7 +53,9 @@ func Run(cfg Config) error {
 
 	// Determine start block (resume if DB has progress)
 	start := cfg.Start
+	resumed := false
 	if last, ok := ns.GetLastProcessed(); ok {
+		resumed = true
 		resume := last + 1
 		if resume > start {
 			start = resume
@@ -86,6 +88,10 @@ func Run(cfg Config) error {
 	startTime := time.Now()
 	lastLog := time.Now()
 	blocksSinceFlush := 0
+
+	// Every path this session has persisted; serializeDirtyPaths uses it to
+	// detect split-created internal nodes (see dirty.go).
+	writtenPaths := make(map[string]struct{})
 
 	err = dr.IterateRange(uint32(start), uint32(cfg.End), func(blockNum uint32, entries []dataset.Entry) error {
 		// Track modified stems for dirty-path serialization
@@ -131,7 +137,7 @@ func Run(cfg Config) error {
 			return fmt.Errorf("block %d: root is not InternalNode", blockNum)
 		}
 
-		dirtyNodes, rootCommitment, err := serializeDirtyPaths(iroot, dirtyStems)
+		dirtyNodes, rootCommitment, err := serializeDirtyPaths(iroot, dirtyStems, writtenPaths)
 		if err != nil {
 			return fmt.Errorf("block %d: serialize dirty paths: %w", blockNum, err)
 		}
@@ -152,6 +158,24 @@ func Run(cfg Config) error {
 			allNodes, err := iroot.BatchSerialize()
 			if err != nil {
 				return fmt.Errorf("block %d: BatchSerialize: %w", blockNum, err)
+			}
+			// Tripwire: on a fresh ingest, every resident path must already
+			// have been persisted by the per-block dirty writer; a miss here
+			// means some tree change escaped it (the moved-leaf class of bug)
+			// and queries between its creation and this flush would fail.
+			if !resumed {
+				missed := 0
+				for _, sn := range allNodes {
+					if _, ok := writtenPaths[string(sn.Path)]; !ok {
+						missed++
+					}
+				}
+				if missed > 0 {
+					logger.Printf("WARNING: block %d: flush found %d node path(s) never written per-block (per-block coverage gap)", blockNum, missed)
+				}
+			}
+			for _, sn := range allNodes {
+				writtenPaths[string(sn.Path)] = struct{}{}
 			}
 			if err := ns.SaveNodes(allNodes, uint64(blockNum)); err != nil {
 				return fmt.Errorf("block %d: save all nodes: %w", blockNum, err)
