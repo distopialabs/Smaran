@@ -41,6 +41,19 @@ INGEST_BENCH_BLOCKS="${INGEST_BENCH_BLOCKS:-$(_pick INGEST_BENCH_BLOCKS)}"
 SHARDS_BENCH_BLOCKS="${SHARDS_BENCH_BLOCKS:-$(_pick SHARDS_BENCH_BLOCKS)}"
 SHARDS_BENCH_DURATION="${SHARDS_BENCH_DURATION:-$(_pick SHARDS_BENCH_DURATION)}"
 
+# --- Per-run setup guard ------------------------------------------------------
+# Quiet check of exactly what this figure's script needs; fails fast with a
+# remedy before any benchmark work (require_setup in common.sh). FIGURE_ID is
+# derived from the calling script's name (run_fig6a.sh -> fig6a).
+FIGURE_ID="$(basename "$0" .sh)"
+FIGURE_ID="${FIGURE_ID#run_}"
+case "$FIGURE_ID" in
+    fig6a | fig6b | fig6c | fig7b)
+        require_setup binaries data-local blocks account-stats params plot-deps server ;;
+    fig7a | fig7c)
+        require_setup binaries data-local blocks account-stats-50k plot-deps server ;;
+esac
+
 # --- Protocol helpers -------------------------------------------------------
 # Reviewer-facing name is "Smaran"; binaries/dirs use the old name "samurai",
 # and the query benchmark logs use "samuraimpt".

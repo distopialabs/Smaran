@@ -136,8 +136,151 @@ install_protocol() {
 }
 
 # ---------------------------------------------------------------------------
+# Setup checks — one source of truth for "is this machine ready"
+# ---------------------------------------------------------------------------
+# Every experiment/plot script starts with a quiet require_setup call listing
+# only the items it actually needs (<1 s, silent on success); check_setup.sh
+# runs every item verbosely. Both use the same _setup_check function so the
+# quiet guard and the troubleshooting tool can never drift apart.
+
+SETUP_CHECK_ITEMS=(binaries go plot-deps data-local blocks
+    account-stats-50k account-stats params paper-logs server)
+
+_INSTALL_HINT="run ./DecentralizedLedgerScripts/install_smaran.sh (on a fresh CloudLab node, setup may still be running — the SSH login banner shows its status)"
+
+_setup_desc() {
+    case "$1" in
+        binaries)          echo "protocol binaries built (bin/)" ;;
+        go)                echo "Go toolchain (go >= 1.$GO_REQUIRED_MINOR)" ;;
+        plot-deps)         echo "plot dependencies (LaTeX + matplotlib/pandas/numpy)" ;;
+        data-local)        echo "/data/local exists and is writable" ;;
+        blocks)            echo "block dataset reachable at data/blocks" ;;
+        account-stats-50k) echo "account_stats_50k.csv present" ;;
+        account-stats)     echo "benchmark accounts list available" ;;
+        params)            echo "Smaran verification params (data/params)" ;;
+        paper-logs)        echo "paper-logs bundle reachable" ;;
+        server)            echo "server node reachable (two-node mode only)" ;;
+    esac
+}
+
+# _setup_check <item>: silent; returns 0 if satisfied, else sets
+# SETUP_FAIL (what is wrong) and SETUP_HINT (one-line remedy).
+_setup_check() {
+    local item="$1"
+    SETUP_FAIL=""
+    SETUP_HINT="$_INSTALL_HINT"
+    case "$item" in
+        binaries)
+            local b
+            for b in samurai proofc merkle merkle-proofc verkle verkle-proofc; do
+                if [ ! -x "$REPO_ROOT/bin/$b" ]; then
+                    SETUP_FAIL="protocol binaries not built (bin/$b missing)"
+                    return 1
+                fi
+            done ;;
+        go)
+            if ! command -v go >/dev/null 2>&1 \
+                || [ "$(go version | sed -E 's/.*go1\.([0-9]+).*/\1/')" -lt "$GO_REQUIRED_MINOR" ]; then
+                SETUP_FAIL="Go >= 1.$GO_REQUIRED_MINOR not on PATH"
+                return 1
+            fi ;;
+        plot-deps)
+            if ! command -v latex >/dev/null 2>&1 || ! command -v dvipng >/dev/null 2>&1 \
+                || ! command -v gs >/dev/null 2>&1 \
+                || ! python3 -c 'import importlib.util as u, sys; sys.exit(0 if all(u.find_spec(m) for m in ("matplotlib", "pandas", "numpy")) else 1)' 2>/dev/null; then
+                SETUP_FAIL="plot dependencies missing (LaTeX/dvipng/ghostscript or python matplotlib/pandas/numpy)"
+                return 1
+            fi ;;
+        data-local)
+            if [ ! -d /data/local ] || [ ! -w /data/local ]; then
+                SETUP_FAIL="/data/local missing or not writable"
+                return 1
+            fi ;;
+        blocks)
+            if ! compgen -G "$REPO_ROOT/data/blocks/blk_*.dat" >/dev/null 2>&1; then
+                SETUP_FAIL="block dataset not reachable at data/blocks"
+                SETUP_HINT="mount the SmaranEthereumDataset CloudLab dataset (or set SMARAN_DATASET_DIR) and $_INSTALL_HINT"
+                return 1
+            fi ;;
+        account-stats-50k)
+            if [ ! -s "$REPO_ROOT/account_stats_50k.csv" ]; then
+                SETUP_FAIL="account_stats_50k.csv missing"
+                SETUP_HINT="it ships in the SmaranEthereumDataset CloudLab dataset (or regenerate: scripts/artifact/generate_account_stats.sh); then $_INSTALL_HINT"
+                return 1
+            fi ;;
+        account-stats)
+            # Full-scale runs read account_stats_all.csv; quick runs generate a
+            # window-matched list on the fly, which needs the Go toolchain.
+            if [ "${QUICK:-0}" = "1" ]; then
+                _setup_check go || SETUP_FAIL="Go toolchain missing (quick runs generate their accounts list with 'go run')"
+            else
+                if [ ! -s "$REPO_ROOT/account_stats_all.csv" ]; then
+                    SETUP_FAIL="account_stats_all.csv missing"
+                    SETUP_HINT="it ships in the SmaranEthereumDataset CloudLab dataset (or regenerate: scripts/artifact/generate_account_stats.sh); then $_INSTALL_HINT"
+                    return 1
+                fi
+            fi ;;
+        params)
+            if [ ! -d "$REPO_ROOT/data/params" ] || ! ls -A "$REPO_ROOT/data/params" >/dev/null 2>&1; then
+                SETUP_FAIL="data/params missing (Smaran proof verification needs it; it is committed in the repo)"
+                SETUP_HINT="restore it with: git -C $REPO_ROOT checkout -- data/params"
+                return 1
+            fi ;;
+        paper-logs)
+            if ! _paper_logs_findable; then
+                SETUP_FAIL="paper-logs bundle not found (smaran-paper-logs.tar.gz)"
+                SETUP_HINT="mount the SmaranEthereumDataset CloudLab dataset, or set SMARAN_PAPER_LOGS=<extracted paper-logs dir>"
+                return 1
+            fi ;;
+        server)
+            # Only meaningful in two-node mode (SERVER_HOST set by
+            # /local/cluster.env on CloudLab); single-node mode always passes.
+            if [ -n "${SERVER_HOST:-}" ] && [ "$SERVER_HOST" != "localhost" ]; then
+                if ! ssh -o BatchMode=yes -o ConnectTimeout=5 "$SERVER_HOST" "test -d /data/local -a -w /data/local" 2>/dev/null; then
+                    SETUP_FAIL="server node $SERVER_HOST not reachable over ssh (or its /data/local is not writable)"
+                    SETUP_HINT="server node setup may still be running — retry in a minute; see /local/cluster.env for the configured host"
+                    return 1
+                fi
+            fi ;;
+        *) die "unknown setup-check item: $item" ;;
+    esac
+}
+
+# require_setup <item>... — quiet per-run guard: stops before any work with a
+# one-line remedy if this script's prerequisites are not in place.
+require_setup() {
+    local item
+    for item in "$@"; do
+        if ! _setup_check "$item"; then
+            echo "Setup incomplete: $SETUP_FAIL" >&2
+            echo "  Fix: $SETUP_HINT" >&2
+            echo "  (Full diagnosis: ./DecentralizedLedgerScripts/check_setup.sh)" >&2
+            exit 1
+        fi
+    done
+}
+
+# ---------------------------------------------------------------------------
 # Paper-logs bundle (prebaked logs, hosted in the CloudLab dataset — not git)
 # ---------------------------------------------------------------------------
+
+# True iff resolve_paper_logs below would succeed — same lookup order, but
+# never extracts anything (used by the setup checks).
+_paper_logs_findable() {
+    local candidates=() dir m
+    [ -n "${SMARAN_PAPER_LOGS:-}" ] && candidates+=("$SMARAN_PAPER_LOGS")
+    candidates+=("$REPO_ROOT/paper-logs" "/data/local/artifact-staging/paper-logs")
+    for m in "${DATASET_MOUNT_CANDIDATES[@]}"; do
+        candidates+=("$m/paper-logs")
+    done
+    for dir in "${candidates[@]}"; do
+        [ -f "$dir/MANIFEST.txt" ] && return 0
+    done
+    for m in "${DATASET_MOUNT_CANDIDATES[@]}"; do
+        [ -f "$m/smaran-paper-logs.tar.gz" ] && return 0
+    done
+    return 1
+}
 
 # Prints the path of the paper-logs directory, extracting the tarball from the
 # dataset mount if needed. Fails with instructions if not found.

@@ -14,6 +14,10 @@
 
 source "$(dirname "$0")/lib/common.sh"
 
+# Plot-only mode needs no block dataset, binaries, or /data/local — just the
+# plotting toolchain and the prebaked logs.
+require_setup plot-deps paper-logs
+
 echo "Regenerating all paper figures from prebaked logs"
 
 BUNDLE="$(resolve_paper_logs)"
