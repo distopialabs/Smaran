@@ -24,6 +24,8 @@ but keep server and client in the same cluster, because the dataset is
 cluster-local (Clemson types, or the Utah pair c6525-100g + xl170).
 """
 
+import base64
+
 import geni.portal as portal
 import geni.rspec.pg as pg
 
@@ -96,6 +98,16 @@ pc.defineParameter(
     "needs only moderate cores for the 32 concurrent proof clients. Must be "
     "in the same cluster as the server.")
 
+pc.defineParameter(
+    "autoSetup", "Run automatic node setup at startup",
+    portal.ParameterType.BOOLEAN, True,
+    longDescription="Leave checked for the standard artifact-evaluation "
+    "flow: nodes clone the repository, install the toolchain, build, and "
+    "wire everything up with no manual steps. Uncheck to get bare nodes "
+    "(dataset mounted, LAN and blockstore configured, nothing installed); "
+    "the SSH login banner then shows the two commands that perform the "
+    "setup manually.")
+
 params = pc.bindParameters()
 
 server_cluster = CLUSTER_OF[params.server_type]
@@ -130,15 +142,29 @@ def add_node(name, hwtype, role, lan_ip):
     fslink.vlan_tagging = True
     fslink.link_multiplexing = True
 
-    # Startup: shallow-clone the repo (the ref's tree only, a few MB), then
-    # hand off to its setup script. Zero reviewer action (~2 min).
-    # Idempotent across reboots: the clone is skipped when already present.
-    node.addService(pg.Execute(
-        shell="bash",
-        command="sudo bash -c '{ { [ -d /local/repository/.git ] || "
-                "git clone --depth 1 --branch %s %s /local/repository; } && "
-                "bash /local/repository/cloudlab/setup-node.sh %s %s; } "
-                ">/local/setup.log 2>&1'" % (REPO_REF, REPO_URL, role, SERVER_IP)))
+    # Startup. Auto-setup on (default): shallow-clone the repo (the ref's
+    # tree only, a few MB), then hand off to its setup script - zero
+    # reviewer action (~2 min). Idempotent across reboots: the clone is
+    # skipped when already present. Auto-setup off: leave the node bare and
+    # install only an MOTD breadcrumb with the manual setup commands (it is
+    # overwritten by the real READY/FAILED banner once setup runs).
+    if params.autoSetup:
+        cmd = ("sudo bash -c '{ { [ -d /local/repository/.git ] || "
+               "git clone --depth 1 --branch %s %s /local/repository; } && "
+               "bash /local/repository/cloudlab/setup-node.sh %s %s; } "
+               ">/local/setup.log 2>&1'" % (REPO_REF, REPO_URL, role, SERVER_IP))
+    else:
+        motd = ("#!/bin/sh\n"
+                'echo "Smaran artifact: auto-setup was disabled at instantiation."\n'
+                'echo "To set up this node:"\n'
+                'echo "  git clone --depth 1 --branch %s %s /local/repository"\n'
+                'echo "  sudo /local/repository/cloudlab/setup-node.sh"\n'
+                % (REPO_REF, REPO_URL))
+        cmd = ("sudo bash -c 'echo %s | base64 -d "
+               ">/etc/update-motd.d/05-smaran-artifact && "
+               "chmod +x /etc/update-motd.d/05-smaran-artifact'"
+               % base64.b64encode(motd.encode()).decode())
+    node.addService(pg.Execute(shell="bash", command=cmd))
     return node, lan_iface
 
 

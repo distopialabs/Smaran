@@ -3,15 +3,18 @@
 # (and on reboots; every step is idempotent). Zero reviewer action: when this
 # finishes, the node is ready to run experiments.
 #
-#   Usage: setup-node.sh <server|client> <server-lan-ip>
+#   Usage: setup-node.sh [server|client] [server-lan-ip]
+#
+# Both arguments are optional: the role is auto-detected from the CloudLab
+# node name (profile names node1 = server, node0 = client) and the server
+# LAN address defaults to the profile's constant — so a manual run (the
+# profile's auto-setup checkbox unchecked) is just: sudo .../setup-node.sh
 #
 # Progress/diagnostics: /local/setup.log (the profile redirects our output
 # there). SSH logins get an accurate READY / IN PROGRESS / FAILED banner —
 # CloudLab's green "ready" fires at boot, before this script finishes.
 set -euo pipefail
 
-ROLE="${1:?usage: setup-node.sh <server|client> <server-lan-ip>}"
-SERVER_IP="${2:?usage: setup-node.sh <server|client> <server-lan-ip>}"
 REPO=/local/repository
 STATUS_FILE=/local/setup.status
 
@@ -23,6 +26,17 @@ die() {
     echo FAILED >"$STATUS_FILE"
     exit 1
 }
+
+ROLE="${1:-}"
+SERVER_IP="${2:-192.168.1.1}"
+if [ -z "$ROLE" ]; then
+    NODE_ID="$(geni-get client_id 2>/dev/null || cat /var/emulab/boot/nickname 2>/dev/null || true)"
+    case "$NODE_ID" in
+        node1*) ROLE=server ;;
+        node0*) ROLE=client ;;
+        *) die "cannot auto-detect role from node name '$NODE_ID' — usage: setup-node.sh <server|client> [server-lan-ip]" ;;
+    esac
+fi
 
 # --- MOTD readiness banner (before anything that can fail) -------------------
 cat >/etc/update-motd.d/05-smaran-artifact <<'MOTD'
