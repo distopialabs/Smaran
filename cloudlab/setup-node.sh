@@ -18,6 +18,12 @@ STATUS_FILE=/local/setup.status
 echo "IN PROGRESS" >"$STATUS_FILE"
 trap 'echo FAILED >"$STATUS_FILE"' ERR
 
+die() {
+    echo "ERROR: $*"
+    echo FAILED >"$STATUS_FILE"
+    exit 1
+}
+
 # --- MOTD readiness banner (before anything that can fail) -------------------
 cat >/etc/update-motd.d/05-smaran-artifact <<'MOTD'
 #!/bin/sh
@@ -29,6 +35,16 @@ case "$status" in
 esac
 MOTD
 chmod +x /etc/update-motd.d/05-smaran-artifact
+
+# --- The dataset must be populated ---------------------------------------------
+# Under the profile the dataset is always mounted, so missing content is
+# always an error - fail loudly here rather than confusingly at run time.
+# (A dataset still attached read-write to another experiment presents its
+# pre-release state to read-only mounts: often an empty filesystem.)
+for f in modified_accounts account_stats_50k.csv account_stats_all.csv \
+         smaran-paper-logs.tar.gz; do
+    [ -e "/smaran-dataset/$f" ] || die "/smaran-dataset/$f missing - dataset not populated yet (or still attached read-write to another experiment)"
+done
 
 # --- Who instantiated the experiment (the reviewer) --------------------------
 CREATOR="$(geni-get user_urn | awk -F'+' '{print $NF}')"
