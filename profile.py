@@ -52,6 +52,14 @@ IMAGE = {
     "utah": "urn:publicid:IDN+emulab.net+image+emulab-ops//UBUNTU22-64-STD",
 }
 
+# The artifact repository, shallow-cloned to /local/repository by the
+# startup command. This profile is maintained as profile.py in that repo and
+# pasted into the CloudLab profile editor (not a repo-based profile — the
+# repo's git history exceeds CloudLab's 500 MiB clone limit), so the clone
+# is ours to do. At submission time, flip REPO_REF to the artifact tag.
+REPO_URL = "https://github.com/distopialabs/Smaran.git"
+REPO_REF = "timing_debug"
+
 # Experiment-LAN addresses; setup-node.sh writes the server's address into
 # /local/cluster.env so the scripts find it (benchmark traffic crosses the
 # experiment LAN, as in the paper — not the control network).
@@ -120,11 +128,15 @@ def add_node(name, hwtype, role, lan_ip):
     fslink.best_effort = True
     fslink.vlan_tagging = True
 
-    # Startup: everything the node needs, zero reviewer action (~2 min).
+    # Startup: shallow-clone the repo (the ref's tree only, a few MB), then
+    # hand off to its setup script. Zero reviewer action (~2 min).
+    # Idempotent across reboots: the clone is skipped when already present.
     node.addService(pg.Execute(
         shell="bash",
-        command="sudo bash /local/repository/cloudlab/setup-node.sh "
-                "%s %s >/local/setup.log 2>&1" % (role, SERVER_IP)))
+        command="sudo bash -c '{ { [ -d /local/repository/.git ] || "
+                "git clone --depth 1 --branch %s %s /local/repository; } && "
+                "bash /local/repository/cloudlab/setup-node.sh %s %s; } "
+                ">/local/setup.log 2>&1'" % (REPO_REF, REPO_URL, role, SERVER_IP)))
     return node, lan_iface
 
 
