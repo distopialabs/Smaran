@@ -125,7 +125,7 @@ def find_newest_ingestion_csv(input_root: str, protocol: str, user_count: int) -
     """
     proto_dir = os.path.join(input_root, protocol)
     if not os.path.isdir(proto_dir):
-        print(f"  WARNING: protocol directory not found: {proto_dir}")
+        # Covered by the per-protocol zero-coverage warning after loading.
         return None
 
     matches = glob.glob(os.path.join(proto_dir, f"ingestion_{user_count}.csv"))
@@ -133,7 +133,9 @@ def find_newest_ingestion_csv(input_root: str, protocol: str, user_count: int) -
     matches = sorted(matches, key=os.path.getmtime, reverse=True)
 
     if not matches:
-        print(f"  WARNING: no ingestion CSV for protocol={protocol}, users={user_count} — skipping")
+        # Expected whenever a protocol was never run at this user count (the
+        # prebaked Cauchy series covers small counts the live protocols skip,
+        # and vice versa) — each protocol is plotted over its own counts.
         return None
 
     chosen = matches[0]
@@ -468,6 +470,9 @@ def main():
             if csv_path is None:
                 continue
             data[uc][proto] = compute_scalars(csv_path, args.warmup, args.cooldown, proto)
+    for proto in protocols:
+        if not any(proto in data[uc] for uc in user_counts):
+            print(f"  WARNING: no ingestion CSVs for protocol={proto} under {args.input_root} — it will not appear in the figure")
 
     # Print + save summary table
     print(f"\n{'Users':<10} {'Protocol':<15} {'Throughput (upd/s)':<20}")
