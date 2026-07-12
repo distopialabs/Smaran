@@ -296,6 +296,7 @@ def _plot_metric(
     configure_plot_style()
     fig, ax = plt.subplots(figsize=(30, 12))
 
+    y_seen: List[float] = []
     for protocol, proto_points in points_by_protocol.items():
         if not proto_points:
             continue
@@ -307,6 +308,7 @@ def _plot_metric(
         if not valid:
             continue
         xs, ys = zip(*valid)
+        y_seen.extend(ys)
         ax.plot(
             xs, ys,
             marker=style["marker"],
@@ -319,12 +321,29 @@ def _plot_metric(
 
     ax.set_xscale("log")
     ax.set_yscale("log")
-    if ylim_top is not None:
-        ax.set_ylim(top=ylim_top)
     if yticks is not None:
+        # The fixed tick lists span the paper's full-scale data (Cauchy
+        # reaches 27 h latencies and 1e-4 ops/s). Quick-tier data covers a
+        # fraction of that, and keeping every tick would stretch the axis
+        # over the unused decades — trim to the decades the plotted data
+        # occupies, then size the limits from data and surviving ticks.
+        # Full-scale data spans the whole list, so nothing changes there.
+        if y_seen:
+            lo, hi = min(y_seen) / 3, max(y_seen) * 3
+            trimmed = [t for t in yticks if lo <= t <= hi]
+            if len(trimmed) >= 2:
+                yticks = trimmed
         ax.set_yticks(yticks)
         ax.set_yticklabels([str(int(t)) if t == int(t) else str(t) for t in yticks])
         ax.yaxis.set_minor_locator(matplotlib.ticker.NullLocator())
+        if y_seen:
+            top = max(y_seen) * 1.3
+            if ylim_top is not None:
+                top = min(top, ylim_top)   # deliberate clip (payload panel)
+            top = max(top, max(yticks))
+            ax.set_ylim(bottom=min(min(y_seen) / 1.3, min(yticks)), top=top)
+    elif ylim_top is not None:
+        ax.set_ylim(top=ylim_top)
     ax.xaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(_range_formatter))
     ax.yaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(y_formatter))
     ax.grid(True, which="both", linestyle="--", linewidth=3, alpha=0.7)

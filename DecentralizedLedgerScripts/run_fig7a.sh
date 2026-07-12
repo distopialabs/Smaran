@@ -25,6 +25,9 @@ done
 PROTOCOL_ARGS=(--protocol samurai --protocol merkle --protocol verkle)
 if stage_cauchy fig7a "$LOGS/cauchy"; then
     PROTOCOL_ARGS+=(--protocol cauchy)
+else
+    # Drop any copy staged by an earlier run so it cannot leak into this plot.
+    rm -rf "$LOGS/cauchy"
 fi
 
 echo "Plotting"

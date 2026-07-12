@@ -30,8 +30,11 @@ QUICK_PROOF_DURATION=30s
 FULL_RANGES_SMARAN="1 100 500 1000 5000 7000 50000 200000 600000 1200000 2600000"
 FULL_RANGES_MERKLE="1 100 500 1000 5000 7000 50000 200000 600000"
 FULL_RANGES_VERKLE="1 100 500 1000 5000 7000"
-QUICK_RANGES_SMARAN="1 100 1000"
-QUICK_RANGES_MERKLE="1 100 1000"
+# 10000 = the whole quick ingest window; it is where Smaran visibly parts
+# from Merkle. Verkle stays capped lower (range 1000 already costs ~60 s
+# per query at quick scale).
+QUICK_RANGES_SMARAN="1 100 1000 10000"
+QUICK_RANGES_MERKLE="1 100 1000 10000"
 QUICK_RANGES_VERKLE="1 100 1000"
 
 # Figure 7b sweeps Smaran twice (optimus + non_optimus) over these ranges

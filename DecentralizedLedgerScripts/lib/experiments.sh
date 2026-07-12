@@ -249,6 +249,9 @@ clear_run_logs() {
 stage_cauchy() {
     local what="$1" dest="$2"      # what: fig7a | fig6 (source subdir in the bundle)
     local bundle src
+    # Cauchy is full-scale only: its prebaked numbers come from paper-scale
+    # runs and would sit meaninglessly next to quick-tier results.
+    [ "$QUICK" = "1" ] && return 1
     if ! bundle="$(resolve_paper_logs 2>/dev/null)"; then
         say "Paper-logs bundle not found — plotting without the Cauchy series (see README)"
         return 1
@@ -272,7 +275,12 @@ run_fig6_pipeline() {
     local logs="$RESULTS_DIR/fig6/logs"
     local out="$RESULTS_DIR/fig6"
     local clients_dir="$logs/numclients${NUM_CLIENTS}"
-    local marker="$logs/.complete-n${N_BLOCKS}-c${NUM_CLIENTS}-d${PROOF_DURATION}"
+    # The marker names every knob that shapes the sweep's CSVs — including
+    # the per-protocol range lists, so changed ranges redo the sweep instead
+    # of silently re-plotting stale logs.
+    local ranges_id
+    ranges_id="$(echo "${RANGES_SMARAN[*]}|${RANGES_MERKLE[*]}|${RANGES_VERKLE[*]}" | md5sum | cut -c1-8)"
+    local marker="$logs/.complete-n${N_BLOCKS}-c${NUM_CLIENTS}-d${PROOF_DURATION}-r${ranges_id}"
 
     if [ -f "$marker" ] && [ "${FORCE_RERUN:-0}" != "1" ]; then
         say "Reusing benchmark logs from a previous Figure 6 run ($logs; FORCE_RERUN=1 to redo)"
@@ -292,7 +300,9 @@ run_fig6_pipeline() {
         touch "$marker"
     fi
 
-    stage_cauchy fig6 "$clients_dir/cauchy" || true
+    # When Cauchy is not staged (quick tier, or no bundle), also drop any
+    # copy staged by an earlier run so it cannot leak into this plot.
+    stage_cauchy fig6 "$clients_dir/cauchy" || rm -rf "$clients_dir/cauchy"
 
     echo "Plotting"
     (cd "$REPO_ROOT" && python3 scripts/paper-figures/fig6_query.py "$logs" --output "$out")
