@@ -112,11 +112,16 @@ Notes that apply to both tiers:
 - All parameters (both tiers) are defined in one place —
   **`DecentralizedLedgerScripts/config.sh`** — and any value can be
   overridden per-run via environment variables (examples in that file).
-- Quick-scale fig7b: the two curves nearly overlap — expected, not a bug.
-  The no-archival-storage penalty grows with the *ingested window* (the
-  paper's 2.6M blocks), not the query range: we verified both legs run
-  distinct code paths and still differ by <10% even at a 60k-block window
-  with ranges to 50k. The separation needs the full-scale ingest.
+- **Quick-scale fig7b: the two curves nearly overlap — expected, not a
+  bug.** The gains of Smaran's archival storage are realized when the
+  ingested window is large — hundreds of thousands to millions of blocks
+  (the paper ingests 2.6M). At the quick tier's 10k-block window Smaran
+  performs the same with or without it: we verified the two legs run
+  distinct code paths and stay within a few percent even at a 60k-block
+  window with query ranges to 50k. Smaran being this fast *without*
+  archival storage at small scales is itself a good property, but it means
+  the paper's visual separation only appears at full scale (or raise
+  `N_BLOCKS` / `RANGES_7B` yourself — see `config.sh`).
 
 ## Full-scale runs (Tier 2)
 
