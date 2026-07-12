@@ -1,6 +1,6 @@
 # Smaran artifact disk image — build recipe
 
-The profile ([profile.py](profile.py)) boots each node from a per-cluster
+The profile ([profile.py](../profile.py)) boots each node from a per-cluster
 disk image with the slow, stable parts of the environment baked in. The
 **code is never baked**: CloudLab clones the repo fresh at instantiation and
 the startup script builds it (~1 min with the warm module cache), so a code
@@ -34,7 +34,7 @@ of the above — but instantiation takes ~5–10 min of apt/pip instead of ~2 mi
    `smaran-artifact` under project `distopialabs-PG0`; take it from the
    **client-type** node (images are hardware-portable within a cluster).
 6. Note the produced image URN and put it in `IMAGE` in
-   [profile.py](profile.py) for that cluster (replacing the `UBUNTU22-64-STD`
+   [profile.py](../profile.py) for that cluster (replacing the `UBUNTU22-64-STD`
    entry and the `TODO(image)` note).
 7. Repeat on the other cluster.
 

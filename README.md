@@ -222,6 +222,7 @@ entry-point directories:
 Reviewer-facing scripts live in **`DecentralizedLedgerScripts/`**
 (install, full-scale experiments, plot-only mode, `check_setup.sh`,
 `status.sh`) and **`QuickTesting-DecentralizedLedgerScripts/`** (quick
-variants of the same scripts). The CloudLab profile and node setup live in
-**`cloudlab/`**. All experiment output is written under **`results/`**
+variants of the same scripts). The CloudLab profile is **`profile.py`** at
+the repo root (where CloudLab requires it); node setup and the image recipe
+live in **`cloudlab/`**. All experiment output is written under **`results/`**
 (gitignored). `docs/DEVELOPMENT.md` documents every binary and subcommand.
