@@ -149,8 +149,14 @@ client, client_lan = add_node("node0", params.client_type, "client", CLIENT_IP)
 bs = server.Blockstore("bsnode1", "/data")
 bs.size = "700GB"
 
-# Client <-> server experiment LAN (no shaping - line rate, as in the paper).
+# Client <-> server experiment LAN. best_effort: don't demand guaranteed
+# interswitch bandwidth - the paper pair (c6420 10G, r6615 100G) lives in
+# different rack groups, and a guaranteed cross-group path rarely maps.
+# Best-effort still runs at line rate in practice, and the benchmark's
+# proof traffic is far below 10G.
 link = request.Link("lan0")
+link.best_effort = True
+link.vlan_tagging = True
 link.addInterface(client_lan)
 link.addInterface(server_lan)
 
