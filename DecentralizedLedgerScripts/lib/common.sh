@@ -322,6 +322,89 @@ stage_paper_logs() {
 }
 
 # ---------------------------------------------------------------------------
+# --detach: background experiment runs that survive SSH disconnects
+# ---------------------------------------------------------------------------
+# Shared by every run_fig*.sh via lib/experiments.sh (the QuickTesting
+# wrappers inherit it). Inline runs (the default) write no state files; only
+# --detach records <figure>.state + <figure>.console.log under results/logs/,
+# which status.sh reads.
+
+DETACH=0
+RUN_ARGS=()
+
+# parse_run_flags "$@": split artifact-level flags from pass-through args.
+parse_run_flags() {
+    local a
+    for a in "$@"; do
+        case "$a" in
+            --detach) DETACH=1 ;;
+            *) RUN_ARGS+=("$a") ;;
+        esac
+    done
+}
+
+run_state_file()  { echo "$RESULTS_DIR/logs/$1.state"; }
+run_console_log() { echo "$RESULTS_DIR/logs/$1.console.log"; }
+
+# figure_estimate <fig-id>: wall-clock estimate for the current tier, from
+# the EST_* table in config.sh (informational only).
+figure_estimate() {
+    local v="FULL_EST_${1^^}"
+    [ "${QUICK:-0}" = "1" ] && v="QUICK_EST_${1^^}"
+    echo "${!v:-unknown}"
+}
+
+# maybe_detach: in the parent invocation of a --detach run, relaunch this
+# script nohup'd in the background, record its state file, and exit. The
+# relaunched child (SMARAN_DETACHED=1) takes the normal inline path with its
+# output captured to the console log.
+maybe_detach() {
+    [ "$DETACH" = "1" ] || return 0
+    [ -z "${SMARAN_DETACHED:-}" ] || return 0
+    local fig="$FIGURE_ID"
+    local console state est pid
+    console="$(run_console_log "$fig")"
+    state="$(run_state_file "$fig")"
+    est="$(figure_estimate "$fig")"
+
+    # Refuse to double-launch: same figure = same ports and cache dirs.
+    if [ -f "$state" ]; then
+        pid="$(sed -n 's/^PID=//p' "$state")"
+        if grep -q '^STATE=running$' "$state" && [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+            echo "Figure ${fig#fig} is already running detached — check it with ./status.sh" >&2
+            exit 1
+        fi
+    fi
+
+    mkdir -p "$RESULTS_DIR/logs"
+    echo "Running experiment Figure ${fig#fig} detached — estimated ${est}. Console log: ${console#"$REPO_ROOT"/} — check progress with ./status.sh"
+    : >"$console"
+    local tier=full
+    [ "${QUICK:-0}" = "1" ] && tier=quick
+    {
+        echo "FIGURE=$fig"
+        echo "TIER=$tier"
+        echo "STATE=running"
+        echo "STARTED_AT=$(date +%s)"
+        echo "ESTIMATE=$est"
+        echo "CONSOLE_LOG=$console"
+    } >"$state"
+    SMARAN_DETACHED=1 SMARAN_STATE_FILE="$state" nohup "$0" "${RUN_ARGS[@]}" >>"$console" 2>&1 &
+    echo "PID=$!" >>"$state"
+    exit 0
+}
+
+# _finalize_run_state <exit-code>: EXIT-trap hook — mark a detached run's
+# state file done/failed. No-op for inline runs (no SMARAN_STATE_FILE).
+_finalize_run_state() {
+    local rc="$1" st=done
+    [ -n "${SMARAN_STATE_FILE:-}" ] && [ -f "$SMARAN_STATE_FILE" ] || return 0
+    [ "$rc" -eq 0 ] || st=failed
+    sed -i "s/^STATE=.*/STATE=$st/" "$SMARAN_STATE_FILE"
+    echo "FINISHED_AT=$(date +%s)" >>"$SMARAN_STATE_FILE"
+}
+
+# ---------------------------------------------------------------------------
 # Server lifecycle (used by the query-benchmark experiment scripts)
 # ---------------------------------------------------------------------------
 
@@ -335,7 +418,8 @@ start_server() {
     say "Starting $(basename "$bin") server on port $port (log: $log)"
     "$bin" serve --db-dir "$db" --port "$port" "$@" >"$log" 2>&1 &
     SERVER_PID=$!
-    trap 'stop_server' EXIT
+    # Shutdown on exit/interrupt is handled by the experiment-level cleanup
+    # trap in lib/experiments.sh (a trap here would overwrite it).
 }
 
 # wait_for_server <port> <timeout-seconds> [message]

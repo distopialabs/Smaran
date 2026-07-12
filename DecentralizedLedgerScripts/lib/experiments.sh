@@ -54,6 +54,27 @@ case "$FIGURE_ID" in
         require_setup binaries data-local blocks account-stats-50k plot-deps server ;;
 esac
 
+# --- Run mode: inline (default) or --detach -----------------------------------
+parse_run_flags "$@"
+maybe_detach   # exits here in the parent of a --detach run
+
+# From this point on we are the real run (inline, or the detached child).
+# One cleanup trap for the whole experiment: stop any server we started and,
+# for detached runs, finalize the state file. INT/TERM route through EXIT so
+# Ctrl+C also stops servers.
+_experiment_cleanup() {
+    local rc=$?
+    stop_server
+    _finalize_run_state "$rc"
+}
+trap _experiment_cleanup EXIT
+trap 'exit 130' INT TERM
+
+# Full-scale runs are hours long; recommend --detach when run inline.
+if [ "$QUICK" != "1" ] && [ -z "${SMARAN_DETACHED:-}" ] && [[ "$FIGURE_ID" == fig* ]]; then
+    echo "NOTE: this is a full-scale run, estimated $(figure_estimate "$FIGURE_ID") — recommended: $0 --detach (survives SSH disconnects; check progress with ./status.sh)"
+fi
+
 # --- Protocol helpers -------------------------------------------------------
 # Reviewer-facing name is "Smaran"; binaries/dirs use the old name "samurai",
 # and the query benchmark logs use "samuraimpt".

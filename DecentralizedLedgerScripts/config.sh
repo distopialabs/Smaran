@@ -47,6 +47,23 @@ FULL_INGEST_BENCH_BLOCKS=50000      # paper value
 QUICK_INGEST_BENCH_BLOCKS=10000
 INGEST_BENCH_TIMEOUT=15m            # deadline per point (both tiers)
 
+# --- Wall-clock estimates (informational only) ---------------------------------
+# Shown by the --detach launch message and the full-scale inline tip; they do
+# not affect the runs. Keep in sync with the README time table (re-measured
+# on the artifact hardware during validation).
+QUICK_EST_FIG6A="~15 min (first run; ~7 min with cached databases)"
+QUICK_EST_FIG6B="~1 min (re-plots figure 6a's cached sweep)"
+QUICK_EST_FIG6C="~1 min (re-plots figure 6a's cached sweep)"
+QUICK_EST_FIG7A="~11 min"
+QUICK_EST_FIG7B="~9 min (reuses figure 6's database)"
+QUICK_EST_FIG7C="~12 min"
+FULL_EST_FIG6A="~30 h (dominated by the one-time full ingest per protocol)"
+FULL_EST_FIG6B="~5 min (re-plots figure 6a's cached sweep)"
+FULL_EST_FIG6C="~5 min (re-plots figure 6a's cached sweep)"
+FULL_EST_FIG7A="~19 h"
+FULL_EST_FIG7B="~1.5 h (after figure 6's one-time ingest)"
+FULL_EST_FIG7C="~5 h"
+
 # --- Figure 7c: sharding sweep (Smaran only) ----------------------------------
 # Duration-limited as in the paper (full N_BLOCKS is never reached).
 FULL_SHARDS="1 10 50 100 500 1000"
