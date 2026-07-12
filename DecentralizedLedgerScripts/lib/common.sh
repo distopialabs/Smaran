@@ -27,7 +27,9 @@ is_remote() {
 # Host the protocol servers run on, as seen from this node.
 server_host() { if is_remote; then echo "$SERVER_HOST"; else echo localhost; fi; }
 
-SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new)
+# LogLevel=ERROR silences ssh's informational "Connection to <host> closed."
+# after each remote ingest (reviewers read it as noise) while keeping errors.
+SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new -o LogLevel=ERROR)
 
 # server_ctl <cmd...>: short control command on the server node (remote mode).
 server_ctl() { ssh "${SSH_OPTS[@]}" "$SERVER_HOST" "$@"; }
@@ -497,7 +499,13 @@ start_server() {
         say "Starting $name server on $SERVER_HOST port $port (log: $SERVER_LOG, fetched to $RESULTS_DIR/server-logs/ at end of run)"
         local extra=""
         [ $# -gt 0 ] && extra="$(printf ' %q' "$@")"
-        SERVER_PID="$(server_ctl "mkdir -p '$dir' && nohup '$bin' serve --db-dir '$db' --port $port$extra >'$SERVER_LOG' 2>&1 & echo \$! | tee '$SERVER_PIDFILE'")"
+        # Braces make & background only the nohup command: without them the
+        # whole "mkdir && nohup ..." list backgrounds as a subshell that (a)
+        # stays alive as the server's parent holding sshd's stdout pipe, so
+        # this ssh never returns, and (b) is what $! names, so the pidfile
+        # would point at the subshell instead of the server. </dev/null keeps
+        # the server clear of the ssh session's stdin.
+        SERVER_PID="$(server_ctl "mkdir -p '$dir' && { nohup '$bin' serve --db-dir '$db' --port $port$extra >'$SERVER_LOG' 2>&1 </dev/null & echo \$! | tee '$SERVER_PIDFILE'; }")"
     else
         mkdir -p "$RESULTS_DIR/server-logs"
         SERVER_LOG="$RESULTS_DIR/server-logs/${name}_port${port}.log"
