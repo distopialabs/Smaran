@@ -28,7 +28,7 @@ sharding).
    Clemson); if unavailable, pick a fallback pair from the parameter
    dropdowns (kept in the same cluster — the dataset is cluster-local).
 2. **Wait until the Startup column shows `Finished` for both nodes** on the
-   experiment page (~2 min after boot). The green "ready" banner appears
+   experiment page (~4 min after boot). The green "ready" banner appears
    earlier, at boot. The SSH login banner is the authoritative signal:
    `setup READY` means go; `IN PROGRESS` means wait (it shows a log to
    watch); `FAILED` means see `/local/setup.log`.

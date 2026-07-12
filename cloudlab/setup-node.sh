@@ -44,7 +44,7 @@ cat >/etc/update-motd.d/05-smaran-artifact <<'MOTD'
 status=$(cat /local/setup.status 2>/dev/null || echo UNKNOWN)
 case "$status" in
     READY)         echo "Smaran artifact: node setup READY — start at /local/repository/README.md" ;;
-    "IN PROGRESS") echo "Smaran artifact: node setup IN PROGRESS (~2 min) — watch: tail -f /local/setup.log" ;;
+    "IN PROGRESS") echo "Smaran artifact: node setup IN PROGRESS (~4 min) — watch: tail -f /local/setup.log" ;;
     *)             echo "Smaran artifact: node setup FAILED — see /local/setup.log" ;;
 esac
 MOTD
@@ -76,9 +76,10 @@ SMARAN_DATASET_DIR=/smaran-dataset
 EOF
 
 # --- Intra-experiment SSH (client drives the server over ssh) ----------------
-# geni-get returns the experiment creator's CloudLab key; homes are
-# NFS-shared across the experiment's nodes, so installing it once under
-# ~/.ssh makes node0 -> node1 ssh work without prompts.
+# geni-get returns the same experiment key on every node. Homes are LOCAL
+# per node (not NFS), but this script runs on each node, so each installs
+# the private key and authorizes its public half locally - together that
+# makes node0 -> node1 ssh work without prompts.
 SSH_DIR="$CREATOR_HOME/.ssh"
 KEY="$SSH_DIR/id_cloudlab"
 mkdir -p "$SSH_DIR"

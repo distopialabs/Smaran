@@ -1,11 +1,17 @@
-# Smaran artifact disk image — build recipe
+# Smaran artifact disk image — build recipe (optional, currently not used)
 
-The profile ([profile.py](../profile.py) — maintained here, pasted into the
-CloudLab profile editor) boots each node from a per-cluster disk image with
-the slow, stable parts of the environment baked in. The **code is never
-baked**: the startup command shallow-clones the repo fresh at instantiation
-and builds it (~1 min with the warm module cache), so a code fix never
-requires re-imaging.
+**Status: skipped.** Measured on the stock `UBUNTU22-64-STD` image, full
+node setup takes ~4 min (client; server ~1.5 min) — a baked image would
+save only ~2 min per instantiation, not worth the per-cluster snapshot
+maintenance. The profile therefore boots stock images. This recipe is kept
+in case setup ever grows slow again (e.g., heavier dependencies).
+
+The profile ([profile.py](../profile.py) — maintained in the repo, pasted
+into the CloudLab profile editor) would boot each node from a per-cluster
+disk image with the slow, stable parts of the environment baked in. The
+**code is never baked**: the startup command shallow-clones the repo fresh
+at instantiation and builds it (~1 min with the warm module cache), so a
+code fix never requires re-imaging.
 
 What the image adds over stock `UBUNTU22-64-STD`:
 

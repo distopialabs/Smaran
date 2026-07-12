@@ -12,7 +12,7 @@ This profile reproduces the paper's benchmark topology:
 
 Both nodes mount the SmaranEthereumDataset (blocks + account CSVs + curated
 paper logs) read-only at `/smaran-dataset`, and the repository is cloned to
-`/local/repository` on each node. Node setup is fully automatic (~2 min after
+`/local/repository` on each node. Node setup is fully automatic (~4 min after
 boot): wait until the Startup column on the experiment page shows
 **Finished** for both nodes, then SSH into node0 and follow
 `/local/repository/README.md`. If you SSH in early, the login banner shows
@@ -144,7 +144,7 @@ def add_node(name, hwtype, role, lan_ip):
 
     # Startup. Auto-setup on (default): shallow-clone the repo (the ref's
     # tree only, a few MB), then hand off to its setup script - zero
-    # reviewer action (~2 min). Idempotent across reboots: the clone is
+    # reviewer action (~4 min). Idempotent across reboots: the clone is
     # skipped when already present. Auto-setup off: leave the node bare and
     # install only an MOTD breadcrumb with the manual setup commands (it is
     # overwritten by the real READY/FAILED banner once setup runs).
