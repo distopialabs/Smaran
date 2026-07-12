@@ -27,7 +27,7 @@ is_remote() {
 # Host the protocol servers run on, as seen from this node.
 server_host() { if is_remote; then echo "$SERVER_HOST"; else echo localhost; fi; }
 
-SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=10)
+SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new)
 
 # server_ctl <cmd...>: short control command on the server node (remote mode).
 server_ctl() { ssh "${SSH_OPTS[@]}" "$SERVER_HOST" "$@"; }
@@ -272,7 +272,7 @@ _setup_check() {
             # Only meaningful in two-node mode (SERVER_HOST set by
             # /local/cluster.env on CloudLab); single-node mode always passes.
             if [ -n "${SERVER_HOST:-}" ] && [ "$SERVER_HOST" != "localhost" ]; then
-                if ! ssh -o BatchMode=yes -o ConnectTimeout=5 "$SERVER_HOST" "test -d /data/local -a -w /data/local" 2>/dev/null; then
+                if ! ssh "${SSH_OPTS[@]}" -o ConnectTimeout=5 "$SERVER_HOST" "test -d /data/local -a -w /data/local" 2>/dev/null; then
                     SETUP_FAIL="server node $SERVER_HOST not reachable over ssh (or its /data/local is not writable)"
                     SETUP_HINT="server node setup may still be running — retry in a minute; see /local/cluster.env for the configured host"
                     return 1
