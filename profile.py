@@ -128,6 +128,7 @@ def add_node(name, hwtype, role, lan_ip):
     fslink.addInterface(fsnode.interface)
     fslink.best_effort = True
     fslink.vlan_tagging = True
+    fslink.link_multiplexing = True
 
     # Startup: shallow-clone the repo (the ref's tree only, a few MB), then
     # hand off to its setup script. Zero reviewer action (~2 min).
@@ -149,14 +150,16 @@ client, client_lan = add_node("node0", params.client_type, "client", CLIENT_IP)
 bs = server.Blockstore("bsnode1", "/data")
 bs.size = "700GB"
 
-# Client <-> server experiment LAN. best_effort: don't demand guaranteed
-# interswitch bandwidth - the paper pair (c6420 10G, r6615 100G) lives in
-# different rack groups, and a guaranteed cross-group path rarely maps.
-# Best-effort still runs at line rate in practice, and the benchmark's
-# proof traffic is far below 10G.
+# Client <-> server experiment LAN. All three flags matter for mapping:
+# best_effort (no guaranteed cross-rack bandwidth - the paper pair lives in
+# different rack groups), and vlan_tagging + link_multiplexing so this LAN
+# can share a physical port with the dataset link (the r6615 has a single
+# experiment interface). Best-effort still runs at line rate in practice,
+# and the benchmark's proof traffic is far below 10G.
 link = request.Link("lan0")
 link.best_effort = True
 link.vlan_tagging = True
+link.link_multiplexing = True
 link.addInterface(client_lan)
 link.addInterface(server_lan)
 
