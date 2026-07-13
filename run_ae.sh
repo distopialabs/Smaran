@@ -90,20 +90,23 @@ if [ "$USECASE" = 'kt' ]; then
   else
     SCRIPTS='./KeyTransparencyScripts/run_fig4a.sh ./KeyTransparencyScripts/run_fig4b.sh ./KeyTransparencyScripts/run_fig4c.sh ./KeyTransparencyScripts/run_fig5.sh'
   fi
-  PDF_GLOB='output/*.pdf'
 else
   if [ "$MODE" = 'quick' ]; then
     SCRIPTS='./QuickTesting-DecentralizedLedgerScripts/run_fig6a.sh ./QuickTesting-DecentralizedLedgerScripts/run_fig6b.sh ./QuickTesting-DecentralizedLedgerScripts/run_fig6c.sh ./QuickTesting-DecentralizedLedgerScripts/run_fig7a.sh ./QuickTesting-DecentralizedLedgerScripts/run_fig7b.sh ./QuickTesting-DecentralizedLedgerScripts/run_fig7c.sh'
   else
     SCRIPTS='./DecentralizedLedgerScripts/run_fig6a.sh ./DecentralizedLedgerScripts/run_fig6b.sh ./DecentralizedLedgerScripts/run_fig6c.sh ./DecentralizedLedgerScripts/run_fig7a.sh ./DecentralizedLedgerScripts/run_fig7b.sh ./DecentralizedLedgerScripts/run_fig7c.sh'
   fi
-  PDF_GLOB='results/fig*/*.pdf'
 fi
 ssh "${USER}@${HOST}" "cd $REPO_EXPR && for s in $SCRIPTS; do echo === \$s ===; \$s || { echo \"\$s failed\"; exit 1; }; done"
 
 echo "[4/4] Copying PDFs to $OUT ..."
 mkdir -p "$OUT"
-scp "${USER}@${HOST}:$REPO_EXPR/$PDF_GLOB" "$OUT/"
+if [ "$USECASE" = 'kt' ]; then
+  scp "${USER}@${HOST}:$REPO_EXPR/output/*.pdf" "$OUT/"
+else
+  # DL figures live in nested per-figure directories (e.g. fig6/numclients32/)
+  scp -r "${USER}@${HOST}:$REPO_EXPR/results/fig*" "$OUT/"
+fi
 
 echo ''
 echo '==========================================================='
