@@ -1,122 +1,71 @@
 #!/usr/bin/env bash
-# Smaran AE — one-command laptop-side driver.
-# Reviewer runs this on their LAPTOP after instantiating the CloudLab profile.
+# Smaran AE — drive the artifact from your LAPTOP.
+# Thin remote wrapper around ./run.sh on node0; no prior login to node0 is
+# needed (CloudLab installs your SSH key on the nodes at boot).
 #
-# Usage:  bash run_ae.sh <cloudlab-username> <node0-hostname> [kt|dl] [quick|full]
-# Defaults: usecase 'kt', mode 'full'.
+#   bash run_ae.sh <user> <node0-host> start <mode> <scope...>   start (detached)
+#   bash run_ae.sh <user> <node0-host> status                    check progress
+#   bash run_ae.sh <user> <node0-host> follow                    watch log live
+#   bash run_ae.sh <user> <node0-host> stop                      abort the run
+#   bash run_ae.sh <user> <node0-host> fetch [local-dir]         copy figures back
 #
-# What it does:
-#   1) SSH into node0
-#   2) Ensure the repo is present (the profile clones it to /local/repository)
-#      and inter-node SSH works
-#   3) Run every figure for the chosen usecase
-#   4) scp PDFs back to ~/Desktop/smaran-ae-output/ on your laptop
+#   mode:  smoke | quick | full        scope: all | kt | dl | fig4a ... fig7c
+#
+# Example session:
+#   bash run_ae.sh alice clnode123.clemson.cloudlab.us start quick all
+#   bash run_ae.sh alice clnode123.clemson.cloudlab.us status
+#   bash run_ae.sh alice clnode123.clemson.cloudlab.us fetch ~/Desktop/smaran-figs
 set -euo pipefail
 
-if [ $# -lt 2 ]; then
-  echo "Usage: $0 <cloudlab-username> <node0-hostname> [kt|dl] [quick|full]"
-  echo "Example: $0 alice clnode123.clemson.cloudlab.us kt full"
+if [ $# -lt 3 ]; then
+  sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'
   exit 2
 fi
 
-USER=$1
-HOST=$2
-USECASE=${3:-kt}
-MODE=${4:-full}
-OUT="${HOME}/Desktop/smaran-ae-output"
+USER=$1; HOST=$2; shift 2
 BRANCH=unified-artifact
+SSH=(ssh -o StrictHostKeyChecking=accept-new "${USER}@${HOST}")
 
-case "$USECASE" in
-  kt)
-    case "$MODE" in
-      quick) ETA='~90 minutes' ;;
-      full)  ETA='~3 hours' ;;
-      *) echo 'MODE must be "quick" or "full"'; exit 2 ;;
-    esac ;;
-  dl)
-    case "$MODE" in
-      quick) ETA='~50 minutes' ;;
-      full)  ETA='tens of hours (full-scale ingest; see README)' ;;
-      *) echo 'MODE must be "quick" or "full"'; exit 2 ;;
-    esac ;;
-  *) echo 'USECASE must be "kt" or "dl"'; exit 2 ;;
-esac
-
-echo '==========================================================='
-echo "  Smaran Artifact Evaluation - $USECASE $MODE sweep"
-echo "  Target: ${USER}@${HOST}"
-echo "  Estimated wall-clock: $ETA"
-echo "  Output: ${OUT}"
-echo '==========================================================='
-
-echo '[1/4] Checking SSH...'
-ssh -o StrictHostKeyChecking=accept-new "${USER}@${HOST}" 'hostname' \
-  || { echo 'SSH failed'; exit 1; }
-
-echo '[2/4] Setting up node0...'
-ssh "${USER}@${HOST}" "BRANCH='$BRANCH' bash -s" <<'REMOTE'
-set -euo pipefail
-# The CloudLab profile clones the repo to /local/repository at boot; fall
-# back to a home-dir clone when running against a bare machine.
-if [ -d /local/repository/.git ]; then
-  REPO=/local/repository
-else
-  REPO="$HOME/Smaran"
-  [ -d "$REPO/.git" ] || git clone --branch "$BRANCH" \
-      https://github.com/distopialabs/Smaran.git "$REPO"
-fi
-cd "$REPO"
-[ -f ~/.ssh/id_ed25519 ] || ssh-keygen -t ed25519 -N '' -f ~/.ssh/id_ed25519
-grep -qxF "$(cat ~/.ssh/id_ed25519.pub)" ~/.ssh/authorized_keys 2>/dev/null \
-  || cat ~/.ssh/id_ed25519.pub >> ~/.ssh/authorized_keys
-cat ~/.ssh/id_ed25519.pub \
-  | ssh -o StrictHostKeyChecking=accept-new node1 \
-      "grep -qxF \"\$(cat)\" ~/.ssh/authorized_keys || cat >> ~/.ssh/authorized_keys"
-ssh-keyscan -H node0 node1 >> ~/.ssh/known_hosts 2>/dev/null || true
-[ -e /usr/local/bin/go ] || sudo ln -sf /usr/local/go/bin/go /usr/local/bin/go
-[ -f KeyTransparencyScripts/nodes.env ] || cp KeyTransparencyScripts/nodes.env.template KeyTransparencyScripts/nodes.env
-sudo pkill -9 coniksserver ktserver 2>/dev/null || true
-sudo rm -f /tmp/coniks.sock || true
-ssh -o StrictHostKeyChecking=no node1 'sudo pkill -9 -f coniks 2>/dev/null; sudo rm -f /tmp/coniks.sock' || true
-echo "setup complete in $REPO"
-REMOTE
-
+# The profile clones the repo to /local/repository at boot; on a bare machine
+# fall back to a home-dir clone.
 REPO_EXPR='$( [ -d /local/repository/.git ] && echo /local/repository || echo ~/Smaran )'
 
-echo "[3/4] Running $USECASE $MODE experiments on node0..."
-if [ "$USECASE" = 'kt' ]; then
-  if [ "$MODE" = 'quick' ]; then
-    SCRIPTS='./QuickTesting-KeyTransparency/run_fig4a_quick.sh ./QuickTesting-KeyTransparency/run_fig4b_quick.sh ./QuickTesting-KeyTransparency/run_fig4c_quick.sh ./QuickTesting-KeyTransparency/run_fig5_quick.sh'
-  else
-    SCRIPTS='./KeyTransparencyScripts/run_fig4a.sh ./KeyTransparencyScripts/run_fig4b.sh ./KeyTransparencyScripts/run_fig4c.sh ./KeyTransparencyScripts/run_fig5.sh'
-  fi
-else
-  if [ "$MODE" = 'quick' ]; then
-    SCRIPTS='./QuickTesting-DecentralizedLedgerScripts/run_fig6a.sh ./QuickTesting-DecentralizedLedgerScripts/run_fig6b.sh ./QuickTesting-DecentralizedLedgerScripts/run_fig6c.sh ./QuickTesting-DecentralizedLedgerScripts/run_fig7a.sh ./QuickTesting-DecentralizedLedgerScripts/run_fig7b.sh ./QuickTesting-DecentralizedLedgerScripts/run_fig7c.sh'
-  else
-    SCRIPTS='./DecentralizedLedgerScripts/run_fig6a.sh ./DecentralizedLedgerScripts/run_fig6b.sh ./DecentralizedLedgerScripts/run_fig6c.sh ./DecentralizedLedgerScripts/run_fig7a.sh ./DecentralizedLedgerScripts/run_fig7b.sh ./DecentralizedLedgerScripts/run_fig7c.sh'
-  fi
+ensure_repo() {
+  "${SSH[@]}" "BRANCH='$BRANCH' bash -s" <<'REMOTE'
+set -euo pipefail
+if [ ! -d /local/repository/.git ] && [ ! -d ~/Smaran/.git ]; then
+  git clone --branch "$BRANCH" https://github.com/distopialabs/Smaran.git ~/Smaran
 fi
-ssh "${USER}@${HOST}" "cd $REPO_EXPR && for s in $SCRIPTS; do echo === \$s ===; \$s || { echo \"\$s failed\"; exit 1; }; done"
+REMOTE
+}
 
-echo "[4/4] Copying PDFs to $OUT ..."
-mkdir -p "$OUT"
-if [ "$USECASE" = 'kt' ]; then
-  scp "${USER}@${HOST}:$REPO_EXPR/output/*.pdf" "$OUT/"
-else
-  # DL figures live in nested per-figure directories (e.g. fig6/numclients32/)
-  scp -r "${USER}@${HOST}:$REPO_EXPR/results/fig*" "$OUT/"
-fi
-
-echo ''
-echo '==========================================================='
-if [ "$USECASE" = 'kt' ]; then
-  echo '  Done. Compare against paper Figures 4a/4b/4c/5.'
-  echo '  Reference PDFs to compare against: reference_pdfs/ in the repo'
-else
-  echo '  Done. Compare against paper Figures 6a/6b/6c/7a/7b/7c.'
-  echo '  (Tier 0 regenerates the paper versions: ./DecentralizedLedgerScripts/plot_paper_figures.sh)'
-fi
-echo "  PDFs: $OUT"
-echo '==========================================================='
-ls -la "$OUT/"
+case "${1:-}" in
+  start)
+    ensure_repo
+    "${SSH[@]}" "cd $REPO_EXPR && ./run.sh $*"
+    echo
+    echo "Check progress any time with:"
+    echo "  bash $0 $USER $HOST status"
+    ;;
+  status|stop)
+    "${SSH[@]}" "cd $REPO_EXPR && ./run.sh $1"
+    ;;
+  follow)
+    echo '(Ctrl+C stops watching; the run keeps going on node0)'
+    "${SSH[@]}" "cd $REPO_EXPR && ./run.sh follow"
+    ;;
+  fetch)
+    DEST="${2:-$HOME/Desktop/smaran-ae-output}"
+    mkdir -p "$DEST"
+    scp "${USER}@${HOST}:$REPO_EXPR/output/*.pdf" "$DEST/" 2>/dev/null || true
+    # DL figures live in nested per-figure directories (e.g. fig6/numclients32/)
+    scp -r "${USER}@${HOST}:$REPO_EXPR/results/fig*" "$DEST/" 2>/dev/null || true
+    scp -r "${USER}@${HOST}:$REPO_EXPR/results/paper-figures" "$DEST/" 2>/dev/null || true
+    echo "Figures in $DEST:"
+    find "$DEST" -name '*.pdf' | sort
+    ;;
+  *)
+    sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'
+    exit 2
+    ;;
+esac

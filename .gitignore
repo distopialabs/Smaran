@@ -35,3 +35,4 @@ CONTEXT.md
 Coniks/build/
 KeyTransparencyScripts/nodes.env
 *.pyc
+.ae/
