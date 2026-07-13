@@ -11,8 +11,8 @@ reproduces both evaluation usecases with one standard workflow:
 
 | Usecase | Figures | Scope name | Guide |
 |---|---|---|---|
-| **Key Transparency** (§7.1) | 4a, 4b, 4c, 5 | `kt` | [outline below](#key-transparency-the-four-kt-figures), full guide in [docs/kt-artifact-guide.md](docs/kt-artifact-guide.md) |
-| **Decentralized Ledger** (§7.2) | 6a-6c, 7a-7c | `dl` | [below](#decentralized-ledger-the-six-dl-figures) |
+| **Key Transparency** (§7.1) | 4a, 4b, 4c, 5 | `kt` | [below](#key-transparency) |
+| **Decentralized Ledger** (§7.2) | 6a-6c, 7a-7c | `dl` | [below](#decentralized-ledger) |
 
 ## How to run: the three choices
 
@@ -36,7 +36,7 @@ your key at boot):
 | `./run.sh follow` | `bash run_ae.sh <user> <node0-host> follow` |
 | `./run.sh results` | `bash run_ae.sh <user> <node0-host> fetch ~/Desktop/smaran-figs` |
 
-(`run_ae.sh` is in this repo: download it, or clone the repo on your laptop.)
+(`run_ae.sh` is in this repo; see [Run from your laptop](#run-from-your-laptop-optional).)
 
 **3. What do you run?** `start <mode> <scope>`:
 
@@ -56,16 +56,20 @@ estimate; closing your terminal never loses a run. `status` shows progress,
 (rerunning is safe, since finished figures are cached), `results` lists or
 copies the PDFs.
 
-The rest of this README: [Quick start](#quick-start-cloudlab-profile) for
-the profile path, [where output lands](#where-everything-lives), then one
-section per usecase:
+The rest of this README: [Quick start](#quick-start-cloudlab-profile),
+[where output lands](#where-everything-lives), then one guide per usecase
+with the same structure (the figures, what to check, usecase notes):
 
-- **[Key Transparency](#key-transparency-the-four-kt-figures)**: Smaran as a
-  key-transparency log, evaluated against **CONIKS** and **OPTIKS** across
-  four figures.
-- **[Decentralized Ledger](#decentralized-ledger-the-six-dl-figures)**:
-  Smaran as a sharded KZG-based decentralized ledger, evaluated against
-  **Merkle (MPT)** and **Verkle** baselines across six figures.
+- **[Key Transparency](#key-transparency)**: Smaran as a key-transparency
+  log, vs **CONIKS** and **OPTIKS**, four figures.
+- **[Decentralized Ledger](#decentralized-ledger)**: Smaran as a sharded
+  KZG-based decentralized ledger, vs **Merkle (MPT)** and **Verkle**, six
+  figures.
+
+Shared reference material follows the guides: [full-scale runs](#full-scale-runs),
+[laptop driving](#run-from-your-laptop-optional), [viewing figures](#viewing-figures),
+[install](#install-paths-bc-one-time), [troubleshooting](#troubleshooting),
+[code layout](#code-layout).
 
 > **Naming note:** the system was renamed to *Smaran* during submission; the
 > codebase still uses its original name *samurai* in binary, package, and log
@@ -95,7 +99,8 @@ yourself.
    The defaults are the paper's node pair (r6615 server + c6420 client at
    Clemson); if unavailable, pick a fallback pair from the parameter
    dropdowns (kept in the same cluster, because the dataset is
-   cluster-local).
+   cluster-local; priority order in
+   [Hardware fallbacks](#hardware-fallbacks-cloudlab-profile)).
 2. **Wait until the Startup column shows `Finished` for both nodes** on the
    experiment page (~4 min after boot). The green "ready" banner appears
    earlier, at boot. The SSH login banner is the authoritative signal:
@@ -142,53 +147,77 @@ On manual/own-server setups you write `/local/cluster.env` yourself (one
 line, `SERVER_HOST=...`; see [Install](#install-paths-bc-one-time)); the
 scripts then behave identically.
 
-## Key Transparency: the four KT figures
+## Key Transparency
 
-Smaran vs **CONIKS** and **OPTIKS** as key-transparency logs. Each figure is
-one sweep across the three protocols: `ktserver` runs on node1 (built there
-automatically from a GitHub clone pinned to this repo's commit), `ktbench`
-drives it from node0, and a PDF lands in `output/`.
+Smaran vs **CONIKS** and **OPTIKS** as key-transparency logs (§7.1). Each
+figure is one sweep across the three protocols: `ktserver` runs on node1
+(built there automatically from a GitHub clone pinned to this repo's
+commit), `ktbench` drives it from node0, and a PDF lands in `output/`.
+Run with `./run.sh start <mode> kt` (or per-figure, e.g. `quick fig4a`).
 
-| Figure | Shows | Quick | Full scale |
+### The figures
+
+| Figure | Shows | Quick | Full |
 |---|---|---|---|
-| `fig4a` | monitoring-query latency vs versions | ~50 min (runs the fig4 sweep) | ~3 h for the full `kt` scope |
-| `fig4b` / `fig4c` | throughput / payload vs versions | ~1 min (re-plot of 4a's sweep) | minutes on 4a's sweep |
-| `fig5` | key-update (put) throughput vs users | ~55 min | included above |
+| `fig4a` | monitoring-query latency vs versions | ~50 min (runs the fig4 sweep) | 11 version counts {2 ... 2047} |
+| `fig4b` / `fig4c` | throughput / payload vs versions | ~1 min (re-plot of 4a's sweep) | re-plot of the full sweep |
+| `fig5` | key-update (put) throughput vs users | ~55 min (3 user counts) | 6 user counts {10k ... 1M} |
 
-Figures 4a/4b/4c come from one sweep: the first script to run performs it,
-the other two re-plot from its logs (`KT_FORCE_RERUN=1` to redo). Quick
-scale cuts the sweep from 11 version counts to 5 and from 6 user counts to
-3, keeping the trends and protocol ordering.
+Full `kt` scope is ~3 h compute; quick is ~2 h with 5 version counts and 3
+user counts, keeping the trends and protocol ordering. Figures 4a/4b/4c
+come from one sweep: the first script to run performs it, the other two
+re-plot from its logs (`KT_FORCE_RERUN=1` to redo).
 
-What to check (details and expected shapes in the
-[KT guide](docs/kt-artifact-guide.md)):
-
-- `python3 KeyTransparencyScripts/verify.py` is an automated shape check
-  against the paper's §7.1 claims; exit code 0 means all of them held.
-- [`reference_pdfs/`](reference_pdfs/) holds the PDFs from our own full run
-  on the paper's hardware pair; your shapes should match. Absolute numbers
-  depend on hardware; trends and protocol ordering are the criteria.
-
-Underlying scripts: `KeyTransparencyScripts/run_fig*.sh` (full scale) and
+Underlying scripts: `KeyTransparencyScripts/run_fig*.sh` (full) and
 `QuickTesting-KeyTransparency/run_fig*_quick.sh` (quick), same scripts with
-reduced parameters. `./run.sh` invokes these.
+reduced parameters; `./run.sh` invokes these.
 
-## Decentralized Ledger: the six DL figures
+### What to check
 
-Smaran vs **Merkle (MPT)** and **Verkle** as decentralized-ledger state:
-**6a** (query latency), **6b** (query throughput), **6c** (payload size),
-**7a** (ingestion throughput), **7b** (impact of archival storage), **7c**
-(impact of sharding). Ingest runs on node1, proof clients on node0, PDFs
-land under `results/`.
+Absolute numbers depend on hardware; trends and protocol ordering are the
+criteria.
+
+- **Automated:** `python3 KeyTransparencyScripts/verify.py` checks the
+  shapes against the paper's §7.1 claims; exit code 0 means all of them
+  held on your data.
+- **Visual:** compare `output/*.pdf` against the paper's Figures 4a/4b/4c/5,
+  or against [`reference_pdfs/`](reference_pdfs/), the PDFs from our own
+  full sweep on the paper's hardware pair.
+
+| Figure | Expected shape |
+|---|---|
+| 4a latency | Coniks steepest rise, reaching ~5 s at 2047 versions. Optiks linear rise. Smaran near-flat, then climbs after 512. |
+| 4b throughput | Optiks highest at low versions, crosses below Smaran around 128-256. Smaran near-flat then declines. Coniks lowest throughout. |
+| 4c payload | Optiks and Coniks track together, growing steeply. Smaran grows much more slowly. |
+| 5 put throughput | Broken y-axis. Upper: Optiks and Smaran in tens of thousands of ops/s with mild decline. Lower: Coniks flat at ~640 ops/s. |
+
+### KT notes
+
+- **Single run per point.** The paper averages 3 runs; the artifact runs
+  each point once to fit the time budget, so individual points may look
+  noisier than the paper (Fig 4a Smaran at 700 and 1500 versions, Fig 5
+  Optiks between 50k and 1M users). Shape and ordering are preserved.
+- **Coniks fork.** The `Coniks/` submodule is `coniks-history-extension`, a
+  fork of official CONIKS with a Merkle Patricia Trie extension. Its
+  per-request cost is user-count-independent, which is why our Fig 5 Coniks
+  curve is flat while the paper's declines slightly. Fig 4 shape matches
+  the paper.
+- KT needs no dataset; everything is generated during the sweep.
+
+## Decentralized Ledger
+
+Smaran vs **Merkle (MPT)** and **Verkle** as decentralized-ledger state
+(§7.2). Each figure ingests Ethereum blocks on node1, serves proofs to
+clients on node0, and lands a PDF under `results/`. Run with
+`./run.sh start <mode> dl` (or per-figure, e.g. `quick fig6a`).
+
+### The figures
 
 Each script announces `Running experiment Figure <yy>`, prints one
 `Running <protocol> with <x> ...` line per data point, then `Plotting`, and
-ends with the figure's path under `results/`. Quick variants live in
-`QuickTesting-DecentralizedLedgerScripts/`, full-scale in
-`DecentralizedLedgerScripts/`: same scripts, reduced parameters.
-
-The tables below use the underlying per-figure scripts; `./run.sh` invokes
-these same scripts (`start smoke dl` = `plot_paper_figures.sh`, "Tier 0").
+ends with the figure's path. The table uses the underlying per-figure
+scripts; `./run.sh` invokes these same scripts (`start smoke dl` =
+`plot_paper_figures.sh`, "Tier 0").
 
 | Script | Shows | Quick | Full scale (extrapolated) |
 |---|---|---|---|
@@ -203,7 +232,30 @@ Quick-tier times are as measured end-to-end on the paper's two-node
 CloudLab pair (r6615 server + c6420 client); slower storage inflates them
 considerably, chiefly through Smaran's shard-database setup/teardown.
 
-Notes that apply to both tiers:
+Underlying scripts: `DecentralizedLedgerScripts/run_fig*.sh` (full) and
+`QuickTesting-DecentralizedLedgerScripts/run_fig*.sh` (quick), same scripts
+with reduced parameters. All parameters (both tiers) are defined in one
+place, **`DecentralizedLedgerScripts/config.sh`**, and any value can be
+overridden per-run via environment variables (examples in that file).
+
+### What to check
+
+Absolute numbers at quick scale are far below the paper's (small ingest
+window, short durations); the *trends* are what to check. Compare
+`results/fig*/` against the paper's Figures 6-7, or against
+`results/paper-figures/` (regenerated from the paper's own logs by the
+smoke tier).
+
+| Figure | Expected shape |
+|---|---|
+| 6a latency | Smaran and MPT track at small ranges; MPT keeps climbing past ~100 while Smaran flattens. Verkle far above both. |
+| 6b throughput | Mirror of 6a: Smaran near-flat, dominant at large ranges; MPT falls steeply below it; Verkle lowest. |
+| 6c payload | Smaran near-constant; MPT and Verkle grow roughly linearly with range, orders of magnitude larger. |
+| 7a ingestion | Smaran above MPT above Verkle at every user count, all gently declining. |
+| 7b archival | Full scale: the archival leg stays flat while the non-archival leg climbs at large ranges. Quick scale: the two legs overlap (see notes). |
+| 7c sharding | Throughput scales monotonically with shard count at every user count. |
+
+### DL notes
 
 - **Figures 6a/6b/6c come from one benchmark sweep.** The first of the three
   scripts runs it; the other two reuse the cached logs and just re-plot
@@ -216,15 +268,10 @@ Notes that apply to both tiers:
   scripts say so while you wait; this is normal.
 - **Interrupting is safe.** Ctrl+C stops the run and its servers (on both
   nodes); rerunning redoes any unfinished work from clean state.
-- Absolute numbers at quick scale are far below the paper's (small ingest
-  window, short durations); the *trends* are what to check.
 - **Quick figures omit the Cauchy baseline.** Cauchy exists only as prebaked
   paper-scale logs (a separate Rust codebase, far too slow to rerun), which
   would sit meaninglessly next to quick-scale numbers; Tier 0 and full-scale
   figures include it.
-- All parameters (both tiers) are defined in one place,
-  **`DecentralizedLedgerScripts/config.sh`**, and any value can be
-  overridden per-run via environment variables (examples in that file).
 - **Quick-scale fig7b: the two curves nearly overlap. Expected, not a
   bug.** The gains of Smaran's archival storage are realized when the
   ingested window is large: hundreds of thousands to millions of blocks
@@ -235,21 +282,24 @@ Notes that apply to both tiers:
   archival storage at small scales is itself a good property, but it means
   the paper's visual separation only appears at full scale (or raise
   `N_BLOCKS` / `RANGES_7B` yourself; see `config.sh`).
+- DL needs the block dataset: mounted automatically on the profile, from
+  [Zenodo](https://doi.org/10.5281/zenodo.21317398) elsewhere (see
+  [Install](#install-paths-bc-one-time)).
 
 ## Full-scale runs
 
 `./run.sh start full kt` and `./run.sh start full dl` run each usecase at
-paper scale. For per-figure control, the underlying DL scripts offer the
-same detached behavior:
+paper scale (KT ~3 h; DL tens of hours, dominated by the one-time full
+ingests). For per-figure control, the underlying DL scripts offer the same
+detached behavior:
 
 ```bash
 ./DecentralizedLedgerScripts/run_fig<yy>.sh --detach
 ```
 
-Identical scripts at the paper's parameters (query ranges to 2.6M, 32
+Identical scripts at the paper's parameters (DL: query ranges to 2.6M, 32
 clients, 2 min per point, 5 user counts to 2M, 6 shard counts to 1000; KT:
-11 version counts to 2047, 6 user counts to 1M). The one-time full DL
-ingests are the dominant cost (see the table). **Always use `--detach`**
+11 version counts to 2047, 6 user counts to 1M). **Always use `--detach`**
 for full-scale runs: the run survives SSH disconnects, and
 
 ```bash
@@ -277,6 +327,13 @@ server types are NVMe-only by design:
 
 No experiment ever runs on your laptop. `run_ae.sh` (repo root) drives
 `run.sh` on node0 remotely; see [the table at the top](#how-to-run-the-three-choices).
+Get it without cloning:
+
+```bash
+curl -sLO https://raw.githubusercontent.com/distopialabs/Smaran/main/run_ae.sh
+bash run_ae.sh <user> <node0-host> start quick all
+```
+
 To copy everything (figures and logs) back by hand:
 
 ```bash
@@ -290,7 +347,8 @@ PDFs can't render in a terminal; in order of convenience:
 1. **VS Code Remote-SSH** *(recommended)*: connect to node0, open
    `/local/repository`, and click any PDF under `results/` or `output/`;
    terminal and file browser in the same window.
-2. **Copy to your laptop**: the `rsync` one-liner above.
+2. **Copy to your laptop**: `bash run_ae.sh <user> <node0-host> fetch`, or
+   the `rsync` one-liner above.
 3. **Throwaway HTTP preview**: `cd results && python3 -m http.server 8000`,
    then browse `http://<node0>:8000` (remember to stop it: open port).
 
@@ -316,6 +374,13 @@ On **both** machines:
    ./DecentralizedLedgerScripts/install_merkle.sh
    ./DecentralizedLedgerScripts/install_verkle.sh
    ./DecentralizedLedgerScripts/install_smaran.sh
+   ```
+   For KT, also run the three KT installers (idempotent as well) on both
+   machines:
+   ```bash
+   ./KeyTransparencyScripts/install_coniks.sh
+   ./KeyTransparencyScripts/install_optiks.sh
+   ./KeyTransparencyScripts/install_smaran.sh
    ```
 4. Tell the scripts where the server is: create `/local/cluster.env`
    (both machines) with:
@@ -356,13 +421,18 @@ rerun).
 - **A run was interrupted / a node rebooted**: just rerun the script;
   servers left behind are cleaned up automatically and unfinished benchmark
   points are redone. `status.sh` reports a detached run whose process died.
-- **Two-node scripts report the server unreachable (`Permission denied`)
-  after you changed your SSH keys on the CloudLab portal mid-experiment**:
-  CloudLab then rewrites `~/.ssh/authorized_keys` on every node, removing the
-  experiment-internal key the setup added. SSH into node1 (your portal key
-  still works) and run
+- **A KT sweep hangs for more than ~5 min on one point**: `./run.sh stop`,
+  delete the newest directory under `logs/`, rerun (finished protocols are
+  cached).
+- **Two-node scripts report `Permission denied` between the nodes**: rerun
+  `./run.sh setup` on node0. If it broke *after you changed your SSH keys on
+  the CloudLab portal mid-experiment*: CloudLab then rewrites
+  `~/.ssh/authorized_keys` on every node, removing the experiment-internal
+  key the setup added. SSH into node1 (your portal key still works) and run
   `cat ~/.ssh/id_cloudlab.pub >> ~/.ssh/authorized_keys` to restore it.
 - **Dataset mounted somewhere unusual**: `export SMARAN_DATASET_DIR=<dir>`.
+- **Anything else**: open an issue at
+  <https://github.com/distopialabs/Smaran/issues>.
 
 ## Code layout
 

@@ -8,7 +8,7 @@ sweep across `{Smaran, Optiks, Coniks}`, and produces a single PDF.
 
 1. **Use the CloudLab profile** (fastest): instantiate
    [the unified profile](https://www.cloudlab.us/p/distopialabs-PG0/smaran-artifact)
-   (see [docs/kt-artifact-guide.md](../docs/kt-artifact-guide.md)). Smaran is
+   (see the [root README](../README.md)). Smaran is
    built at boot; Coniks/Optiks install on first use. Skip to *Running the
    experiments* below.
 2. **Install from source** on any two Ubuntu 22.04 machines that can SSH each
@@ -80,6 +80,5 @@ for the full sweep to complete.
 
 ## Time estimates
 
-See the [root README](../README.md) and the
-[KT guide](../docs/kt-artifact-guide.md) for a table of human + compute time
-per experiment.
+See the Key Transparency section of the [root README](../README.md) for a
+table of human + compute time per experiment.
