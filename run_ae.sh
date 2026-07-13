@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Smaran AE: drive the artifact from your LAPTOP.
 # Thin remote wrapper around ./run.sh on node0; no prior login to node0 is
-# needed (CloudLab installs your SSH key on the nodes at boot).
+# needed, provided your SSH key was registered on your CloudLab account
+# before the experiment was instantiated (README Quick start, Step 0).
 #
 #   bash run_ae.sh <user> <node0-host> start <mode> <scope...>   start (detached)
 #   bash run_ae.sh <user> <node0-host> status                    check progress
@@ -18,7 +19,7 @@
 set -euo pipefail
 
 if [ $# -lt 3 ]; then
-  sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'
   exit 2
 fi
 
@@ -65,7 +66,7 @@ case "${1:-}" in
     find "$DEST" -name '*.pdf' | sort
     ;;
   *)
-    sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'
     exit 2
     ;;
 esac

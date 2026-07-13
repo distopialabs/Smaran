@@ -26,8 +26,9 @@ reproduces both evaluation usecases with one standard workflow:
 
 **2. Where do you drive it from?** Everything is `./run.sh` on node0. Either
 SSH in and use it directly, or stay on your laptop and let `run_ae.sh` call
-it over SSH for you (no prior login needed on the profile; CloudLab installs
-your key at boot):
+it over SSH for you. No prior login to node0 is needed, as long as your SSH
+key was registered on your CloudLab account *before* instantiating; that is
+Step 0 of the [Quick start](#quick-start-cloudlab-profile):
 
 | On node0 | From your laptop |
 |---|---|
