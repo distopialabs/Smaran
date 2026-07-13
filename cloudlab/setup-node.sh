@@ -126,6 +126,10 @@ sudo -u "$CREATOR" -i bash -c "cd '$REPO' && ./DecentralizedLedgerScripts/instal
 # pays no compile time. Coniks/Optiks baselines are built on demand by
 # KeyTransparencyScripts/install_coniks.sh / install_optiks.sh.
 DEBIAN_FRONTEND=noninteractive apt-get install -y -qq protobuf-compiler
+# install_smaran.sh puts Go under /usr/local/go, which is not on PATH in this
+# boot context — the symlink makes 'go' resolvable for make and for the
+# reviewer's non-interactive shells.
+ln -sf /usr/local/go/bin/go /usr/local/bin/go
 sudo -u "$CREATOR" -i bash -c "cd '$REPO' && make build-kt"
 sudo -u "$CREATOR" -i bash -c "cd '$REPO' && { [ -f KeyTransparencyScripts/nodes.env ] || cp KeyTransparencyScripts/nodes.env.template KeyTransparencyScripts/nodes.env; }"
 
