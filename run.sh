@@ -83,24 +83,35 @@ running_pid() {
 do_setup() {
     echo "[setup] repo: $REPO ($(git branch --show-current 2>/dev/null || echo '?') @ $(git log -1 --format=%h 2>/dev/null || echo '?'))"
 
-    # Inter-node SSH (needed by both usecases: node0 drives node1).
-    # On the CloudLab profile the boot setup already installed the shared
-    # experiment key (~/.ssh/id_cloudlab); elsewhere we create and authorize
-    # an ed25519 key. Skipped when there is no node1 (single-machine mode).
-    if getent hosts node1 >/dev/null 2>&1; then
-        if [ ! -f "$HOME/.ssh/id_cloudlab" ]; then
-            [ -f "$HOME/.ssh/id_ed25519" ] || ssh-keygen -t ed25519 -N '' -f "$HOME/.ssh/id_ed25519" -q
-            grep -qxF "$(cat "$HOME/.ssh/id_ed25519.pub")" "$HOME/.ssh/authorized_keys" 2>/dev/null \
-                || cat "$HOME/.ssh/id_ed25519.pub" >> "$HOME/.ssh/authorized_keys"
-            cat "$HOME/.ssh/id_ed25519.pub" | ssh -o StrictHostKeyChecking=accept-new -o LogLevel=ERROR node1 \
-                'grep -qxF "$(cat)" ~/.ssh/authorized_keys || cat >> ~/.ssh/authorized_keys' \
-                || { echo "[setup] ERROR: cannot SSH to node1 — fix inter-node SSH first (see README)"; exit 1; }
-        fi
-        ssh-keyscan -H node0 node1 >> "$HOME/.ssh/known_hosts" 2>/dev/null || true
-        echo "[setup] inter-node SSH: OK"
-    else
-        echo "[setup] no node1 in DNS — single-machine mode (DL only; KT needs two nodes)"
+    # Both usecases run on two nodes: this one (the client) drives the server
+    # over SSH. The CloudLab profile provides the hostname node1; own-server
+    # setups define SERVER_HOST in /local/cluster.env (see README, Install).
+    SERVER_NODE=""
+    if [ -f /local/cluster.env ]; then
+        SERVER_NODE="$(. /local/cluster.env 2>/dev/null; echo "${SERVER_HOST:-}")"
     fi
+    if [ -z "$SERVER_NODE" ] && getent hosts node1 >/dev/null 2>&1; then SERVER_NODE=node1; fi
+    if [ -z "$SERVER_NODE" ]; then
+        echo "[setup] ERROR: no server node found."
+        echo "        The artifact runs on two nodes. Provide a hostname 'node1' (CloudLab"
+        echo "        profile does this) or set SERVER_HOST in /local/cluster.env."
+        echo "        See README: Install (Paths B/C)."
+        exit 1
+    fi
+
+    # Inter-node SSH. On the CloudLab profile the boot setup already installed
+    # the shared experiment key (~/.ssh/id_cloudlab); elsewhere we create and
+    # authorize an ed25519 key.
+    if [ ! -f "$HOME/.ssh/id_cloudlab" ]; then
+        [ -f "$HOME/.ssh/id_ed25519" ] || ssh-keygen -t ed25519 -N '' -f "$HOME/.ssh/id_ed25519" -q
+        grep -qxF "$(cat "$HOME/.ssh/id_ed25519.pub")" "$HOME/.ssh/authorized_keys" 2>/dev/null \
+            || cat "$HOME/.ssh/id_ed25519.pub" >> "$HOME/.ssh/authorized_keys"
+        cat "$HOME/.ssh/id_ed25519.pub" | ssh -o StrictHostKeyChecking=accept-new -o LogLevel=ERROR "$SERVER_NODE" \
+            'grep -qxF "$(cat)" ~/.ssh/authorized_keys || cat >> ~/.ssh/authorized_keys' \
+            || { echo "[setup] ERROR: cannot SSH to $SERVER_NODE — fix inter-node SSH first (see README)"; exit 1; }
+    fi
+    ssh-keyscan -H node0 "$SERVER_NODE" >> "$HOME/.ssh/known_hosts" 2>/dev/null || true
+    echo "[setup] inter-node SSH to $SERVER_NODE: OK"
 
     # Go on PATH for non-interactive shells.
     [ -e /usr/local/bin/go ] || sudo ln -sf /usr/local/go/bin/go /usr/local/bin/go 2>/dev/null || true
@@ -111,10 +122,8 @@ do_setup() {
     # Clean stale KT state from any prior run.
     sudo pkill -9 coniksserver ktserver ktbench coniksbench 2>/dev/null || true
     sudo rm -f /tmp/coniks.sock 2>/dev/null || true
-    if getent hosts node1 >/dev/null 2>&1; then
-        ssh -o StrictHostKeyChecking=no -o LogLevel=ERROR node1 \
-            'sudo pkill -9 -f "coniks|ktserver|ktbench" 2>/dev/null; sudo rm -f /tmp/coniks.sock' 2>/dev/null || true
-    fi
+    ssh -o StrictHostKeyChecking=no -o LogLevel=ERROR "$SERVER_NODE" \
+        'sudo pkill -9 -f "coniks|ktserver|ktbench" 2>/dev/null; sudo rm -f /tmp/coniks.sock' 2>/dev/null || true
     echo "[setup] done"
 }
 
