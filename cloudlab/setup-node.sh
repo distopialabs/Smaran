@@ -121,6 +121,14 @@ chown -R "$CREATOR:" "$REPO"
 # image, ~5-10 min of apt/pip on a stock Ubuntu image) ------------------------
 sudo -u "$CREATOR" -i bash -c "cd '$REPO' && ./DecentralizedLedgerScripts/install_smaran.sh"
 
+# --- Key Transparency usecase prep (Section 7.1) -----------------------------
+# protoc for KT proto rebuilds; ktserver/ktbench prebuilt so the first KT run
+# pays no compile time. Coniks/Optiks baselines are built on demand by
+# KeyTransparencyScripts/install_coniks.sh / install_optiks.sh.
+DEBIAN_FRONTEND=noninteractive apt-get install -y -qq protobuf-compiler
+sudo -u "$CREATOR" -i bash -c "cd '$REPO' && make build-kt"
+sudo -u "$CREATOR" -i bash -c "cd '$REPO' && { [ -f KeyTransparencyScripts/nodes.env ] || cp KeyTransparencyScripts/nodes.env.template KeyTransparencyScripts/nodes.env; }"
+
 # --- Client: pre-extract the paper-logs bundle so Tier 0 starts instantly ----
 if [ "$ROLE" = "client" ] && [ ! -f /data/local/artifact-staging/paper-logs/MANIFEST.txt ]; then
     mkdir -p /data/local/artifact-staging

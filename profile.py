@@ -1,6 +1,11 @@
 # -*- coding: utf-8 -*-
 """Smaran artifact evaluation - two-node experiment (client + server).
 
+One profile serves both usecases: Key Transparency (Section 7.1, Figs 4-5;
+ktserver on node1, ktbench on node0) and Decentralized Ledger (Section 7.2,
+Figs 6-7). After setup finishes, SSH into node0 and run
+`/local/repository/setup_cloudlab.sh` to pick one.
+
 This profile reproduces the paper's benchmark topology:
 
   * **node0 (client)** - where you log in. Runs the orchestration scripts,
@@ -61,7 +66,7 @@ IMAGE = {
 # repo's git history exceeds CloudLab's 500 MiB clone limit), so the clone
 # is ours to do. At submission time, flip REPO_REF to the artifact tag.
 REPO_URL = "https://github.com/distopialabs/Smaran.git"
-REPO_REF = "timing_debug"
+REPO_REF = "unified-artifact"
 
 # Experiment-LAN addresses; setup-node.sh writes the server's address into
 # /local/cluster.env so the scripts find it (benchmark traffic crosses the
