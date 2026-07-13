@@ -319,6 +319,10 @@ def build_repo_prepare_commands(commit_hash: str, settings: KtExperimentSettings
         f"cd {settings.remote_repo_dir} && git submodule sync --recursive",
         f"cd {settings.remote_repo_dir} && git submodule update --init --recursive --force",
         f"cd {settings.remote_repo_dir} && {settings.build_command}",
+        (
+            f"rm -rf {settings.remote_bin_dir}/params && "
+            f"cp -r {settings.remote_repo_dir}/data/params {settings.remote_bin_dir}/params"
+        ),
     ]
 
 
@@ -333,10 +337,14 @@ def build_server_start_command(settings: KtExperimentSettings) -> str:
             f"cd {server_config_dir} && "
             f"nohup ../coniksserver run -p > {settings.server_log_path} 2>&1 < /dev/null &"
         )
+    # -params-dir must be explicit: the default is cwd-relative, and
+    # regenerating missing params silently takes many minutes.
+    params_dir = os.path.join(settings.remote_tmp_dir, "bin", "params")
     return (
         f"nohup {settings.server_binary} -batch_size {settings.server_batch_size} "
         f"--addr {settings.server_addr} "
         f"--protocol {settings.bench_protocol} "
+        f"-params-dir {params_dir} "
         f"> {settings.server_log_path} 2>&1 < /dev/null &"
     )
 
@@ -359,8 +367,10 @@ def build_bench_command(
             f"-v"
             f"> {settings.remote_base_dir}/{node_name}.log 2>&1"
         )
+    params_dir = os.path.join(settings.remote_tmp_dir, "bin", "params")
     return (
         f"{settings.bench_binary} "
+        f"-params-dir {params_dir} "
         f"-num-users {settings.bench_num_users} "
         f"-num-load-clients {settings.bench_num_load_clients} "
         f"-num-run-clients {settings.bench_num_run_clients} "
