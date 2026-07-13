@@ -1,12 +1,23 @@
 # Smaran — Artifact Evaluation
 
-This repository is the artifact for the SOSP paper on **Smaran**, a sharded
-KZG-based decentralized ledger, evaluated against **Merkle (MPT)** and
-**Verkle** baselines. It contains the full source for all three protocols and
-scripts that reproduce the paper's six experiment figures: **6a** (query
-latency), **6b** (query throughput), **6c** (payload size), **7a** (ingestion
-throughput), **7b** (impact of archival storage), **7c** (impact of
-sharding).
+This repository is the artifact for the SOSP paper on **Smaran**. It
+reproduces both evaluation usecases:
+
+| Usecase | Figures | Entry point | Guide |
+|---|---|---|---|
+| **Key Transparency** (§7.1) | 4a, 4b, 4c, 5 | `./run_kt.sh` | [docs/kt-artifact-guide.md](docs/kt-artifact-guide.md) |
+| **Decentralized Ledger** (§7.2) | 6a–6c, 7a–7c | `./run_dl.sh` | this README |
+
+Both usecases run on the same two-node CloudLab profile. On node0,
+`./setup_cloudlab.sh` prepares the environment (inter-node SSH, PATH,
+stale state) and offers the same choice as a menu.
+
+The rest of this README is the **Decentralized Ledger** guide: Smaran as a
+sharded KZG-based decentralized ledger, evaluated against **Merkle (MPT)**
+and **Verkle** baselines, with scripts that reproduce the paper's six DL
+experiment figures: **6a** (query latency), **6b** (query throughput),
+**6c** (payload size), **7a** (ingestion throughput), **7b** (impact of
+archival storage), **7c** (impact of sharding).
 
 > **Naming note:** the system was renamed to *Smaran* during submission; the
 > codebase still uses its original name *samurai* in binary, package, and log

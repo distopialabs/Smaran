@@ -6,9 +6,11 @@ sweep across `{Smaran, Optiks, Coniks}`, and produces a single PDF.
 
 ## Two ways to run
 
-1. **Use the pre-built CloudLab image** (fastest): instantiate the profile in
-   [`../cloudlab-profile/`](../cloudlab-profile/). All three protocols are
-   already installed. Skip to *Running the experiments* below.
+1. **Use the CloudLab profile** (fastest): instantiate
+   [the unified profile](https://www.cloudlab.us/p/distopialabs-PG0/smaran-artifact)
+   (see [docs/kt-artifact-guide.md](../docs/kt-artifact-guide.md)). Smaran is
+   built at boot; Coniks/Optiks install on first use. Skip to *Running the
+   experiments* below.
 2. **Install from source** on any two Ubuntu 22.04 machines that can SSH each
    other: run the three installers first (see *Installation* below).
 
