@@ -30,3 +30,8 @@ results/
 .agents/
 .claude/
 CONTEXT.md
+
+# Key Transparency artifacts
+Coniks/build/
+KeyTransparencyScripts/nodes.env
+*.pyc
