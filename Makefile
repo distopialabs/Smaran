@@ -126,8 +126,11 @@ bench-proof: bench-proof-samurai bench-proof-merkle bench-proof-verkle bench-pro
 .PHONY: build-kt coniks setup-coniks-server setup-coniks-client \
         run-coniks-server stop-coniks-server run-coniks-client
 
-CONIKS_SERVER_DIR ?= $(BUILD_DIR)/coniks-server-config
-CONIKS_CLIENT_DIR ?= $(BUILD_DIR)/coniks-client-config
+# DL's BUILD_DIR is relative; the coniks targets cd into config dirs, so
+# they need absolute paths.
+KT_BIN := $(CURDIR)/$(BUILD_DIR)
+CONIKS_SERVER_DIR ?= $(KT_BIN)/coniks-server-config
+CONIKS_CLIENT_DIR ?= $(KT_BIN)/coniks-client-config
 SED = $(shell which gsed 2>/dev/null || which sed)
 
 build-kt:
@@ -147,7 +150,7 @@ coniks:
 setup-coniks-server: coniks
 	mkdir -p $(CONIKS_SERVER_DIR)
 	rm -rf $(CONIKS_SERVER_DIR)/*
-	cd $(CONIKS_SERVER_DIR) && $(BUILD_DIR)/coniksserver init -c
+	cd $(CONIKS_SERVER_DIR) && $(KT_BIN)/coniksserver init -c
 	rm -rf $(CONIKS_SERVER_DIR)/init.str
 	echo "  allow_registration = true" >> $(CONIKS_SERVER_DIR)/config.toml
 	$(SED) -i 's|epoch_deadline = 0|epoch_deadline = 6000|g' $(CONIKS_SERVER_DIR)/config.toml
@@ -155,16 +158,16 @@ setup-coniks-server: coniks
 setup-coniks-client: coniks
 	mkdir -p $(CONIKS_CLIENT_DIR)
 	rm -rf $(CONIKS_CLIENT_DIR)/*
-	cd $(CONIKS_CLIENT_DIR) && $(BUILD_DIR)/coniksclient init
+	cd $(CONIKS_CLIENT_DIR) && $(KT_BIN)/coniksclient init
 	cd $(CONIKS_CLIENT_DIR) && $(SED) -i 's|../keyserver/||g' config.toml
 	cd $(CONIKS_CLIENT_DIR) && $(SED) -i 's|../coniksserver|$(CONIKS_SERVER_DIR)|g' config.toml
 
 run-coniks-server: coniks $(CONIKS_SERVER_DIR)
 	rm -rf $(CONIKS_SERVER_DIR)/init.str
-	cd $(CONIKS_SERVER_DIR) && $(BUILD_DIR)/coniksserver run -p
+	cd $(CONIKS_SERVER_DIR) && $(KT_BIN)/coniksserver run -p
 
 stop-coniks-server: $(CONIKS_SERVER_DIR)
 	kill -USR2 $(shell cat $(CONIKS_SERVER_DIR)/coniks.pid)
 
 run-coniks-client: coniks $(CONIKS_CLIENT_DIR)
-	cd $(CONIKS_CLIENT_DIR) && $(BUILD_DIR)/coniksclient run
+	cd $(CONIKS_CLIENT_DIR) && $(KT_BIN)/coniksclient run
