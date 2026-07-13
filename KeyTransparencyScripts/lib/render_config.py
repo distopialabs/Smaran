@@ -22,7 +22,11 @@ DEFAULTS = {
     "KT_CLIENT_HOST": "node0",
     "KT_CLIENT_PORT": "22",
     "KT_SSH_USER": os.environ.get("USER", ""),
-    "KT_SSH_KEY": os.path.expanduser("~/.ssh/id_ed25519"),
+    "KT_SSH_KEY": next(
+        (k for k in (os.path.expanduser("~/.ssh/id_cloudlab"),
+                     os.path.expanduser("~/.ssh/id_ed25519")) if os.path.exists(k)),
+        os.path.expanduser("~/.ssh/id_ed25519"),
+    ),
     "KT_REMOTE_DIR": "/users/" + os.environ.get("USER", "shistuu"),
     "KT_REPO_BRANCH": "unified-artifact",
     "KT_REPO_URL": "https://github.com/distopialabs/Smaran",
