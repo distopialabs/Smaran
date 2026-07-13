@@ -8,6 +8,7 @@
 #   ./run.sh stop                     stop the current run
 #   ./run.sh results [dest-dir]       list figures, or copy them to dest-dir
 #   ./run.sh setup                    environment prep only (start runs it anyway)
+#   ./run.sh wait                     block until the current run finishes, then exit
 #
 #   mode:  smoke   pipeline check (KT ~5 min; DL ~2 min, plots from paper logs)
 #          quick   reduced sweeps, same qualitative trends (KT ~2 h; DL ~50 min)
@@ -45,11 +46,11 @@ eta_minutes() { # <mode> <fig>  -> rough minutes (from measured quick-tier times
     local mode=$1 fig=$2
     case "$mode:$fig" in
         quick:fig4a|quick:fig4b|quick:fig4c) echo 20 ;;
-        quick:fig5) echo 55 ;;
+        quick:fig5) echo 300 ;;
         quick:fig6a) echo 16 ;;   quick:fig6b|quick:fig6c) echo 1 ;;
         quick:fig7a) echo 11 ;;   quick:fig7b) echo 9 ;;   quick:fig7c) echo 12 ;;
         full:fig4a|full:fig4b|full:fig4c) echo 50 ;;
-        full:fig5) echo 30 ;;
+        full:fig5) echo 240 ;;
         full:fig6a) echo 1500 ;;  full:fig6b|full:fig6c) echo 1 ;;
         full:fig7a) echo 1140 ;;  full:fig7b) echo 90 ;;   full:fig7c) echo 300 ;;
         *) echo 5 ;;
@@ -242,6 +243,59 @@ do_status() {
     tail -5 "$LOG" 2>/dev/null | sed 's/^/  | /'
 }
 
+do_follow() {
+    [ -f "" ] || { echo 'No run recorded yet. Start one with: ./run.sh start quick all'; exit 0; }
+    echo '(Ctrl+C stops watching; the run keeps going)'
+    # tail the log; when run leaves "running" state, exit
+    ( tail -f "" ) &
+    local tail_pid= 
+    trap 'kill \ 2>/dev/null; exit 130' INT
+    while :; do
+        sleep 5
+        local st; st=""
+        case "" in
+            running) : ;;
+            done|failed|stopped)
+                sleep 1
+                kill "" 2>/dev/null
+                echo
+                echo '======================================================='
+                if [ "" = done ]; then
+                    echo '  RUN FINISHED (state: done)'
+                    echo '  PDFs: ./run.sh results'
+                elif [ "" = failed ]; then
+                    echo "  RUN FAILED at: "
+                else
+                    echo '  RUN STOPPED'
+                fi
+                echo '======================================================='
+                wait "" 2>/dev/null
+                return 0
+                ;;
+        esac
+    done
+}
+
+do_wait() {
+    [ -f "" ] || { echo 'No run recorded yet.'; exit 0; }
+    local last_step='' cur='' st
+    while :; do
+        st=""
+        cur=""
+        if [ "" != "" ] && [ -n "" ]; then
+            echo "[:06:13]  "
+            last_step=""
+        fi
+        case "" in
+            running) sleep 10 ;;
+            done)    echo; echo '======================================================='; echo '  RUN FINISHED (state: done)'; echo '  PDFs: ./run.sh results'; echo '======================================================='; return 0 ;;
+            failed)  echo; echo '======================================================='; echo "  RUN FAILED at: "; echo '  Log: ./run.sh follow'; echo '======================================================='; return 1 ;;
+            stopped) echo 'Run was stopped.'; return 2 ;;
+            *)       echo "unknown state: "; return 3 ;;
+        esac
+    done
+}
+
 do_stop() {
     local pid; pid="$(running_pid)"
     [ -n "$pid" ] || { echo "Nothing running."; exit 0; }
@@ -305,6 +359,7 @@ case "$cmd" in
                do_start "$@" ;;
     _worker)   shift; do_worker "$@" ;;
     status)    do_status ;;
+    wait)      do_wait ;;
     follow)    echo '(Ctrl+C stops watching; the run keeps going)'; exec tail -f "$LOG" ;;
     stop)      do_stop ;;
     results)   shift || true; do_results "${1:-}" ;;
