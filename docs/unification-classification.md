@@ -89,9 +89,12 @@ Only edits allowed: package clause / import paths (`internal/tree` →
 
 ### R3 — mechanical adaptations (compile-checked only)
 
-None required so far. (The anticipated `VerifyNewRangeProofs` /
-`SamuraiDB` adaptations are moot under the R4 split. If the import-rewrite
-build surfaces small ones, they will be logged here.)
+| Where | Adaptation |
+|---|---|
+| `internal/db/compat.go` | `type SamuraiDB = SamuraiStore` alias (DL renamed the struct; fields identical) — lets KT code compile unchanged |
+| `KeyTransparencyScripts/configs/*.toml` | `repo_url` now `@REPO_URL@` (KT_REPO_URL was documented in nodes.env.template but never wired up); remote `build_command` ends in `make build-kt setup-coniks-server setup-coniks-client` instead of bare `make`, which on the unified branch would build the DL set |
+
+The anticipated `VerifyNewRangeProofs` adaptation is moot under the R4 split.
 
 ### CONV — already converged, DL file satisfies KT
 
@@ -138,3 +141,21 @@ build surfaces small ones, they will be logged here.)
    dev toggle, the R4 split still works — but worth knowing.
 2. Naming: `internal/kt/tree` + `internal/kt/proof` vs `internal/kttree` +
    `internal/ktproof`. Default: the former (keeps KT-owned code under one roof).
+
+Both resolved 2026-07-12: MaxLayer=1 confirmed intended for KT;
+`internal/kt/{tree,proof}` naming approved.
+
+## Implementation notes (Phases 2-5)
+
+- Pre-existing breakage, left untouched: `cmd/tools/debug_version` does not
+  compile on `timing_debug` itself (passes `*db.PebbleDB` where `*db.DB` is
+  expected); `TestSamuraiMPTReusableAfterProve` fails identically on pristine
+  KT-artifact and on this branch (verified per-test parity of
+  `go test ./internal/kt/`).
+- The Coniks submodule is recorded as .gitmodules + gitlink
+  (ed679f92, exactly KT-artifact's pin) without fetching; install_coniks.sh
+  / kt.py run `git submodule update --init` on the nodes as before.
+- `go.mod` additions: github.com/op/go-logging (internal/logging).
+- KT's separate `cloudlab-profile/` retired; `profile.py` (REPO_REF ->
+  unified-artifact) + `cloudlab/setup-node.sh` (protobuf-compiler,
+  `make build-kt`, nodes.env seed) serve both usecases.
