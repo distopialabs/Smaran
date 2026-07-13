@@ -8,7 +8,7 @@
 
 Env vars (see KeyTransparencyScripts/nodes.env.template for defaults):
   KT_SERVER_HOST, KT_SERVER_PORT, KT_CLIENT_HOST, KT_CLIENT_PORT,
-  KT_SSH_USER, KT_SSH_KEY, KT_REMOTE_DIR, KT_REPO_BRANCH.
+  KT_SSH_USER, KT_SSH_KEY, KT_REMOTE_DIR, KT_REPO_URL, KT_REPO_BRANCH.
 """
 from __future__ import annotations
 
@@ -25,6 +25,7 @@ DEFAULTS = {
     "KT_SSH_KEY": os.path.expanduser("~/.ssh/id_ed25519"),
     "KT_REMOTE_DIR": "/users/" + os.environ.get("USER", "shistuu"),
     "KT_REPO_BRANCH": "unified-artifact",
+    "KT_REPO_URL": "https://github.com/distopialabs/Smaran",
 }
 
 
@@ -39,6 +40,7 @@ def render(template_path: Path, out_path: Path) -> None:
         "@REMOTE_REPO_DIR@": f"{remote_base}/Smaran",
         "@REMOTE_BIN_DIR@": f"{remote_base}/Smaran/bin",
         "@REPO_BRANCH@": _env("KT_REPO_BRANCH"),
+        "@REPO_URL@": _env("KT_REPO_URL"),
     }
 
     template = template_path.read_text(encoding="utf-8")

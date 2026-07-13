@@ -3,7 +3,7 @@
 # Values are Shubham's proven put_throughput.toml verbatim.
 
 [experiment]
-repo_url = "https://github.com/distopialabs/Smaran"
+repo_url = "@REPO_URL@"
 remote_base_dir = "@REMOTE_BASE_DIR@"
 remote_repo_dir = "@REMOTE_REPO_DIR@"
 remote_bin_dir  = "@REMOTE_BIN_DIR@"
@@ -13,7 +13,7 @@ server_addr = "0.0.0.0:3191"
 server_port = 3191
 server_log_path = "@REMOTE_BASE_DIR@/server.log"
 repo_branch = "@REPO_BRANCH@"
-build_command = "cd Coniks && git reset --hard HEAD && git clean -fd && git checkout ed679f9 && cd .. && rm -rf bin && mkdir -p bin && make"
+build_command = "cd Coniks && git reset --hard HEAD && git clean -fd && git checkout ed679f9 && cd .. && rm -rf bin && mkdir -p bin && make build-kt setup-coniks-server setup-coniks-client"
 server_binary = "/tmp/bin/ktserver"
 server_process_name = "ktserver"
 server_batch_size = 16384
