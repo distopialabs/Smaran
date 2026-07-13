@@ -15,7 +15,7 @@ reproduces both evaluation usecases with one standard workflow:
 | Setup | What you do |
 |---|---|
 | **A. CloudLab, our profile** *(recommended — zero install)* | Instantiate [the profile](https://www.cloudlab.us/p/distopialabs-PG0/smaran-artifact); both nodes self-configure at boot ([Quick start](#quick-start-cloudlab-profile)) |
-| **B. CloudLab, manual** | Instantiate any two-node Ubuntu 22.04 experiment, then follow the same steps as C |
+| **B. CloudLab, manual** | Instantiate any two-node Ubuntu 22.04 experiment, then follow the same steps as C — except inter-node SSH is automatic: `./run.sh setup` fetches the experiment key on any CloudLab node (run it once per node) |
 | **C. Your own servers** | Two Ubuntu 22.04 machines that can SSH each other; see [Install](#install-paths-bc--one-time). DL needs the dataset ([Zenodo DOI 10.5281/zenodo.21317398](https://doi.org/10.5281/zenodo.21317398)); KT needs no dataset |
 
 **2. Where do you drive it from?** Everything is `./run.sh` on node0 — either
@@ -80,8 +80,11 @@ cat ~/.ssh/id_ed25519.pub    # copy the whole line
 ```
 
 Paste it at <https://www.cloudlab.us/manage_profile.php?nav=ssh> → **Add
-Key**. If you already instantiated before adding the key, terminate that
-experiment and instantiate again — keys are only pushed at boot.
+Key**. If you already instantiated before adding the key, either terminate
+that experiment and instantiate again (keys are only pushed at boot), or use
+the browser shell on the experiment page (per-node menu → **Shell**, no key
+needed) to append your public key to `~/.ssh/authorized_keys` on node0
+yourself.
 
 1. **Instantiate** [the profile](https://www.cloudlab.us/p/distopialabs-PG0/smaran-artifact).
    The defaults are the paper's node pair (r6615 server + c6420 client at

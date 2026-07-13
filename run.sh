@@ -99,19 +99,56 @@ do_setup() {
         exit 1
     fi
 
-    # Inter-node SSH. On the CloudLab profile the boot setup already installed
-    # the shared experiment key (~/.ssh/id_cloudlab); elsewhere we create and
-    # authorize an ed25519 key.
-    if [ ! -f "$HOME/.ssh/id_cloudlab" ]; then
-        [ -f "$HOME/.ssh/id_ed25519" ] || ssh-keygen -t ed25519 -N '' -f "$HOME/.ssh/id_ed25519" -q
-        grep -qxF "$(cat "$HOME/.ssh/id_ed25519.pub")" "$HOME/.ssh/authorized_keys" 2>/dev/null \
-            || cat "$HOME/.ssh/id_ed25519.pub" >> "$HOME/.ssh/authorized_keys"
-        cat "$HOME/.ssh/id_ed25519.pub" | ssh -o StrictHostKeyChecking=accept-new -o LogLevel=ERROR "$SERVER_NODE" \
-            'grep -qxF "$(cat)" ~/.ssh/authorized_keys || cat >> ~/.ssh/authorized_keys' \
-            || { echo "[setup] ERROR: cannot SSH to $SERVER_NODE — fix inter-node SSH first (see README)"; exit 1; }
+    # Inter-node SSH.
+    mkdir -p "$HOME/.ssh"; chmod 700 "$HOME/.ssh"; touch "$HOME/.ssh/authorized_keys"
+
+    # Any CloudLab node (our profile OR a manual experiment) can fetch the
+    # shared experiment key with geni-get; each node that runs setup
+    # self-authorizes it. Our profile does this at boot; on a manual CloudLab
+    # experiment, run './run.sh setup' once on each node.
+    if [ ! -f "$HOME/.ssh/id_cloudlab" ] && command -v geni-get >/dev/null 2>&1; then
+        if geni-get key > "$HOME/.ssh/id_cloudlab" 2>/dev/null && [ -s "$HOME/.ssh/id_cloudlab" ]; then
+            chmod 600 "$HOME/.ssh/id_cloudlab"
+            ssh-keygen -y -f "$HOME/.ssh/id_cloudlab" > "$HOME/.ssh/id_cloudlab.pub"
+        else
+            rm -f "$HOME/.ssh/id_cloudlab"
+        fi
+    fi
+
+    if [ -f "$HOME/.ssh/id_cloudlab" ]; then
+        grep -qxF "$(cat "$HOME/.ssh/id_cloudlab.pub")" "$HOME/.ssh/authorized_keys" \
+            || cat "$HOME/.ssh/id_cloudlab.pub" >> "$HOME/.ssh/authorized_keys"
+        # NB: an IdentityFile in ssh config replaces the default key list, so
+        # list the ed25519 key too or a working default would stop working.
+        if ! grep -q id_cloudlab "$HOME/.ssh/config" 2>/dev/null; then
+            printf 'Host node0 node1 %s\n    IdentityFile %s\n    IdentityFile %s\n    StrictHostKeyChecking accept-new\n' \
+                "$SERVER_NODE" "$HOME/.ssh/id_cloudlab" "$HOME/.ssh/id_ed25519" >> "$HOME/.ssh/config"
+            chmod 600 "$HOME/.ssh/config"
+        fi
     fi
     ssh-keyscan -H node0 "$SERVER_NODE" >> "$HOME/.ssh/known_hosts" 2>/dev/null || true
-    echo "[setup] inter-node SSH to $SERVER_NODE: OK"
+
+    # If the CloudLab key didn't get us in (or there is none), fall back to an
+    # ed25519 key: self-authorize and install it on the server. The push may
+    # prompt for the server's password once; afterwards it's passwordless.
+    if ! ssh -o BatchMode=yes -o ConnectTimeout=5 -o LogLevel=ERROR "$SERVER_NODE" true 2>/dev/null; then
+        [ -f "$HOME/.ssh/id_ed25519" ] || ssh-keygen -t ed25519 -N '' -f "$HOME/.ssh/id_ed25519" -q
+        grep -qxF "$(cat "$HOME/.ssh/id_ed25519.pub")" "$HOME/.ssh/authorized_keys" \
+            || cat "$HOME/.ssh/id_ed25519.pub" >> "$HOME/.ssh/authorized_keys"
+        cat "$HOME/.ssh/id_ed25519.pub" | ssh -o StrictHostKeyChecking=accept-new "$SERVER_NODE" \
+            'mkdir -p ~/.ssh && touch ~/.ssh/authorized_keys && { grep -qxF "$(cat)" ~/.ssh/authorized_keys || cat >> ~/.ssh/authorized_keys; }' \
+            || true
+    fi
+
+    if ssh -o BatchMode=yes -o ConnectTimeout=5 -o LogLevel=ERROR "$SERVER_NODE" true 2>/dev/null; then
+        echo "[setup] inter-node SSH to $SERVER_NODE: OK"
+    else
+        echo "[setup] ERROR: passwordless SSH to $SERVER_NODE is not working."
+        echo "        Manual CloudLab experiment: run './run.sh setup' on $SERVER_NODE too, then rerun here."
+        echo "        Own servers: install $HOME/.ssh/id_ed25519.pub into $SERVER_NODE's ~/.ssh/authorized_keys"
+        echo "        (e.g. ssh-copy-id), then rerun."
+        exit 1
+    fi
 
     # Go on PATH for non-interactive shells.
     [ -e /usr/local/bin/go ] || sudo ln -sf /usr/local/go/bin/go /usr/local/bin/go 2>/dev/null || true
