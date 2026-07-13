@@ -1,0 +1,31 @@
+# Fig 5 QUICK — Reduced sweep (3 points instead of 6).
+
+[experiment]
+repo_url = "https://github.com/distopialabs/Smaran"
+remote_base_dir = "@REMOTE_BASE_DIR@"
+remote_repo_dir = "@REMOTE_REPO_DIR@"
+remote_bin_dir  = "@REMOTE_BIN_DIR@"
+remote_tmp_dir  = "/tmp/"
+server_node = "node1"
+server_addr = "0.0.0.0:3191"
+server_port = 3191
+server_log_path = "@REMOTE_BASE_DIR@/server.log"
+repo_branch = "@REPO_BRANCH@"
+build_command = "cd Coniks && git reset --hard HEAD && git clean -fd && git checkout ed679f9 && cd .. && rm -rf bin && mkdir -p bin && make"
+server_binary = "/tmp/bin/ktserver"
+server_process_name = "ktserver"
+server_batch_size = 16384
+bench_binary = "/tmp/bin/ktbench -run-mode put"
+bench_num_users = 100000
+bench_num_load_clients = 500
+bench_num_run_clients = 500
+bench_num_versions = 1
+coniks_num_versions_divider = 1
+bench_run_duration_secs = 90
+bench_protocol = "samurai"
+local_logs_dir = "logs"
+server_startup_wait_seconds = 60.0
+
+[sweeping_parameters]
+bench_protocol = ["samurai", "optiks", "coniks"]
+bench_num_users = [10000, 200000, 1000000]
