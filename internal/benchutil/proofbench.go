@@ -27,7 +27,7 @@ type ClientStats struct {
 	TotalServerErrors   int
 	TotalVerifyFailures int
 	TotalProofgenNs     int64
-	TotalE2ENs          int64
+	TotalResponseNs     int64
 	TotalVerifyNs       int64
 	TotalPayloadBytes   int64
 }
@@ -39,7 +39,7 @@ func (s *ClientStats) Add(other ClientStats) {
 	s.TotalServerErrors += other.TotalServerErrors
 	s.TotalVerifyFailures += other.TotalVerifyFailures
 	s.TotalProofgenNs += other.TotalProofgenNs
-	s.TotalE2ENs += other.TotalE2ENs
+	s.TotalResponseNs += other.TotalResponseNs
 	s.TotalVerifyNs += other.TotalVerifyNs
 	s.TotalPayloadBytes += other.TotalPayloadBytes
 }
@@ -168,19 +168,27 @@ func PrintSummary(w io.Writer, cfg ProofBenchConfig, stats ClientStats, wallDura
 	if stats.TotalRequests > 0 {
 		throughput := float64(stats.TotalRequests) / wallDuration.Seconds()
 		avgProofgen := time.Duration(stats.TotalProofgenNs / int64(stats.TotalRequests))
-		avgE2E := time.Duration(stats.TotalE2ENs / int64(stats.TotalRequests))
+		avgResponse := time.Duration(stats.TotalResponseNs / int64(stats.TotalRequests))
 		avgVerify := time.Duration(stats.TotalVerifyNs / int64(stats.TotalRequests))
 		avgPayload := float64(stats.TotalPayloadBytes) / float64(stats.TotalRequests)
 
 		fmt.Fprintf(w, "Throughput:          %.1f req/s\n", throughput)
 		fmt.Fprintf(w, "Avg Proofgen:        %s\n", avgProofgen.Round(100*time.Microsecond))
-		fmt.Fprintf(w, "Avg E2E Latency:     %s\n", avgE2E.Round(100*time.Microsecond))
+		fmt.Fprintf(w, "Avg Response Latency: %s\n", avgResponse.Round(100*time.Microsecond))
 		fmt.Fprintf(w, "Avg Verify:          %s\n", avgVerify.Round(100*time.Microsecond))
 		fmt.Fprintf(w, "Avg Payload Size:    %.1fKB\n", avgPayload/1024)
 	}
 }
 
-// WriteSummaryFile writes the summary to the standard output path for proof benchmarks.
+// ProofCSVHeader is the standard header for proof benchmark summary CSVs.
+var ProofCSVHeader = []string{
+	"duration_s", "clients", "range_size", "total_requests",
+	"client_errors", "server_errors", "verify_failures",
+	"throughput_rps", "avg_proofgen_ms", "avg_response_ms",
+	"avg_verify_ms", "avg_payload_kb",
+}
+
+// WriteSummaryFile writes the summary as a CSV to the standard output path for proof benchmarks.
 func WriteSummaryFile(baseDir, protocol string, cfg ProofBenchConfig, stats ClientStats, wallDuration time.Duration) error {
 	path, err := ProofOutputPath(baseDir, protocol, cfg.RangeSize)
 	if err != nil {
@@ -191,6 +199,42 @@ func WriteSummaryFile(baseDir, protocol string, cfg ProofBenchConfig, stats Clie
 		return fmt.Errorf("create summary file: %w", err)
 	}
 	defer f.Close()
-	PrintSummary(f, cfg, stats, wallDuration)
-	return nil
+
+	w := csv.NewWriter(f)
+
+	if err := w.Write(ProofCSVHeader); err != nil {
+		return fmt.Errorf("write CSV header: %w", err)
+	}
+
+	durationS := wallDuration.Seconds()
+	var throughput, avgProofgenMs, avgResponseMs, avgVerifyMs, avgPayloadKB float64
+	if stats.TotalRequests > 0 {
+		n := float64(stats.TotalRequests)
+		throughput = n / durationS
+		avgProofgenMs = float64(stats.TotalProofgenNs) / n / 1e6
+		avgResponseMs = float64(stats.TotalResponseNs) / n / 1e6
+		avgVerifyMs = float64(stats.TotalVerifyNs) / n / 1e6
+		avgPayloadKB = float64(stats.TotalPayloadBytes) / n / 1024
+	}
+
+	row := []string{
+		fmt.Sprintf("%.1f", durationS),
+		strconv.Itoa(cfg.NumClients),
+		strconv.Itoa(cfg.RangeSize),
+		strconv.Itoa(stats.TotalRequests),
+		strconv.Itoa(stats.TotalClientErrors),
+		strconv.Itoa(stats.TotalServerErrors),
+		strconv.Itoa(stats.TotalVerifyFailures),
+		fmt.Sprintf("%.1f", throughput),
+		fmt.Sprintf("%.1f", avgProofgenMs),
+		fmt.Sprintf("%.1f", avgResponseMs),
+		fmt.Sprintf("%.1f", avgVerifyMs),
+		fmt.Sprintf("%.1f", avgPayloadKB),
+	}
+	if err := w.Write(row); err != nil {
+		return fmt.Errorf("write CSV row: %w", err)
+	}
+
+	w.Flush()
+	return w.Error()
 }

@@ -31,7 +31,7 @@ func RunServe(port int, dbs []*db.SamuraiStore, precomputedData *config.Precompu
 		}
 	}
 
-	proofServer := server.NewProofServer(dbs, precomputedData, mptStore)
+	proofServer := server.NewProofServer(dbs, precomputedData, mptStore, nil)
 
 	log.Printf("Starting Samurai gRPC server on port %d", port)
 	if err := server.ListenAndServe(addr, proofServer); err != nil {

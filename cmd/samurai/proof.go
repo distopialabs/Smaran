@@ -26,11 +26,12 @@ func ProofCmd() *cli.Command {
 			queryStartBlock := uint64(c.Uint64("start-block"))
 			queryEndBlock := queryStartBlock + c.Uint64("n") - 1
 			dbDir := c.String("db-dir")
+			numShards := NUM_SHARDS
 			cryptoParams, err := SetupCryptoParams(dbDir)
 			if err != nil {
 				return err
 			}
-			samuraiStores, err := SetupSamuraiStores(dbDir)
+			samuraiStores, err := SetupSamuraiStores(dbDir, numShards)
 			if err != nil {
 				return err
 			}
@@ -38,7 +39,7 @@ func ProofCmd() *cli.Command {
 				defer db.Close()
 			}
 
-			shardIdx := utils.AddressToShardIndex(addr, NUM_SHARDS)
+			shardIdx := utils.AddressToShardIndex(addr, numShards)
 			db := samuraiStores[shardIdx]
 
 			fmt.Println("Generating range proofs for account", addr.Hex())
@@ -65,8 +66,8 @@ func ProofCmd() *cli.Command {
 				return fmt.Errorf("verification failed: %v", err)
 			}
 
-			start = time.Now()
-			fmt.Println("Time taken to verify range proofs", time.Since(start))
+			// start = time.Now()
+			// fmt.Println("Time taken to verify range proofs", time.Since(start))
 
 			return nil
 		},

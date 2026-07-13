@@ -43,20 +43,20 @@ func GenerateBatchRootKey(account common.Address, layer, batchIdx uint64) string
 
 // Store/Get CurrentBalanceInfo
 
-func StoreCurrentBalanceInfo(account common.Address, cb *CurrentBalance, d db.DB) {
+func StoreCurrentBalanceInfo(account common.Address, cb *CurrentBalance, d *db.DB) {
 	key := GenerateCurrentBalanceInfoKey(account)
 	val, err := proto.Marshal(protoFromCurrentBalance(cb))
 	if err != nil {
 		panic(fmt.Errorf("failed to encode current balance info: %w", err))
 	}
-	if err := d.Set([]byte(key), val, false); err != nil {
+	if err := (*d).Set([]byte(key), val, false); err != nil {
 		panic(fmt.Errorf("failed to store current balance info: %w", err))
 	}
 }
 
-func GetCurrentBalanceInfo(account common.Address, d db.DB) (*CurrentBalance, error) {
+func GetCurrentBalanceInfo(account common.Address, d *db.DB) (*CurrentBalance, error) {
 	key := GenerateCurrentBalanceInfoKey(account)
-	val, err := d.Get([]byte(key))
+	val, err := (*d).Get([]byte(key))
 	if err != nil {
 		if err == db.ErrNotFound {
 			return nil, err
@@ -72,7 +72,7 @@ func GetCurrentBalanceInfo(account common.Address, d db.DB) (*CurrentBalance, er
 
 // Store/Get LXBatchTree
 
-func StoreCurrentLXBatchTree(account common.Address, batchTree *LXBatchTree, dirtyChunks *[MaxLayer]map[int]bool, d db.DB) {
+func StoreCurrentLXBatchTree(account common.Address, batchTree *LXBatchTree, dirtyChunks *[MaxLayer]map[int]bool, d *db.DB) {
 	for layer := uint64(1); layer <= MaxLayer; layer++ {
 		if dirtyChunks == nil {
 			totalChunks := SegmentTreeSize / ChunkSize
@@ -84,7 +84,7 @@ func StoreCurrentLXBatchTree(account common.Address, batchTree *LXBatchTree, dir
 				for i := startIdx; i < endIdx; i++ {
 					copy(chunkData[(i-startIdx)*common.HashLength:], batchTree[layer-1][i][:])
 				}
-				if err := d.Set([]byte(key), chunkData, false); err != nil {
+				if err := (*d).Set([]byte(key), chunkData, false); err != nil {
 					panic(fmt.Errorf("failed to store batch tree chunk: %w", err))
 				}
 			}
@@ -109,7 +109,7 @@ func StoreCurrentLXBatchTree(account common.Address, batchTree *LXBatchTree, dir
 
 				if isEmpty {
 					// Delete stale chunk from DB to reclaim space
-					if err := d.Delete([]byte(key), false); err != nil {
+					if err := (*d).Delete([]byte(key), false); err != nil {
 						panic(fmt.Errorf("failed to delete empty batch tree chunk: %w", err))
 					}
 				} else {
@@ -117,7 +117,7 @@ func StoreCurrentLXBatchTree(account common.Address, batchTree *LXBatchTree, dir
 					for i := startIdx; i < endIdx; i++ {
 						copy(chunkData[(i-startIdx)*common.HashLength:], batchTree[layer-1][i][:])
 					}
-					if err := d.Set([]byte(key), chunkData, false); err != nil {
+					if err := (*d).Set([]byte(key), chunkData, false); err != nil {
 						panic(fmt.Errorf("failed to store batch tree chunk: %w", err))
 					}
 				}
@@ -126,9 +126,9 @@ func StoreCurrentLXBatchTree(account common.Address, batchTree *LXBatchTree, dir
 	}
 }
 
-func GetCurrentLXBatchTree(account common.Address, d db.DB) *LXBatchTree {
+func GetCurrentLXBatchTree(account common.Address, d *db.DB) *LXBatchTree {
 	var batchTree LXBatchTree
-	pdb, ok := d.(*db.PebbleDB)
+	pdb, ok := (*d).(*db.PebbleDB)
 	if !ok {
 		panic("GetCurrentLXBatchTree requires PebbleDB for iteration")
 	}
@@ -185,7 +185,7 @@ func GetCurrentLXBatchTree(account common.Address, d db.DB) *LXBatchTree {
 
 // Store/Get LXBatchCommitments
 
-func StoreLXBatchCommitments(account common.Address, version uint64, bc *LXBatchCommitment, d db.DB) {
+func StoreLXBatchCommitments(account common.Address, version uint64, bc *LXBatchCommitment, d *db.DB) {
 	lastLeafNodeIdx := version - 1
 	lxBatchIdx := func(layer uint64) uint64 {
 		return lastLeafNodeIdx / (L1BatchSize * utils.PowUint64(L2BatchSize, layer-1))
@@ -197,13 +197,13 @@ func StoreLXBatchCommitments(account common.Address, version uint64, bc *LXBatch
 		valBytes := bc[layer-1].Bytes()
 		val := make([]byte, len(valBytes))
 		copy(val, valBytes[:])
-		if err := d.Set([]byte(key), val, false); err != nil {
+		if err := (*d).Set([]byte(key), val, false); err != nil {
 			panic(fmt.Errorf("failed to store batch commitments: %w", err))
 		}
 	}
 }
 
-func GetLXBatchCommitments(account common.Address, version uint64, d db.DB) *LXBatchCommitment {
+func GetLXBatchCommitments(account common.Address, version uint64, d *db.DB) *LXBatchCommitment {
 	lastLeafNodeIdx := version - 1
 	lxBatchIdx := func(layer uint64) uint64 {
 		return lastLeafNodeIdx / (L1BatchSize * utils.PowUint64(L2BatchSize, layer-1))
@@ -213,7 +213,7 @@ func GetLXBatchCommitments(account common.Address, version uint64, d db.DB) *LXB
 	for layer := uint64(1); layer <= MaxLayer; layer++ {
 		batchIdx := lxBatchIdx(layer)
 		key := GenerateBatchCommitmentsKey(account, layer, batchIdx)
-		val, err := d.Get([]byte(key))
+		val, err := (*d).Get([]byte(key))
 		if err != nil {
 			if err == db.ErrNotFound {
 				panic(fmt.Errorf("batch commitments not found for layer %d batch %d", layer, batchIdx))
@@ -244,7 +244,7 @@ func GetBatchCommitment(account common.Address, layer, batchIdx uint64, d db.DB)
 
 // Store/Get LXBatchRoots
 
-func StoreLXBatchRoots(account common.Address, version uint64, batchTree *LXBatchTree, d db.DB) {
+func StoreLXBatchRoots(account common.Address, version uint64, batchTree *LXBatchTree, d *db.DB) {
 	lastLeafNodeIdx := version - 1
 	lxBatchIdx := func(layer uint64) uint64 {
 		return lastLeafNodeIdx / (L1BatchSize * utils.PowUint64(L2BatchSize, layer-1))
@@ -254,7 +254,7 @@ func StoreLXBatchRoots(account common.Address, version uint64, batchTree *LXBatc
 		batchIdx := lxBatchIdx(layer)
 		key := GenerateBatchRootKey(account, layer, batchIdx)
 		root := batchTree[layer-1][0]
-		if err := d.Set([]byte(key), root[:], false); err != nil {
+		if err := (*d).Set([]byte(key), root[:], false); err != nil {
 			panic(fmt.Errorf("failed to store batch root: %w", err))
 		}
 	}
@@ -282,9 +282,9 @@ func StoreHistoricalBalance(account common.Address, hb *HistoricalBalance, d db.
 	}
 }
 
-func GetHistoricalBalance(account common.Address, version uint64, d db.DB) *HistoricalBalance {
+func GetHistoricalBalance(account common.Address, version uint64, d *db.DB) *HistoricalBalance {
 	key := GenerateHistoricalBalanceKey(account, version)
-	val, err := d.Get([]byte(key))
+	val, err := (*d).Get([]byte(key))
 	if err != nil {
 		panic(fmt.Errorf("failed to get historical balance for version %d: %w", version, err))
 	}

@@ -9,6 +9,7 @@ import (
 	"math"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -38,6 +39,7 @@ func main() {
 		Commands: []*cli.Command{
 			queryCmd(),
 			benchCmd(),
+			openloopCmd(),
 		},
 	}
 	if err := app.Run(os.Args); err != nil {
@@ -91,16 +93,16 @@ func queryCmd() *cli.Command {
 			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 			defer cancel()
 
-			e2eStart := time.Now()
+			respStart := time.Now()
 			resp, fetchErr := fetchProofStream(ctx, client, req, c.Bool("old"))
-			e2eDur := time.Since(e2eStart)
+			respDur := time.Since(respStart)
 
 			if fetchErr != nil {
 				s := samuraiQuerySummary{
 					Account:    account,
 					StartBlock: startBlock,
 					EndBlock:   endBlock,
-					E2EDur:     e2eDur,
+					ResponseDur:     respDur,
 				}
 				if isClientError(fetchErr) {
 					s.ClientErr = fetchErr.Error()
@@ -112,18 +114,18 @@ func queryCmd() *cli.Command {
 			}
 
 			// Extract version range from balance infos.
-			var startVersion uint64 = math.MaxUint64
+			var startVersion uint64
 			var endVersion uint64
-			for _, bi := range resp.BalanceInfos {
-				if bi.Version < startVersion {
-					startVersion = bi.Version
+			if len(resp.BalanceInfos) > 0 {
+				startVersion = math.MaxUint64
+				for _, bi := range resp.BalanceInfos {
+					if bi.Version < startVersion {
+						startVersion = bi.Version
+					}
+					if bi.Version > endVersion {
+						endVersion = bi.Version
+					}
 				}
-				if bi.Version > endVersion {
-					endVersion = bi.Version
-				}
-			}
-			if len(resp.BalanceInfos) == 0 {
-				startVersion = 0
 			}
 
 			payloadBytes := int64(proto.Size(resp))
@@ -141,7 +143,7 @@ func queryCmd() *cli.Command {
 				StartVersion: startVersion,
 				EndVersion:   endVersion,
 				ProofgenDur:  time.Duration(resp.ProofgenDurationNs),
-				E2EDur:       e2eDur,
+				ResponseDur:       respDur,
 				VerifyDur:    verifyDur,
 				Verified:     true,
 				VerifyOK:     verifyErr == nil,
@@ -257,21 +259,25 @@ func benchCmd() *cli.Command {
 							EndBlock:   endBlock,
 						}
 
-						e2eStart := time.Now()
+						respStart := time.Now()
 						resp, reqErr := fetchProofStream(context.Background(), cl, req, useOld)
-						e2eNs := time.Since(e2eStart).Nanoseconds()
+						respNs := time.Since(respStart).Nanoseconds()
 
 						if reqErr != nil {
 							if isClientError(reqErr) {
+								log.Printf("client error: %v", reqErr)
 								stats.TotalClientErrors++
 							} else {
 								stats.TotalServerErrors++
+								if stats.TotalServerErrors <= 3 {
+									log.Printf("client %d: server error: %v", clientID, reqErr)
+								}
 							}
 							continue
 						}
 
 						stats.TotalRequests++
-						stats.TotalE2ENs += e2eNs
+						stats.TotalResponseNs += respNs
 						stats.TotalProofgenNs += resp.ProofgenDurationNs
 						stats.TotalPayloadBytes += int64(proto.Size(resp))
 
@@ -298,6 +304,156 @@ func benchCmd() *cli.Command {
 			if err := benchutil.WriteSummaryFile(c.String("output-dir"), "samuraimpt", cfg, agg, wallDuration); err != nil {
 				log.Printf("warning: failed to write summary file: %v", err)
 			}
+
+			return nil
+		},
+	}
+}
+
+// --- openloop subcommand ---
+
+func openloopCmd() *cli.Command {
+	return &cli.Command{
+		Name:  "openloop",
+		Usage: "Open-loop throughput test: fire requests at a fixed rate to find max server throughput",
+		Flags: []cli.Flag{
+			&cli.StringFlag{Name: "server-addr", Value: "localhost:50051", Usage: "gRPC server address"},
+			&cli.IntFlag{Name: "range-size", Value: 50000, Usage: "Block range size per query"},
+			&cli.StringFlag{Name: "accounts-list", Required: true, Usage: "CSV with accounts sorted by update count desc"},
+			&cli.IntFlag{Name: "num-clients", Value: 1, Usage: "Number of concurrent client connections"},
+			&cli.IntFlag{Name: "rps-per-client", Value: 10, Usage: "Requests per second per client connection"},
+			&cli.IntFlag{Name: "max-concurrent", Value: 100, Usage: "Max in-flight requests per connection (semaphore size)"},
+			&cli.DurationFlag{Name: "duration", Value: 60 * time.Second, Usage: "Test duration"},
+			&cli.BoolFlag{Name: "old", Value: false, Usage: "Use old (slow) proof generation"},
+		},
+		Action: func(c *cli.Context) error {
+			serverAddr := c.String("server-addr")
+			rangeSize := c.Int("range-size")
+			numClients := c.Int("num-clients")
+			rpsPerClient := c.Int("rps-per-client")
+			maxConcurrent := c.Int("max-concurrent")
+			duration := c.Duration("duration")
+			useOld := c.Bool("old")
+
+			// Get server info.
+			conn, err := dialGRPC(serverAddr)
+			if err != nil {
+				return err
+			}
+			info, err := proofpb.NewProofServiceClient(conn).GetInfo(context.Background(), &proofpb.GetInfoRequest{})
+			conn.Close()
+			if err != nil {
+				return fmt.Errorf("GetInfo failed: %w", err)
+			}
+			log.Printf("Server info: latest_block=%d state_root=%s", info.LatestBlock, info.StateRoot)
+
+			firstBlock := dataset.FIRST_BLOCK
+			if info.LatestBlock-firstBlock+1 < uint64(rangeSize) {
+				return fmt.Errorf("server has %d blocks, need at least %d for range-size=%d",
+					info.LatestBlock-firstBlock+1, rangeSize, rangeSize)
+			}
+
+			selector, err := benchutil.NewWeightedAccountSelector(c.String("accounts-list"))
+			if err != nil {
+				return err
+			}
+			log.Printf("Loaded %d weighted accounts", selector.Size())
+
+			offeredRPS := numClients * rpsPerClient
+			log.Printf("Starting open-loop test: %d clients x %d rps = %d offered rps, duration %s, max_concurrent %d",
+				numClients, rpsPerClient, offeredRPS, duration, maxConcurrent)
+
+			// Atomic counters for aggregate stats.
+			var sent, completed, dropped, clientErrors, serverErrors atomic.Int64
+
+			ctx, cancel := context.WithTimeout(context.Background(), duration)
+			defer cancel()
+
+			var wg sync.WaitGroup
+			for i := 0; i < numClients; i++ {
+				wg.Add(1)
+				go func(clientID int) {
+					defer wg.Done()
+
+					clientConn, err := dialGRPC(serverAddr)
+					if err != nil {
+						log.Printf("client %d: dial failed: %v", clientID, err)
+						return
+					}
+					defer clientConn.Close()
+					cl := proofpb.NewProofServiceClient(clientConn)
+
+					sem := make(chan struct{}, maxConcurrent)
+					ticker := time.NewTicker(time.Second / time.Duration(rpsPerClient))
+					defer ticker.Stop()
+
+					var requestWg sync.WaitGroup
+					defer requestWg.Wait()
+
+					for {
+						select {
+						case <-ctx.Done():
+							return
+						case <-ticker.C:
+							// Non-blocking semaphore acquire.
+							select {
+							case sem <- struct{}{}:
+								// Acquired.
+							default:
+								dropped.Add(1)
+								continue
+							}
+
+							sent.Add(1)
+							account := selector.Pick()
+							endBlock := info.LatestBlock
+							startBlock := endBlock - uint64(rangeSize) + 1
+
+							req := &proofpb.GetProofRequest{
+								Account:    account,
+								StartBlock: startBlock,
+								EndBlock:   endBlock,
+							}
+
+							requestWg.Add(1)
+							go func() {
+								defer requestWg.Done()
+								defer func() { <-sem }()
+
+								_, reqErr := fetchProofStream(ctx, cl, req, useOld)
+								if reqErr != nil {
+									// Don't count cancellations from test ending.
+									if ctx.Err() != nil {
+										return
+									}
+									if isClientError(reqErr) {
+										clientErrors.Add(1)
+									} else {
+										serverErrors.Add(1)
+									}
+									return
+								}
+								completed.Add(1)
+							}()
+						}
+					}
+				}(i)
+			}
+
+			wg.Wait()
+
+			// Print summary.
+			fmt.Println()
+			fmt.Println("=== Open-Loop Results ===")
+			fmt.Printf("Clients:       %d\n", numClients)
+			fmt.Printf("Offered RPS:   %d\n", offeredRPS)
+			fmt.Printf("Duration:      %s\n", duration)
+			fmt.Printf("Sent:          %d\n", sent.Load())
+			fmt.Printf("Completed:     %d\n", completed.Load())
+			fmt.Printf("Dropped:       %d\n", dropped.Load())
+			fmt.Printf("Client Errors: %d\n", clientErrors.Load())
+			fmt.Printf("Server Errors: %d\n", serverErrors.Load())
+			fmt.Println()
 
 			return nil
 		},
@@ -366,14 +522,17 @@ func verifyResponse(resp *proofpb.GetProofResponse, addr common.Address, precomp
 		balanceInfos[i] = server.BalanceInfoFromProto(bi)
 	}
 
-	var startingVersion uint64 = math.MaxUint64
-	var endingVersion uint64 = 0
-	for _, b := range balanceInfos {
-		if b.Version < startingVersion {
-			startingVersion = b.Version
-		}
-		if b.Version > endingVersion {
-			endingVersion = b.Version
+	var startingVersion uint64
+	var endingVersion uint64
+	if len(balanceInfos) > 0 {
+		startingVersion = math.MaxUint64
+		for _, b := range balanceInfos {
+			if b.Version < startingVersion {
+				startingVersion = b.Version
+			}
+			if b.Version > endingVersion {
+				endingVersion = b.Version
+			}
 		}
 	}
 
@@ -412,7 +571,7 @@ type samuraiQuerySummary struct {
 	StartVersion uint64
 	EndVersion   uint64
 	ProofgenDur  time.Duration
-	E2EDur       time.Duration
+	ResponseDur  time.Duration
 	VerifyDur    time.Duration
 	Verified     bool
 	VerifyOK     bool
@@ -438,7 +597,7 @@ func printSamuraiQuerySummary(w io.Writer, s samuraiQuerySummary) {
 	if s.ProofgenDur > 0 {
 		fmt.Fprintf(w, "  %-20s %s\n", "Proofgen Latency:", s.ProofgenDur.Round(100*time.Microsecond))
 	}
-	fmt.Fprintf(w, "  %-20s %s\n", "E2E Latency:", s.E2EDur.Round(100*time.Microsecond))
+	fmt.Fprintf(w, "  %-20s %s\n", "Response Latency:", s.ResponseDur.Round(100*time.Microsecond))
 	if s.Verified {
 		fmt.Fprintf(w, "  %-20s %s\n", "Verify Latency:", s.VerifyDur.Round(100*time.Microsecond))
 		if s.VerifyOK {

@@ -9,11 +9,11 @@ import (
 	"strconv"
 	"time"
 
+	verkle "github.com/ethereum/go-verkle"
 	"github.com/nepal80m/samurai/internal/benchutil"
 	"github.com/nepal80m/samurai/internal/dataset"
 	"github.com/nepal80m/samurai/internal/verkle/keys"
 	"github.com/nepal80m/samurai/internal/verkle/store"
-	verkle "github.com/ethereum/go-verkle"
 )
 
 var errTimeLimitReached = errors.New("time limit reached")
@@ -114,6 +114,10 @@ func RunBench(cfg BenchConfig) error {
 	blocksSinceFlush := 0
 	benchStart := time.Now()
 
+	// Every path this session has persisted; serializeDirtyPaths uses it to
+	// detect split-created internal nodes (see dirty.go).
+	writtenPaths := make(map[string]struct{})
+
 	logger.Printf("starting benchmark: duration=%s, start_block=%d, end_block=%d, flush_every=%d, output=%s",
 		cfg.Duration, start, cfg.End, cfg.FlushEvery, cfg.OutCSV)
 
@@ -167,12 +171,14 @@ func RunBench(cfg BenchConfig) error {
 
 		root.Commit()
 
+		// fmt.Printf("root commitment: %x\n", root.Commitment())
+
 		iroot, ok := root.(*verkle.InternalNode)
 		if !ok {
 			return fmt.Errorf("block %d: root is not InternalNode", blockNum)
 		}
 
-		dirtyNodes, rootCommitment, err := serializeDirtyPaths(iroot, dirtyStems)
+		dirtyNodes, rootCommitment, err := serializeDirtyPaths(iroot, dirtyStems, writtenPaths)
 		if err != nil {
 			return fmt.Errorf("block %d: serialize dirty paths: %w", blockNum, err)
 		}
@@ -188,6 +194,9 @@ func RunBench(cfg BenchConfig) error {
 			allNodes, err := iroot.BatchSerialize()
 			if err != nil {
 				return fmt.Errorf("block %d: BatchSerialize: %w", blockNum, err)
+			}
+			for _, sn := range allNodes {
+				writtenPaths[string(sn.Path)] = struct{}{}
 			}
 			if err := ns.SaveNodes(allNodes, uint64(blockNum)); err != nil {
 				return fmt.Errorf("block %d: save all nodes: %w", blockNum, err)

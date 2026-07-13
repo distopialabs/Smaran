@@ -17,7 +17,7 @@ func BuildMPTCmd() *cli.Command {
 		Usage: "Build MPT tree from already-processed Samurai data (end block from metadata)",
 		Flags: []cli.Flag{
 			&cli.StringFlag{Name: "db-dir", Required: true, Usage: "Root directory containing db/ and metadata.json"},
-			&cli.IntFlag{Name: "shards", Value: 32, Usage: "Number of shards (must match the run that produced the data)"},
+			&cli.IntFlag{Name: "shards", Value: NUM_SHARDS, Usage: "Number of shards (must match the run that produced the data)"},
 		},
 		Action: func(c *cli.Context) error {
 			dbDir := c.String("db-dir")

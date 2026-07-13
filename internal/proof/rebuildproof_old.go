@@ -19,8 +19,7 @@ import (
 // uses stored commitments to fill the commitHash part of the batch trees
 // in this process, stores only the involved batch trees and returns them
 func OldRebuildSegmentTreeForProof(account common.Address, lxRequiredBatchIdxs map[uint64][]uint64, startingVersion uint64, endingVersion uint64, db *db.SamuraiStore, precomputedData *config.PrecomputedData) (map[string]tree.BatchTree, []*tree.HistoricalBalance) {
-
-	cbInfo, err := tree.GetCurrentBalanceInfo(account, db.StateDB)
+	cbInfo, err := tree.GetCurrentBalanceInfo(account, &db.StateDB)
 	if err != nil {
 		panic(err)
 	}
@@ -50,7 +49,7 @@ func OldRebuildSegmentTreeForProof(account common.Address, lxRequiredBatchIdxs m
 
 	for version := uint64(0); version < cbInfo.Version; version++ {
 		fetchStart := time.Now()
-		hbInfo := tree.GetHistoricalBalance(account, version, db.HistoryDB)
+		hbInfo := tree.GetHistoricalBalance(account, version, &db.HistoryDB)
 		dbFetchTime += time.Since(fetchStart)
 
 		leafAddStart := time.Now()
@@ -103,7 +102,6 @@ func OldRebuildSegmentTreeForProof(account common.Address, lxRequiredBatchIdxs m
 }
 
 func OldAddLeafNode(accountInfo *tree.AccountInfo, leafNodeIdx uint64, leafNodeHash common.Hash) {
-
 	// find which index to update for each layer
 	lxBatchNodeIdx := func(layer uint64) uint64 {
 		if layer == 0 || layer > MaxLayer {
@@ -111,7 +109,6 @@ func OldAddLeafNode(accountInfo *tree.AccountInfo, leafNodeIdx uint64, leafNodeH
 		}
 		if layer == 1 {
 			return leafNodeIdx % L1BatchSize
-
 		} else {
 			return leafNodeIdx / (L1BatchSize * utils.PowUint64(L2BatchSize, layer-2)) % L2BatchSize
 		}
@@ -158,11 +155,9 @@ func OldAddLeafNode(accountInfo *tree.AccountInfo, leafNodeIdx uint64, leafNodeH
 	// UpdateLXTree(accountInfo, L2BatchSize-1+lxModIdx(4), l3RootHash, 4)
 	// l4RootHash := accountInfo.CurrentBatchTree[3][0]
 	// _ = l4RootHash
-
 }
 
 func OldUpdateLXTree(accountInfo *tree.AccountInfo, idx uint64, val common.Hash, layer uint64) {
-
 	batchTree := &accountInfo.CurrentLXBatchTree[layer-1]
 
 	// updating the tree

@@ -19,7 +19,7 @@ import (
 	"github.com/nepal80m/samurai/internal/storage"
 )
 
-const NUM_SHARDS = 32
+const NUM_SHARDS = 1000
 
 func IngestCmd() *cli.Command {
 	return &cli.Command{
@@ -76,15 +76,14 @@ func IngestCmd() *cli.Command {
 				return err
 			}
 			// Setup Database
-
 			shardsNum := NUM_SHARDS
-			shardedSamuraiStores, err := SetupSamuraiStores(dbDir)
+			shardedSamuraiStores, err := SetupSamuraiStores(dbDir, shardsNum)
 			if err != nil {
 				return err
 			}
 
 			// Setup caches
-			cacheSize := 2048 // max number of entries per cache
+			cacheSize := 64 // max number of entries per cache
 			caches, err := ingest.SetupCaches(cacheSize, shardedSamuraiStores, cryptoParams)
 			if err != nil {
 				log.Fatalf("failed to setup caches: %v", err)
@@ -164,8 +163,8 @@ func SetupCryptoParams(dbDir string) (*config.PrecomputedData, error) {
 	return cryptoParams, nil
 }
 
-func SetupSamuraiStores(dbDir string) ([]*db.SamuraiStore, error) {
-	shardedSamuraiStores, err := ingest.SetupDatabases(NUM_SHARDS, filepath.Join(dbDir, "db"))
+func SetupSamuraiStores(dbDir string, shards int) ([]*db.SamuraiStore, error) {
+	shardedSamuraiStores, err := ingest.SetupDatabases(shards, filepath.Join(dbDir, "db"))
 	if err != nil {
 		return nil, fmt.Errorf("failed to setup databases: %v", err)
 	}

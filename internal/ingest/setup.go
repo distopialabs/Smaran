@@ -37,39 +37,45 @@ func SetupDatabases(shards int, dir string) ([]*db.SamuraiStore, error) {
 		treeDBPath := fmt.Sprintf(dir+"/shard-%d-tree", i)
 		historyDBPath := fmt.Sprintf(dir+"/shard-%d-history", i)
 
-		sharedCache := pebble.NewCache(80_000_000)
+		// sharedCache := pebble.NewCache(80_000_000)
+		// sharedCache := pebble.NewCache(512*1024*1024) // 512MB; used by merkle, too high for 1000 shards, default is 8MB
 
 		// StateDB receives tiny struct updates, limit MemTable to 16MB
 		stateDBOpts := &pebble.Options{
-			MemTableSize:              16 << 20,
-			L0CompactionThreshold:     2,
-			L0CompactionFileThreshold: 2000,
-			LBaseMaxBytes:             2147483648,              // 2GB
-			MaxConcurrentCompactions:  func() int { return 4 }, // 4 threads per DB
-			DisableWAL:                true,
-			Cache:                     sharedCache,
+			// MemTableSize:              16 << 20, // default is 4MB; merkle uses around 256MB
+			// TODO: check if performance improves with bigger size.
+			// MemTableSize:          4 << 20,
+			L0CompactionThreshold: 2,
+			// L0CompactionFileThreshold: 2000, // recommended default is 500, change only to test performance improvements
+			// LBaseMaxBytes:             2147483648,              // 2GB; default is 64MB
+			// TODO: check if performance decreases with default value
+			MaxConcurrentCompactions: func() int { return 4 }, // 4 threads per DB
+			DisableWAL:               true,
+			// Cache:                    sharedCache,
 		}
 
 		// TreeDB receives massive 4KB Merkle updates, allocate the configured 64MB MemTable
 		treeDBOpts := &pebble.Options{
-			MemTableSize:              64 << 20,
-			L0CompactionThreshold:     2,
-			L0CompactionFileThreshold: 2000,
-			LBaseMaxBytes:             2147483648,              // 2GB
-			MaxConcurrentCompactions:  func() int { return 4 }, // 4 threads per DB
-			DisableWAL:                true,
-			Cache:                     sharedCache,
+			// MemTableSize:              64 << 20,
+			// MemTableSize:          16 << 20,
+			L0CompactionThreshold: 2,
+			// L0CompactionFileThreshold: 2000, // recommended default is 500, change only to test performance improvements
+			// LBaseMaxBytes:             2147483648,              // 2GB
+			MaxConcurrentCompactions: func() int { return 4 }, // 4 threads per DB
+			DisableWAL:               true,
+			// Cache:                    sharedCache,
 		}
 
 		// HistoryDB receives steady append-only updates, limit MemTable to 32MB
 		historyDBOpts := &pebble.Options{
-			MemTableSize:              32 << 20,
-			L0CompactionThreshold:     2,
-			L0CompactionFileThreshold: 2000,
-			LBaseMaxBytes:             2147483648,              // 2GB
-			MaxConcurrentCompactions:  func() int { return 4 }, // 4 threads per DB
-			DisableWAL:                true,
-			Cache:                     sharedCache,
+			// MemTableSize:              32 << 20,
+			// MemTableSize:          8 << 20,
+			L0CompactionThreshold: 2,
+			// L0CompactionFileThreshold: 2000, // recommended default is 500, change only to test performance improvements
+			// LBaseMaxBytes:             2147483648,              // 2GB
+			MaxConcurrentCompactions: func() int { return 4 }, // 4 threads per DB
+			DisableWAL:               true,
+			// Cache:                    sharedCache,
 		}
 
 		// Create StateDB

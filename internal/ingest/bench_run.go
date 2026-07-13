@@ -8,8 +8,7 @@ import (
 	"time"
 
 	"github.com/nepal80m/samurai/internal/benchutil"
-	"github.com/nepal80m/samurai/internal/dataset"
-	"github.com/nepal80m/samurai/internal/utils"
+	"golang.design/x/chann"
 )
 
 // BenchConfig holds user-facing benchmark parameters that are translated into
@@ -50,8 +49,7 @@ func BenchRun(cfg Config, benchCfg BenchConfig, csvPath string) error {
 	}
 	defer csvWriter.Close()
 
-	// --- configure deadline and block range ---
-	cfg.Blocks.End = dataset.LAST_BLOCK
+	// --- configure deadline ---
 	deadline := time.Now().Add(benchCfg.Duration)
 
 	// --- setup update-level metrics collector ---
@@ -75,13 +73,16 @@ func BenchRun(cfg Config, benchCfg BenchConfig, csvPath string) error {
 	}
 
 	// --- create pipeline plumbing (same as Run) ---
-	queues := make([]*utils.BoundedQueue[UpdateTask], cfg.Workers.CommitWorkerCount)
+	// queues := make([]*utils.BoundedQueue[UpdateTask], cfg.Workers.CommitWorkerCount)
+	queues := make([]*chann.Chann[UpdateTask], cfg.Workers.CommitWorkerCount)
 	for i := 0; i < cfg.Workers.CommitWorkerCount; i++ {
-		queues[i] = utils.NewBoundedQueue[UpdateTask](1024, cfg.Workers.CommitWorkerQueueSize)
+		// queues[i] = utils.NewBoundedQueue[UpdateTask](10000, 10000) // *cfg.Workers.CommitWorkerQueueSize)
+		queues[i] = chann.New[UpdateTask]()
+		// queues[i] = utils.NewBoundedQueue[UpdateTask](-1, -1)
 	}
 
-	blockInfoCh := make(chan mptBlockInfo, 10)
-	commitCh := make(chan mptUpdateCommitmentInfo, 10000)
+	blockInfoCh := make(chan mptBlockInfo, 1)
+	commitCh := chann.New[mptUpdateCommitmentInfoBulk]()
 
 	var commitWG sync.WaitGroup
 	var mptWG sync.WaitGroup
@@ -95,8 +96,8 @@ func BenchRun(cfg Config, benchCfg BenchConfig, csvPath string) error {
 	}()
 
 	benchStart := time.Now()
-	log.Printf("[bench] starting benchmark: duration=%s startBlock=%d kUsers=%d output=%s",
-		benchCfg.Duration, cfg.Blocks.Start, benchCfg.KUsers, csvPath)
+	log.Printf("[bench] starting benchmark: duration=%s startBlock=%d endBlock=%d kUsers=%d output=%s",
+		benchCfg.Duration, cfg.Blocks.Start, cfg.Blocks.End, benchCfg.KUsers, csvPath)
 
 	// --- run producer ---
 	prodErr := produceBlocks(cfg, blockInfoCh, queues)
@@ -108,17 +109,13 @@ func BenchRun(cfg Config, benchCfg BenchConfig, csvPath string) error {
 	close(blockInfoCh)
 
 	commitWG.Wait()
-	close(commitCh)
+	commitCh.Close()
 
 	mptWG.Wait()
 
 	// --- interpret producer result ---
 	if prodErr != nil && !errors.Is(prodErr, errBenchDeadline) {
 		return fmt.Errorf("producer error: %w", prodErr)
-	}
-
-	if prodErr == nil && time.Now().Before(deadline) {
-		return fmt.Errorf("ran out of blocks (reached block %d) before benchmark duration elapsed", dataset.LAST_BLOCK)
 	}
 
 	wallSec := time.Since(benchStart).Seconds()
@@ -151,8 +148,7 @@ func BenchRunSamuraiOnly(cfg Config, benchCfg BenchConfig, csvPath string) error
 	}
 	defer csvWriter.Close()
 
-	// --- configure deadline and block range ---
-	cfg.Blocks.End = dataset.LAST_BLOCK
+	// --- configure deadline ---
 	deadline := time.Now().Add(benchCfg.Duration)
 
 	// --- setup update-level metrics collector ---
@@ -176,13 +172,16 @@ func BenchRunSamuraiOnly(cfg Config, benchCfg BenchConfig, csvPath string) error
 	}
 
 	// --- create pipeline plumbing ---
-	queues := make([]*utils.BoundedQueue[UpdateTask], cfg.Workers.CommitWorkerCount)
+	// queues := make([]*utils.BoundedQueue[UpdateTask], cfg.Workers.CommitWorkerCount)
+	queues := make([]*chann.Chann[UpdateTask], cfg.Workers.CommitWorkerCount)
 	for i := 0; i < cfg.Workers.CommitWorkerCount; i++ {
-		queues[i] = utils.NewBoundedQueue[UpdateTask](1024, cfg.Workers.CommitWorkerQueueSize)
+		// queues[i] = utils.NewBoundedQueue[UpdateTask](1024, cfg.Workers.CommitWorkerQueueSize)
+		queues[i] = chann.New[UpdateTask]()
+		// queues[i] = utils.NewBoundedQueue[UpdateTask](10, 16) // cfg.Workers.CommitWorkerQueueSize)
 	}
 
-	blockInfoCh := make(chan mptBlockInfo, 10)
-	commitCh := make(chan mptUpdateCommitmentInfo, 10000)
+	blockInfoCh := make(chan mptBlockInfo, 100)
+	commitCh := chann.New[mptUpdateCommitmentInfoBulk]()
 
 	var commitWG sync.WaitGroup
 	var collectorWG sync.WaitGroup
@@ -196,8 +195,8 @@ func BenchRunSamuraiOnly(cfg Config, benchCfg BenchConfig, csvPath string) error
 	}()
 
 	benchStart := time.Now()
-	log.Printf("[bench] starting samurai-only benchmark: duration=%s startBlock=%d kUsers=%d output=%s",
-		benchCfg.Duration, cfg.Blocks.Start, benchCfg.KUsers, csvPath)
+	log.Printf("[bench] starting samurai-only benchmark: duration=%s startBlock=%d endBlock=%d kUsers=%d output=%s",
+		benchCfg.Duration, cfg.Blocks.Start, cfg.Blocks.End, benchCfg.KUsers, csvPath)
 
 	// --- run producer ---
 	prodErr := produceBlocks(cfg, blockInfoCh, queues)
@@ -209,17 +208,13 @@ func BenchRunSamuraiOnly(cfg Config, benchCfg BenchConfig, csvPath string) error
 	close(blockInfoCh)
 
 	commitWG.Wait()
-	close(commitCh)
+	commitCh.Close()
 
 	collectorWG.Wait()
 
 	// --- interpret producer result ---
 	if prodErr != nil && !errors.Is(prodErr, errBenchDeadline) {
 		return fmt.Errorf("producer error: %w", prodErr)
-	}
-
-	if prodErr == nil && time.Now().Before(deadline) {
-		return fmt.Errorf("ran out of blocks (reached block %d) before benchmark duration elapsed", dataset.LAST_BLOCK)
 	}
 
 	wallSec := time.Since(benchStart).Seconds()

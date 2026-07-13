@@ -1,382 +1,349 @@
-# Smaran
+# Smaran — Artifact Evaluation
 
-## Introduction
-Smaran is an authenticated data structure that serves time-travel queries — over a single point in the past or an interval — with a constant number of fixed-size proofs, independent of the query range or history length. It combines segment trees with cryptographic vector commitments, and we integrate it into two applications: key transparency and decentralized ledgers.
+Smaran is an authenticated data structure that serves time-travel queries —
+over a single point in the past or an interval — with a constant number of
+fixed-size proofs, independent of the query range or history length. It
+combines segment trees with cryptographic vector commitments, integrated
+into two applications: key transparency and decentralized ledgers.
 
+This repository is the artifact for the SOSP paper on **Smaran**. It
+reproduces both evaluation usecases with one standard workflow:
 
-## Quick Start
+| Usecase | Figures | Scope name |
+|---|---|---|
+| **Key Transparency** (§7.1) | 4a, 4b, 4c, 5 | `kt` |
+| **Decentralized Ledger** (§7.2) | 6a–6c, 7a–7c | `dl` |
 
-```bash
-git clone https://github.com/distopialabs/Samurai.git
-go mod tidy
-make build
-```
+## How to run — the three choices
 
-This produces six binaries in `bin/`:
+**1. Where does it run?**
 
-| Binary | Description |
-|--------|-------------|
-| `samurai` | Samurai (KZG + MPT) — ingest blocks, generate proofs, serve gRPC |
-| `merkle` | Baseline MPT — ingest, proof gen, gRPC server |
-| `verkle` | Baseline Verkle tree — ingest, proof gen, gRPC server |
-| `proofc` | gRPC proof client for samurai |
-| `merkle-proofc` | gRPC proof client for merkle |
-| `verkle-proofc` | gRPC proof client for verkle |
-| `makedataset` | Extract modified accounts from Erigon into a flat dataset |
+| Setup | What you do |
+|---|---|
+| **A. CloudLab, our profile** *(recommended — zero install)* | Instantiate [the profile](https://www.cloudlab.us/p/distopialabs-PG0/smaran-artifact); both nodes self-configure at boot ([Quick start](#quick-start-cloudlab-profile)) |
+| **B. CloudLab, manual** | Instantiate any two-node Ubuntu 22.04 experiment, then follow the same steps as C — except inter-node SSH is automatic: `./run.sh setup` fetches the experiment key on any CloudLab node (run it once per node) |
+| **C. Your own servers** | Two Ubuntu 22.04 machines that can SSH each other; see [Install](#install-paths-bc--one-time). DL needs the dataset ([Zenodo DOI 10.5281/zenodo.21317398](https://doi.org/10.5281/zenodo.21317398)); KT needs no dataset |
 
----
+**2. Where do you drive it from?** Everything is `./run.sh` on node0 — either
+SSH in and use it directly, or stay on your laptop and let `run_ae.sh` call
+it over SSH for you (no prior login needed on the profile; CloudLab installs
+your key at boot):
 
-## Binaries & Commands
+| On node0 | From your laptop |
+|---|---|
+| `./run.sh start quick all` | `bash run_ae.sh <user> <node0-host> start quick all` |
+| `./run.sh status` | `bash run_ae.sh <user> <node0-host> status` |
+| `./run.sh follow` | `bash run_ae.sh <user> <node0-host> follow` |
+| `./run.sh results` | `bash run_ae.sh <user> <node0-host> fetch ~/Desktop/smaran-figs` |
 
-### `samurai`
+(`run_ae.sh` is in this repo — download it, or clone the repo on your laptop.)
 
-Subcommand-based CLI for the Samurai (KZG commitment + MPT) system.
+**3. What do you run?** `start <mode> <scope>`:
 
-```
-samurai <command> [flags]
-```
+| Mode | Meaning | KT time | DL time |
+|---|---|---|---|
+| `smoke` | pipeline check, one point | ~4 min | ~1 min (plots from paper logs) |
+| `quick` | reduced sweep, same qualitative trends | ~90 min | ~50 min |
+| `full` | paper scale | ~3 h | tens of hours (full ingest) |
 
-| Command | Description |
-|---------|-------------|
-| `ingest` | Ingest blocks into the Samurai+MPT pipeline |
-| `build-mpt` | Build MPT from already-processed Samurai data |
-| `bench-ingest` | Duration-based ingestion benchmark with optional hot-account filtering |
-| `proof` | Generate range proofs for an account |
-| `serve` | Start the gRPC proof server |
+Scope is `all`, `kt`, `dl`, or individual figures (`fig4a` … `fig7c`), e.g.
+`./run.sh start quick fig6a fig7b`. Bare `./run.sh` walks you through the
+same choices as menus and prints the equivalent command.
 
-#### `samurai ingest`
+**Runs are detached by default**: `start` returns immediately with a time
+estimate; closing your terminal never loses a run. `status` shows progress,
+`follow` tails the log live (Ctrl+C only stops watching), `stop` aborts
+(rerunning is safe — finished figures are cached), `results` lists or copies
+the PDFs.
 
-```bash
-samurai ingest --db-dir /data/local/tmp/samurai --blocks-dir data/blocks --n 100000
-```
+The rest of this README: [Quick start](#quick-start-cloudlab-profile) for
+the profile path, then the **Decentralized Ledger** guide in depth — Smaran
+as a sharded KZG-based decentralized ledger, evaluated against **Merkle
+(MPT)** and **Verkle** baselines across six figures: **6a** (query latency),
+**6b** (query throughput), **6c** (payload size), **7a** (ingestion
+throughput), **7b** (impact of archival storage), **7c** (impact of
+sharding). The equivalent **Key Transparency** guide (Smaran vs. CONIKS and
+OPTIKS) is [docs/kt-artifact-guide.md](docs/kt-artifact-guide.md).
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--db-dir` | `tmp-samurai-db-dir` | Root directory for all databases |
-| `--blocks-dir` | `data/blocks` | Path to block dataset directory |
-| `--n` | `10000` | Number of blocks to process |
-| `--clean` | `false` | Wipe the database and start fresh |
-| `--cpuprofile` | | Write CPU profile to file |
+> **Naming note:** the system was renamed to *Smaran* during submission; the
+> codebase still uses its original name *samurai* in binary, package, and log
+> names (`samuraimpt` in query-benchmark logs). Reviewer-facing scripts say
+> Smaran; anything on disk named samurai is the same system.
 
-#### `samurai bench-ingest`
+## Quick start (CloudLab profile)
 
-```bash
-# Full pipeline (samurai + MPT)
-samurai bench-ingest --duration 5m --k-users 1000 --accounts-list account_stats_all.csv
-
-# Samurai-only (KZG commitments, no MPT bottleneck)
-samurai bench-ingest --skip-mpt --duration 5m --k-users 1000 --accounts-list account_stats_all.csv
-```
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--db-dir` | `/data/local/tmp/bench-samurai` | Root directory for databases (wiped on each run) |
-| `--blocks-dir` | `data/blocks` | Path to block dataset directory |
-| `--duration` | `5m` | How long to run the benchmark |
-| `--k-users` | `0` | Top-K hot accounts (0 = all, no filtering) |
-| `--accounts-list` | `account_stats_all.csv` | CSV with accounts sorted by update count desc |
-| `--cpuprofile` | | Write CPU profile to file |
-| `--skip-mpt` | `false` | Skip MPT and run samurai-only (KZG) benchmark |
-| `--output-dir` | `/data/local/benchmark_output` | Root directory for benchmark output |
-
-Output: `{output-dir}/samuraimpt/ingestion_{kUsers}_{timestamp}.csv` (default), or `{output-dir}/samurai/...` with `--skip-mpt`
-
-#### `samurai serve`
+**Step 0 — register an SSH key on your CloudLab account (before
+instantiating).** CloudLab installs your public key on the nodes *at boot
+time only*; without one registered first you will get
+`Permission denied (publickey)` when you SSH in.
 
 ```bash
-samurai serve --db-dir /data/local/tmp/samurai --port 50051
+ls ~/.ssh/id_ed25519.pub || ssh-keygen -t ed25519 -N '' -f ~/.ssh/id_ed25519
+cat ~/.ssh/id_ed25519.pub    # copy the whole line
 ```
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--db-dir` | | Database directory |
-| `--host` | `0.0.0.0` | gRPC server host |
-| `--port` | `50051` | gRPC server port |
+Paste it at <https://www.cloudlab.us/manage_profile.php?nav=ssh> → **Add
+Key**. If you already instantiated before adding the key, either terminate
+that experiment and instantiate again (keys are only pushed at boot), or use
+the browser shell on the experiment page (per-node menu → **Shell**, no key
+needed) to append your public key to `~/.ssh/authorized_keys` on node0
+yourself.
 
----
+1. **Instantiate** [the profile](https://www.cloudlab.us/p/distopialabs-PG0/smaran-artifact).
+   The defaults are the paper's node pair (r6615 server + c6420 client at
+   Clemson); if unavailable, pick a fallback pair from the parameter
+   dropdowns (kept in the same cluster — the dataset is cluster-local).
+2. **Wait until the Startup column shows `Finished` for both nodes** on the
+   experiment page (~4 min after boot). The green "ready" banner appears
+   earlier, at boot. The SSH login banner is the authoritative signal:
+   `setup READY` means go; `IN PROGRESS` means wait (it shows a log to
+   watch); `FAILED` means see `/local/setup.log`.
+3. **SSH into `node0`** (the client — the only node you ever touch) and go to
+   the repo clone:
+   ```bash
+   cd /local/repository
+   ```
+4. **Smoke check** (~5 min) — KT runs one full pipeline point; DL
+   regenerates all six paper figures from the curated paper logs:
+   ```bash
+   ./run.sh start smoke all
+   ./run.sh status        # until it says done
+   ```
+5. **First real experiment** (~16 min) — one quick-scale DL figure
+   end-to-end (ingest on the server node → serve → 32 proof clients → plot):
+   ```bash
+   ./run.sh start quick fig6a
+   ```
+6. **Look at the PDFs** — `./run.sh results`, and see
+   [Viewing figures](#viewing-figures).
 
-### `merkle`
+Target: first figure within ~15 minutes of clicking the profile link.
 
-Subcommand-based CLI for the baseline Merkle Patricia Trie system.
+## Where everything lives
 
-```
-merkle <command> [flags]
-```
+Everything you look at is on **node0 (client)** under
+`/local/repository/results/`; everything heavy is on node1 (server) and you
+never touch it.
 
-| Command | Description |
-|---------|-------------|
-| `ingest` | Ingest block data into the MPT |
-| `bench-ingest` | Duration-based ingestion benchmark |
-| `getproof` | Generate an eth_getProof-style account proof |
-| `verifyproof` | Verify an account proof offline from JSON |
-| `serve` | Start the gRPC range proof server |
+| What | Where | Node |
+|---|---|---|
+| Code (repo clone) | `/local/repository` | both |
+| Block dataset, account CSVs, paper logs | `/smaran-dataset` (read-only mount) | both |
+| Ingested databases (big, regenerable) | `/data/local/artifact-dbs` | server |
+| Benchmark logs | `results/logs/` and per-figure `results/fig*/logs/` | client |
+| DL figures (PDFs) | `results/fig*/` and `results/paper-figures/` | client |
+| KT figures (PDFs) | `output/` | client |
+| Cluster config (generated by the profile) | `/local/cluster.env` | both |
 
-#### `merkle ingest`
+On manual/own-server setups you write `/local/cluster.env` yourself (one
+line, `SERVER_HOST=...` — see [Install](#install-paths-bc--one-time)); the
+scripts then behave identically.
+
+## The six figures
+
+Each script announces `Running experiment Figure <yy>`, prints one
+`Running <protocol> with <x> ...` line per data point, then `Plotting`, and
+ends with the figure's path under `results/`. Quick variants live in
+`QuickTesting-DecentralizedLedgerScripts/`, full-scale in
+`DecentralizedLedgerScripts/` — same scripts, reduced parameters.
+
+The tables below use the underlying per-figure scripts; `./run.sh` invokes
+these same scripts (`start smoke dl` = `plot_paper_figures.sh`, "Tier 0").
+
+| Script | Shows | Quick | Full scale (extrapolated) |
+|---|---|---|---|
+| `plot_paper_figures.sh` | all six, from paper logs | ~1 min | — |
+| `run_fig6a.sh` (first of 6a/6b/6c) | query latency vs range | ~16 min first run; ~9 min on cached DBs | one-time full ingest per protocol: tens of hours; then ~25 min per protocol |
+| `run_fig6b.sh` / `run_fig6c.sh` | throughput / payload size | seconds (re-plot of 6a's sweep) | seconds |
+| `run_fig7a.sh` | ingestion throughput | ~11 min | ~19 h |
+| `run_fig7b.sh` | archival storage impact | ~9 min (reuses fig6's DB) | ~1.5 h after fig6's ingest |
+| `run_fig7c.sh` | sharding impact | ~12 min | ~5 h |
+
+Quick-tier times are as measured end-to-end on the paper's two-node
+CloudLab pair (r6615 server + c6420 client); slower storage inflates them
+considerably, chiefly through Smaran's shard-database setup/teardown.
+
+Notes that apply to both tiers:
+
+- **Figures 6a/6b/6c come from one benchmark sweep.** The first of the three
+  scripts runs it; the other two reuse the cached logs and just re-plot
+  (`FORCE_RERUN=1` to redo).
+- **Ingested databases are cached** under `/data/local/artifact-dbs` and
+  reused across runs (Figure 7b reuses Figure 6's Smaran database).
+- **Smaran runs have a fixed setup cost:** creating/opening its ~1000 shard
+  databases adds a delay before ingestion or serving begins (about a minute
+  on NVMe, several minutes on slower disks), and again at teardown. The
+  scripts say so while you wait — this is normal.
+- **Interrupting is safe.** Ctrl+C stops the run and its servers (on both
+  nodes); rerunning redoes any unfinished work from clean state.
+- Absolute numbers at quick scale are far below the paper's (small ingest
+  window, short durations); the *trends* are what to check.
+- **Quick figures omit the Cauchy baseline.** Cauchy exists only as prebaked
+  paper-scale logs (a separate Rust codebase, far too slow to rerun), which
+  would sit meaninglessly next to quick-scale numbers; Tier 0 and full-scale
+  figures include it.
+- All parameters (both tiers) are defined in one place —
+  **`DecentralizedLedgerScripts/config.sh`** — and any value can be
+  overridden per-run via environment variables (examples in that file).
+- **Quick-scale fig7b: the two curves nearly overlap — expected, not a
+  bug.** The gains of Smaran's archival storage are realized when the
+  ingested window is large — hundreds of thousands to millions of blocks
+  (the paper ingests 2.6M). At the quick tier's 10k-block window Smaran
+  performs the same with or without it: we verified the two legs run
+  distinct code paths and stay within a few percent even at a 60k-block
+  window with query ranges to 50k. Smaran being this fast *without*
+  archival storage at small scales is itself a good property, but it means
+  the paper's visual separation only appears at full scale (or raise
+  `N_BLOCKS` / `RANGES_7B` yourself — see `config.sh`).
+
+## Full-scale runs
+
+`./run.sh start full dl` runs all six figures at paper scale. For per-figure
+control, the underlying scripts offer the same detached behavior:
 
 ```bash
-merkle ingest --db-dir /data/local/merkle --blocks-dir data/blocks --n 100000
+./DecentralizedLedgerScripts/run_fig<yy>.sh --detach
 ```
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--db-dir` | *(required)* | Path to state database directory |
-| `--blocks-dir` | `data/blocks` | Path to blocks data directory |
-| `--n` | `1000` | Number of blocks to ingest |
-| `--fresh` | `false` | Delete existing DB and start from scratch |
-
-#### `merkle bench-ingest`
+Identical scripts at the paper's parameters (query ranges to 2.6M, 32
+clients, 2 min per point, 5 user counts to 2M, 6 shard counts to 1000). The
+one-time full ingests are the dominant cost (see the table) — **always use
+`--detach`** for full-scale runs: the run survives SSH disconnects, and
 
 ```bash
-merkle bench-ingest --db-dir /data/local/tmp/bench-merkle --duration 5m --k-users 1000 --fresh
+./DecentralizedLedgerScripts/status.sh
 ```
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--db-dir` | *(required)* | Path to state database directory |
-| `--blocks-dir` | `data/blocks` | Path to blocks data directory |
-| `--duration` | `5m` | How long to run the benchmark |
-| `--k-users` | `0` | Top-K hot accounts (0 = all, no filtering) |
-| `--accounts-list` | `account_stats_all.csv` | CSV with accounts sorted by update count desc |
-| `--fresh` | `false` | Delete existing DB and start from scratch |
-| `--output-dir` | `/data/local/benchmark_output` | Root directory for benchmark output |
+shows each run's state, elapsed vs estimated time, last progress line, and —
+when finished — the figure's path. Console output is captured to
+`results/logs/<figure>.console.log`. `--detach` works for quick runs too;
+inline (no flag) is the default everywhere.
 
-Output: `{output-dir}/merkle/ingestion_{kUsers}_{timestamp}.csv`
+### Hardware fallbacks (CloudLab profile)
 
-#### `merkle getproof`
+If the paper pair is busy, try in this order (profile parameter dropdowns);
+server types are NVMe-only by design:
+
+| Priority | Server | Client | Cluster |
+|---|---|---|---|
+| 1 (paper) | r6615 | c6420 | Clemson |
+| 2 | r650 | c6420 | Clemson |
+| 3 | r6525 | c6420 (or second r6525) | Clemson |
+| 4 | c6525-100g | xl170 | Utah |
+
+## Run from your laptop (optional)
+
+No experiment ever runs on your laptop. `run_ae.sh` (repo root) drives
+`run.sh` on node0 remotely — see [the table at the top](#how-to-run--the-three-choices).
+To copy everything (figures and logs) back by hand:
 
 ```bash
-merkle getproof --db-dir /data/local/merkle --block 18908900 --address 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2
+rsync -a <user>@<node0>:/local/repository/results/ ./smaran-results/
 ```
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--db-dir` | *(required)* | Path to state database directory |
-| `--db-backend` | `pebble` | Database backend: pebble or leveldb |
-| `--block` | *(required)* | Block number to query |
-| `--address` | *(required)* | Account address (0x hex) |
-| `--verify` | `true` | Verify proof after generation |
-| `--cold` | `false` | Reopen DB to simulate cold reads |
+## Viewing figures
 
-#### `merkle serve`
+PDFs can't render in a terminal; in order of convenience:
 
-```bash
-merkle serve --db-dir /data/local/merkle --port 50051
-```
+1. **VS Code Remote-SSH** *(recommended)*: connect to node0, open
+   `/local/repository` — click any PDF under `results/`; terminal and file
+   browser in the same window.
+2. **Copy to your laptop**: the `rsync` one-liner above.
+3. **Throwaway HTTP preview**: `cd results && python3 -m http.server 8000`,
+   then browse `http://<node0>:8000` — remember to stop it (open port).
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--db-dir` | *(required)* | Path to state database directory |
-| `--host` | `0.0.0.0` | gRPC server host |
-| `--port` | `50051` | gRPC server port |
+## Install (Paths B/C — one-time)
 
----
+The artifact runs on **two** Ubuntu 22.04 machines that can SSH each other —
+a *server* (NVMe/SSD, ~100 GB free, 64 GB+ RAM) and a *client* you work
+from — mirroring the paper's topology and the CloudLab profile. (Manual
+CloudLab experiments are exactly this: treat node0 as the client, node1 as
+the server.)
 
-### `verkle`
+On **both** machines:
 
-Subcommand-based CLI for the baseline Verkle tree system.
+1. Clone this repo (same path on both keeps things simple).
+2. Get the block dataset from
+   [Zenodo (DOI 10.5281/zenodo.21317398)](https://doi.org/10.5281/zenodo.21317398)
+   and point the scripts at it: `export SMARAN_DATASET_DIR=<dir with blk_*.dat>`
+   (a shared/NFS copy is fine). KT does not use the dataset.
+3. Run any install script (idempotent; all three leave everything installed —
+   Go 1.25, LaTeX + Python plotting stack, all binaries in `bin/`,
+   `/data/local` made writable, dataset located):
+   ```bash
+   ./DecentralizedLedgerScripts/install_merkle.sh
+   ./DecentralizedLedgerScripts/install_verkle.sh
+   ./DecentralizedLedgerScripts/install_smaran.sh
+   ```
+4. Tell the scripts where the server is — create `/local/cluster.env`
+   (both machines) with:
+   ```
+   SERVER_HOST=<server hostname or IP>
+   ```
+   For KT, also set the two host variables at the top of
+   `KeyTransparencyScripts/nodes.env` (created from the template on first
+   `./run.sh setup`) if your hostnames are not `node0`/`node1`.
 
-```
-verkle <command> [flags]
-```
+On the **client**:
 
-| Command | Description |
-|---------|-------------|
-| `ingest` | Ingest block data into the Verkle tree |
-| `bench-ingest` | Duration-based ingestion benchmark |
-| `getproof` | Generate a Verkle proof for an account |
-| `verifyproof` | Verify a Verkle proof |
-| `serve` | Start the gRPC range proof server |
+5. Regenerate the account-statistics CSVs (Zenodo carries only the blocks;
+   ~5 s + ~4 min, needs ~10 GB RAM):
+   ```bash
+   ./scripts/artifact/generate_account_stats.sh
+   ```
+6. Verify: `./run.sh setup`, then
+   `./DecentralizedLedgerScripts/check_setup.sh` (every line ✓).
 
-#### `verkle ingest`
+The paper-logs bundle (Tier 0 and the prebaked Cauchy series) ships in the
+CloudLab dataset; on your own machine, obtain `smaran-paper-logs.tar.gz` from
+the CloudLab dataset or the authors and set
+`SMARAN_PAPER_LOGS=<extracted paper-logs dir>`. Fresh benchmark figures plot
+without the Cauchy series if the bundle is absent (Cauchy exists only in
+prebaked form — it comes from a separate Rust codebase and is far too slow to
+rerun).
 
-```bash
-verkle ingest --db-dir /data/local/verkle --blocks-dir data/blocks --n 100000
-```
+## Troubleshooting
 
-#### `verkle bench-ingest`
+- **A script says `Setup incomplete: ...`** — it names the missing piece and
+  the fix. On CloudLab this usually means node setup is still running (the
+  SSH login banner shows its status). Full diagnosis:
+  `./DecentralizedLedgerScripts/check_setup.sh`.
+- **Login banner says `setup FAILED`** — `cat /local/setup.log` on that node;
+  re-run `sudo bash /local/repository/cloudlab/setup-node.sh <role> <server-ip>`
+  or re-instantiate.
+- **A run was interrupted / a node rebooted** — just rerun the script;
+  servers left behind are cleaned up automatically and unfinished benchmark
+  points are redone. `status.sh` reports a detached run whose process died.
+- **Two-node scripts report the server unreachable (`Permission denied`)
+  after you changed your SSH keys on the CloudLab portal mid-experiment** —
+  CloudLab then rewrites `~/.ssh/authorized_keys` on every node, removing the
+  experiment-internal key the setup added. SSH into node1 (your portal key
+  still works) and run
+  `cat ~/.ssh/id_cloudlab.pub >> ~/.ssh/authorized_keys` to restore it.
+- **Dataset mounted somewhere unusual** — `export SMARAN_DATASET_DIR=<dir>`.
 
-```bash
-verkle bench-ingest --db-dir /data/local/tmp/bench-verkle --duration 5m --k-users 1000
-```
+## Code layout
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--db-dir` | `/data/local/tmp/bench-verkle` | Path to persistent DB directory |
-| `--blocks-dir` | `data/blocks` | Path to block dataset directory |
-| `--db-backend` | `pebble` | DB backend: pebble or leveldb |
-| `--flush-every` | `1000` | Reload tree every N blocks for memory management |
-| `--duration` | `5m` | Benchmark duration |
-| `--k-users` | `0` | Top-K hot accounts (0 = all, no filtering) |
-| `--accounts-list` | `account_stats_all.csv` | CSV with accounts sorted by update count desc |
-| `--output-dir` | `/data/local/benchmark_output` | Root directory for benchmark output |
+All three protocols share one Go module (`internal/` holds the shared
+dataset, benchmark, and proof machinery); each protocol has its own
+entry-point directories:
 
-Output: `{output-dir}/verkle/ingestion_{kUsers}_{timestamp}.csv`
+| Protocol | Server / ingestion binary | Query (proof) client |
+|---|---|---|
+| Merkle (MPT) | `cmd/merkle` | `cmd/merkle-proofc` |
+| Verkle | `cmd/verkle` | `cmd/verkle-proofc` |
+| Smaran | `cmd/samurai` | `cmd/proofc` |
 
-#### `verkle serve`
+The Key Transparency usecase has its own binaries — `cmd/ktserver` and
+`cmd/ktbench` (Smaran and OPTIKS in one binary; CONIKS builds from the
+`Coniks/` submodule) — with KT-specific tree/proof variants under
+`internal/kt/` and scripts in **`KeyTransparencyScripts/`** +
+**`QuickTesting-KeyTransparency/`**.
 
-```bash
-verkle serve --db-dir /data/local/verkle --port 50053
-```
-
----
-
-### Proof Clients (`proofc`, `merkle-proofc`, `verkle-proofc`)
-
-gRPC proof clients for querying and benchmarking range proofs. Each has two subcommands: `query` (single proof) and `bench` (load benchmark).
-
-**Query a single range proof:**
-
-```bash
-proofc query --server-addr localhost:50051 --account 0x... --start-block 20 --end-block 119 --verify --params-dir ./data/params
-merkle-proofc query --server-addr localhost:50051 --account 0x... --start-block 20 --end-block 119 --verify
-verkle-proofc query --server-addr localhost:50053 --account 0x... --start-block 20 --end-block 119 --verify
-```
-
-**Run a proof generation benchmark:**
-
-```bash
-proofc bench --server-addr localhost:50051 --range-size 50000 --num-clients 4 --accounts-list account_stats_all.csv --duration 60s
-merkle-proofc bench --server-addr localhost:50051 --range-size 50000 --num-clients 4 --accounts-list account_stats_all.csv --duration 60s
-verkle-proofc bench --server-addr localhost:50053 --range-size 50000 --num-clients 4 --accounts-list account_stats_all.csv --duration 60s
-```
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--server-addr` | `localhost:50051` (verkle: `50053`) | gRPC server address |
-| `--range-size` | `50000` | Block range size per query |
-| `--num-clients` | `1` | Concurrent client goroutines |
-| `--accounts-list` | *(required)* | CSV with accounts sorted by update count desc |
-| `--duration` | `60s` | Benchmark duration |
-| `--verify` | `false` | Verify proofs locally |
-| `--params-dir` | `./data/params` | KZG params directory (samurai only) |
-| `--output-dir` | `/data/local/benchmark_output` | Root directory for benchmark output |
-
----
-
-## Benchmark Output
-
-All benchmark output is written under `{output-dir}/<protocol>/` (default `output-dir` is `/data/local/benchmark_output`):
-
-| Protocol | Directory | Description |
-|----------|-----------|-------------|
-| `samurai` | `{output-dir}/samurai/` | Samurai KZG-only (`--skip-mpt`) |
-| `samuraimpt` | `{output-dir}/samuraimpt/` | Samurai + MPT (default) |
-| `merkle` | `{output-dir}/merkle/` | Baseline MPT |
-| `verkle` | `{output-dir}/verkle/` | Baseline Verkle tree |
-
-| Type | File pattern | Example |
-|------|-------------|---------|
-| Ingestion | `ingestion_{kUsers}_{timestamp}.csv` | `samuraimpt/ingestion_1000_20260321_143022.csv` |
-| Ingestion (samurai-only) | `ingestion_{kUsers}_{timestamp}.csv` | `samurai/ingestion_1000_20260321_143022.csv` |
-| Update metrics | `update_metrics_{kUsers}_{timestamp}.csv` | `samurai/update_metrics_1000_20260321_143022.csv` |
-| Proof | `proof_range{rangeSize}_{timestamp}.txt` | `merkle/proof_range50000_20260321_150000.txt` |
-
-### Ingestion CSV columns
-
-All three protocols share a common set of columns:
-
-| Column | Description |
-|--------|-------------|
-| `block_num` | Block number |
-| `num_raw_updates` | Total account updates in the block |
-| `num_selected_updates` | Updates after hot-account filtering (equals raw if no filter) |
-| `queued_at_ns` | Timestamp when block was queued (ns since epoch) |
-| `start_at_ns` | Timestamp when block processing started |
-| `completed_at_ns` | Timestamp when block processing completed |
-
-Samurai adds one extra column for its parallel pipeline:
-
-| Column | Description |
-|--------|-------------|
-| `wait_commitments_ns` | Time spent waiting for KZG commitment workers |
-
-### Update Metrics CSV columns
-
-All protocols produce update-level metrics in a separate CSV using time-windowed atomic counters (1-second windows). This captures true update throughput without the overhead of per-update CSV rows.
-
-| Column | Description |
-|--------|-------------|
-| `window_end_ns` | Timestamp at end of the 1-second window (ns since epoch) |
-| `updates_completed` | Number of updates completed in this window |
-| `sum_compute_ns` | Total compute nanoseconds across all updates in this window |
-
-Derived metrics (computed in post-processing):
-- `update_throughput = updates_completed / window_seconds`
-- `avg_update_latency_ms = (sum_compute_ns / updates_completed) / 1e6`
-
-For Samurai, `sum_compute_ns` captures actual per-update KZG compute time. For Merkle/Verkle, it captures amortized block processing time distributed across the block's updates.
-
----
-
-## Auxiliary Tools
-
-Located under `cmd/tools/` and built with `go run`.
-
-### `makedataset`
-
-Extracts modified-account data from an Erigon node into a flat dataset.
-
-```bash
-./bin/makedataset [flags]
-```
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--startBlock` | `20600000` | Starting block number |
-| `--endBlock` | `21600000` | Ending block number |
-| `--dataDir` | `/data/local/dataset/modified_accounts` | Output dataset directory |
-| `--testMode` | `false` | Run in test/sanity-check mode |
-
-### `count_account_updates`
-
-Scans a block dataset and produces a CSV of per-account update counts.
-
-```bash
-go run ./cmd/tools/count_account_updates --n 10000 --dataset ./data/blocks --o account_stats.csv
-```
-
-### `debug_version`
-
-Inspects account version entries across database shards.
-
-```bash
-go run ./cmd/tools/debug_version --datadir /data/local/samurai/db/ --account 0x... --shards 32
-```
-
----
-
-## Makefile Targets
-
-| Target | Description |
-|--------|-------------|
-| `make build` | Build all binaries into `bin/` |
-| `make build-samurai` | Build `samurai`, `proofc`, `makedataset` |
-| `make build-merkle` | Build `merkle`, `merkle-proofc` |
-| `make build-verkle` | Build `verkle`, `verkle-proofc` |
-| `make clean` | Remove build artifacts |
-| `make bench-ingest` | Run ingestion benchmarks for all three protocols |
-| `make bench-ingest-samurai` | Run samurai ingestion benchmark (5m) |
-| `make bench-ingest-merkle` | Run merkle ingestion benchmark (5m) |
-| `make bench-ingest-verkle` | Run verkle ingestion benchmark (5m) |
-| `make bench-proof` | Run proof benchmarks for all three protocols |
-| `make bench-proof-samurai` | Run samurai proof benchmark (configurable via `RANGE_SIZE`, `NUM_CLIENTS`, `BENCH_DURATION`) |
-| `make bench-proof-merkle` | Run merkle proof benchmark |
-| `make bench-proof-verkle` | Run verkle proof benchmark |
-
----
-
-## Build Protobuf Files
-
-```bash
-protoc --go_out=. --go_opt=paths=source_relative internal/tree/pb/segmenttree.proto
-```
-
-## Performance Profiling
-
-```bash
-go install github.com/google/pprof@latest
-sudo apt-get install -y graphviz
-
-./bin/samurai ingest --cpuprofile ./profiles/cpu.prof --db-dir /data/local/tmp/samurai
-go tool pprof -http=:8080 ./bin/samurai ./profiles/cpu.prof
-```
+DL reviewer-facing scripts live in **`DecentralizedLedgerScripts/`**
+(install, full-scale experiments, plot-only mode, `check_setup.sh`,
+`status.sh`) and **`QuickTesting-DecentralizedLedgerScripts/`** (quick
+variants of the same scripts). The CloudLab profile is **`profile.py`** at
+the repo root (where CloudLab requires it); node setup and the image recipe
+live in **`cloudlab/`**. All experiment output is written under **`results/`**
+(gitignored). `docs/DEVELOPMENT.md` documents every binary and subcommand.

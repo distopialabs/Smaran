@@ -15,15 +15,15 @@ func CreateOrUpdateAccountInfo(account common.Address, balance *big.Int, blockNu
 	}
 
 	loadFn := func(account common.Address, sdb *db.SamuraiStore) *tree.AccountInfo {
-		cbInfo, err := tree.GetCurrentBalanceInfo(account, sdb.StateDB)
+		cbInfo, err := tree.GetCurrentBalanceInfo(account, &sdb.StateDB)
 		if err != nil {
 			if err != db.ErrNotFound {
 				panic(err)
 			}
 			return nil
 		}
-		batchTree := tree.GetCurrentLXBatchTree(account, sdb.TreeDB)
-		batchCommitments := tree.GetLXBatchCommitments(account, cbInfo.Version, sdb.StateDB)
+		batchTree := tree.GetCurrentLXBatchTree(account, &sdb.TreeDB)
+		batchCommitments := tree.GetLXBatchCommitments(account, cbInfo.Version, &sdb.StateDB)
 		return &tree.AccountInfo{
 			Account:                  account,
 			CurrentBalanceInfo:       cbInfo,
@@ -36,6 +36,43 @@ func CreateOrUpdateAccountInfo(account common.Address, balance *big.Int, blockNu
 
 	mutate := func(accountInfo *tree.AccountInfo, sdb *db.SamuraiStore) {
 		accountInfo.Update(blockNumber, balance, sdb)
+	}
+
+	accountInfo, err := cache.Update(account, initFn, loadFn, mutate)
+	if err != nil {
+		panic(err)
+	}
+	commitmentHash := accountInfo.CalculateFinalCommitment()
+	return commitmentHash, nil
+}
+
+func CreateOrUpdateAccountInfoBulk(account common.Address, cache *Cache, entries []tree.AccountBulkUpdateEntry) (common.Hash, error) {
+	initFn := func(account common.Address) *tree.AccountInfo {
+		return tree.NewAccountInfo(account, cache.PrecomputedData)
+	}
+
+	loadFn := func(account common.Address, sdb *db.SamuraiStore) *tree.AccountInfo {
+		cbInfo, err := tree.GetCurrentBalanceInfo(account, &sdb.StateDB)
+		if err != nil {
+			if err != db.ErrNotFound {
+				panic(err)
+			}
+			return nil
+		}
+		batchTree := tree.GetCurrentLXBatchTree(account, &sdb.TreeDB)
+		batchCommitments := tree.GetLXBatchCommitments(account, cbInfo.Version, &sdb.StateDB)
+		return &tree.AccountInfo{
+			Account:                  account,
+			CurrentBalanceInfo:       cbInfo,
+			CurrentLXBatchTree:       batchTree,
+			CurrentLXBatchCommitment: batchCommitments,
+			PrecomputedData:          cache.PrecomputedData,
+			DirtyChunks:              tree.InitDirtyChunks(),
+		}
+	}
+
+	mutate := func(accountInfo *tree.AccountInfo, sdb *db.SamuraiStore) {
+		accountInfo.UpdateBulk(entries, sdb)
 	}
 
 	accountInfo, err := cache.Update(account, initFn, loadFn, mutate)

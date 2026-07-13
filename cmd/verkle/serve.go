@@ -2,10 +2,14 @@ package main
 
 import (
 	"fmt"
+	"log"
+	"time"
 
+	"github.com/nepal80m/samurai/internal/benchutil"
 	"github.com/nepal80m/samurai/internal/verkle/server"
 	"github.com/nepal80m/samurai/internal/verkle/store"
 	"github.com/urfave/cli/v2"
+	"google.golang.org/grpc"
 )
 
 func serveCmd() *cli.Command {
@@ -17,6 +21,8 @@ func serveCmd() *cli.Command {
 			&cli.StringFlag{Name: "db-backend", Value: "pebble", Usage: "DB backend: pebble or leveldb"},
 			&cli.StringFlag{Name: "host", Value: "0.0.0.0", Usage: "gRPC server host"},
 			&cli.IntFlag{Name: "port", Value: 50051, Usage: "gRPC server port"},
+			&cli.BoolFlag{Name: "bench", Value: false, Usage: "Enable per-request CSV logging for throughput benchmarking"},
+			&cli.StringFlag{Name: "bench-output", Value: "", Usage: "Bench CSV output path (default: ./bench_server_<timestamp>.csv)"},
 		},
 		Action: func(c *cli.Context) error {
 			dbDir := c.String("db-dir")
@@ -33,9 +39,27 @@ func serveCmd() *cli.Command {
 			}
 			defer kv.Close()
 
+			var benchLog *benchutil.BenchLogger
+			var grpcOpts []grpc.ServerOption
+			if c.Bool("bench") {
+				benchPath := c.String("bench-output")
+				if benchPath == "" {
+					ts := time.Now().Format("20060102_150405")
+					benchPath = fmt.Sprintf("bench_server_%s.csv", ts)
+				}
+				benchLog, err = benchutil.NewBenchLogger(benchPath)
+				if err != nil {
+					return fmt.Errorf("create bench logger: %w", err)
+				}
+				go benchLog.Run()
+				defer benchLog.Stop()
+				grpcOpts = append(grpcOpts, grpc.MaxConcurrentStreams(100))
+				log.Printf("Bench logging enabled, writing to %s", benchPath)
+			}
+
 			ns := store.NewNodeStore(kv)
-			proofServer := server.NewProofServer(ns)
-			return server.ListenAndServe(addr, proofServer)
+			proofServer := server.NewProofServer(ns, benchLog)
+			return server.ListenAndServe(addr, proofServer, grpcOpts...)
 		},
 	}
 }

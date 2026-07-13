@@ -10,9 +10,9 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 
 	"github.com/nepal80m/samurai/internal/db"
-	"github.com/nepal80m/samurai/internal/tree"
 	"github.com/nepal80m/samurai/internal/merkle/meta"
 	st "github.com/nepal80m/samurai/internal/merkle/state"
+	"github.com/nepal80m/samurai/internal/tree"
 )
 
 const (
@@ -73,7 +73,7 @@ func BuildMPT(cfg Config) error {
 			addrHex := key[len("user:") : len(key)-len(suffix)]
 			addr := common.HexToAddress(addrHex)
 
-			cbInfo, err := tree.GetCurrentBalanceInfo(addr, store.StateDB)
+			cbInfo, err := tree.GetCurrentBalanceInfo(addr, &store.StateDB)
 			if err != nil {
 				iter.Close()
 				return fmt.Errorf("shard %d, account %s: load balance info: %w", shardIdx, addrHex, err)
@@ -83,7 +83,7 @@ func BuildMPT(cfg Config) error {
 			if cbInfo.Version == 0 {
 				commitments = new(tree.LXBatchCommitment)
 			} else {
-				commitments = tree.GetLXBatchCommitments(addr, cbInfo.Version, store.StateDB)
+				commitments = tree.GetLXBatchCommitments(addr, cbInfo.Version, &store.StateDB)
 			}
 
 			ai := &tree.AccountInfo{

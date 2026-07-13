@@ -26,6 +26,7 @@ import (
 	"github.com/nepal80m/samurai/internal/merkle/proof"
 	"github.com/nepal80m/samurai/internal/merkle/server"
 	st "github.com/nepal80m/samurai/internal/merkle/state"
+	"google.golang.org/grpc"
 )
 
 const defaultStartBlock = 18908895
@@ -102,9 +103,11 @@ func benchIngestCmd() *cli.Command {
 		Flags: []cli.Flag{
 			&cli.StringFlag{Name: "blocks-dir", Value: "data/blocks", Usage: "Path to blocks data directory"},
 			&cli.StringFlag{Name: "db-dir", Value: "/data/local/tmp/bench-merkle", Usage: "Path to state database directory"},
-			&cli.DurationFlag{Name: "duration", Value: 5 * time.Minute, Usage: "How long to run the benchmark"},
+			&cli.Uint64Flag{Name: "n", Value: 50000, Usage: "Number of blocks to ingest"},
+			&cli.DurationFlag{Name: "duration", Value: 15 * time.Minute, Usage: "Deadline/timeout for the benchmark"},
 			&cli.IntFlag{Name: "k-users", Value: 0, Usage: "Top-K hot accounts to include (0 = all, no filtering)"},
 			&cli.StringFlag{Name: "accounts-list", Value: "account_stats_all.csv", Usage: "CSV with hot accounts sorted by update count descending"},
+			&cli.IntFlag{Name: "num-shards", Value: 1000, Usage: "Number of shard workers in the pipeline"},
 			&cli.BoolFlag{Name: "fresh", Value: true, Usage: "Delete existing DB and start from scratch"},
 			&cli.StringFlag{Name: "output-dir", Value: benchutil.DefaultOutputDir, Usage: "Root directory for benchmark output"},
 		},
@@ -137,12 +140,17 @@ func benchIngestCmd() *cli.Command {
 			}
 			defer store.Close()
 
+			startBlock := dataset.FIRST_BLOCK
+			endBlock := startBlock + c.Uint64("n") - 1
+
 			cfg := ingest.BenchConfig{
 				BlocksDir:         c.String("blocks-dir"),
 				Store:             store,
-				Start:             dataset.FIRST_BLOCK,
+				Start:             startBlock,
+				End:               endBlock,
 				Duration:          c.Duration("duration"),
 				KUsers:            kUsers,
+				NumShards:         c.Int("num-shards"),
 				AccountsList:      c.String("accounts-list"),
 				OutCSV:            csvPath,
 				UpdateMetricsPath: updateMetricsPath,
@@ -357,6 +365,8 @@ func serveCmd() *cli.Command {
 			&cli.StringFlag{Name: "db-dir", Required: true, Usage: "Path to state database directory"},
 			&cli.StringFlag{Name: "host", Value: "0.0.0.0", Usage: "gRPC server host"},
 			&cli.IntFlag{Name: "port", Value: 50051, Usage: "gRPC server port"},
+			&cli.BoolFlag{Name: "bench", Value: false, Usage: "Enable per-request CSV logging for throughput benchmarking"},
+			&cli.StringFlag{Name: "bench-output", Value: "", Usage: "Bench CSV output path (default: ./bench_server_<timestamp>.csv)"},
 		},
 		Action: func(c *cli.Context) error {
 			host := c.String("host")
@@ -368,8 +378,26 @@ func serveCmd() *cli.Command {
 			}
 			defer store.Close()
 
-			proofServer := server.NewProofServer(store)
-			return server.ListenAndServe(addr, proofServer)
+			var benchLog *benchutil.BenchLogger
+			var grpcOpts []grpc.ServerOption
+			if c.Bool("bench") {
+				benchPath := c.String("bench-output")
+				if benchPath == "" {
+					ts := time.Now().Format("20060102_150405")
+					benchPath = fmt.Sprintf("bench_server_%s.csv", ts)
+				}
+				benchLog, err = benchutil.NewBenchLogger(benchPath)
+				if err != nil {
+					return fmt.Errorf("create bench logger: %w", err)
+				}
+				go benchLog.Run()
+				defer benchLog.Stop()
+				grpcOpts = append(grpcOpts, grpc.MaxConcurrentStreams(100))
+				log.Printf("Bench logging enabled, writing to %s", benchPath)
+			}
+
+			proofServer := server.NewProofServer(store, benchLog)
+			return server.ListenAndServe(addr, proofServer, grpcOpts...)
 		},
 	}
 }
