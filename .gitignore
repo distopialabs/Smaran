@@ -36,3 +36,4 @@ Coniks/build/
 KeyTransparencyScripts/nodes.env
 *.pyc
 .ae/
+output/

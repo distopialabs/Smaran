@@ -145,7 +145,7 @@ Same `run.sh` on node0, driven over SSH — start, check progress, and copy the 
 
 ---
 
-## Install from source 🖥️ *(only if you unchecked the pre-built image at Step 1)*
+## Install from source 🖥️ *(only on machines without the profile's automatic setup)*
 
 Before running the sweeps, run:
 
