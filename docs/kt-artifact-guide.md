@@ -1,13 +1,13 @@
-# Smaran — Artifact Evaluation
+# Smaran Artifact: Key Transparency Guide
 
 Reproduces the paper's evaluation figures:
 
-- **Key Transparency (§7.1)** — Figures 4a, 4b, 4c, 5
-- **Decentralized Ledger (§7.2)** — Figures 6, 7 *(same repo — full guide in the [root README](../README.md))*
+- **Key Transparency (§7.1)**: Figures 4a, 4b, 4c, 5 (this guide)
+- **Decentralized Ledger (§7.2)**: Figures 6, 7 (same repo; full guide in the [root README](../README.md))
 
-**Total time:** ~30 min of your attention + ~3 hours of unattended compute for the full sweep, or ~90 min for the quick sweep.
+**Total time:** ~30 min of your attention + ~3 hours of unattended compute for the full sweep, or ~2 hours for the quick sweep.
 
-You will run **exactly two commands total** (cd and `./run.sh`). Everything else is menu-driven — or copy-paste the one-line equivalents shown below.
+You will run **exactly two commands total** (cd and `./run.sh`). Everything else is menu-driven, or copy-paste the one-line equivalents shown below.
 
 ---
 
@@ -24,7 +24,7 @@ CloudLab installs your public SSH key on the nodes at boot time. If your account
 3. Open <https://www.cloudlab.us/manage_profile.php?nav=ssh>, click **Add Key**, paste, save.
 4. Now you can proceed to Step 1.
 
-If you already instantiated the profile before adding a key, terminate that experiment and instantiate again — CloudLab only pushes keys at node boot.
+If you already instantiated the profile before adding a key, terminate that experiment and instantiate again; CloudLab only pushes keys at node boot.
 
 ---
 
@@ -34,7 +34,7 @@ If you already instantiated the profile before adding a key, terminate that expe
 2. Open the profile directly: <https://www.cloudlab.us/p/distopialabs-PG0/smaran-artifact>. Click **Instantiate**.
 3. Keep the defaults on the parameter form (the paper's node pair: r6615 server + c6420 client at Clemson).
 4. Click **Next → Finish**. Wait until the **Startup** column shows **Finished** for both nodes (~10 min; node setup builds the binaries automatically).
-5. Click **List View**. You will see two nodes: **node0** (client, c6420 — the only node you touch) and **node1** (server, r6615). Copy the SSH command for **node0** — it looks like:
+5. Click **List View**. You will see two nodes: **node0** (client, c6420, the only node you touch) and **node1** (server, r6615). Copy the SSH command for **node0**; it looks like:
 
    ```
    ssh <your-cloudlab-username>@clnodeXXX.clemson.cloudlab.us
@@ -61,19 +61,19 @@ cd /local/repository
 `git clone --branch main --recurse-submodules https://github.com/distopialabs/Smaran.git`.)
 
 `./run.sh` prepares the environment (inter-node SSH, PATHs, cleans stale
-state), asks two questions — what (`kt`) and at which scale — then starts the
-run **detached** and prints the one-line command that skips the menus next
-time. The KT sweeps:
+state), asks two questions (what to run, here `kt`, and at which scale),
+then starts the run **detached** and prints the one-line command that skips
+the menus next time. The KT sweeps:
 
 | Command | Compute time | What it does |
 |---|---|---|
 | `./run.sh start full kt` | ~3 hours | Every point from the paper: Fig 4 with 11 version counts {2 … 2047}, Fig 5 with 6 user counts {10k … 1M}. Highest fidelity. |
-| `./run.sh start quick kt` | ~90 min | Reduced points (Fig 4: 5 version counts; Fig 5: 3 user counts) but same trend and protocol ordering as the paper. |
-| `./run.sh start smoke kt` | ~4 min | One sweep point across the three protocols. Just checks that the whole pipeline (build, SSH, server, bench, plotting) works end-to-end. |
+| `./run.sh start quick kt` | ~2 hours | Reduced points (Fig 4: 5 version counts; Fig 5: 3 user counts) but same trend and protocol ordering as the paper. |
+| `./run.sh start smoke kt` | ~5 min | One sweep point across the three protocols. Just checks that the whole pipeline (build, SSH, server, bench, plotting) works end-to-end. |
 
 Individual figures work too: `./run.sh start quick fig4a`.
 
-**Recommended first-timer flow:** `./run.sh start smoke kt` → wait ~4 min →
+**Recommended first-timer flow:** `./run.sh start smoke kt` → wait ~5 min →
 `./run.sh status` shows `done` and `./run.sh results` lists
 `output/fig4a_latency.pdf` → then `./run.sh start full kt` (or `quick`).
 
@@ -101,7 +101,7 @@ When it's done, PDFs land in `output/` at the repo root (`/local/repository/outp
 
 ## Step 4 · Verify + copy PDFs to your laptop
 
-**On node0** 🖥️ — automated shape check against the paper's qualitative claims:
+**On node0** 🖥️, an automated shape check against the paper's qualitative claims:
 
 ```bash
 python3 KeyTransparencyScripts/verify.py
@@ -109,7 +109,7 @@ python3 KeyTransparencyScripts/verify.py
 
 Exit code 0 means every claim in §7.1 held on your data.
 
-**On your laptop** 💻 — copy the PDFs down and open them:
+**On your laptop** 💻, copy the PDFs down and open them:
 
 ```bash
 mkdir -p ~/Desktop/smaran-ae-output
@@ -117,7 +117,7 @@ scp <your-cloudlab-username>@clnodeXXX.clemson.cloudlab.us:'/local/repository/ou
 open ~/Desktop/smaran-ae-output/*.pdf
 ```
 
-Compare against the paper's Figures 4a/4b/4c/5. Reference PDFs from our own runs are in [`reference_pdfs/`](reference_pdfs/); shapes should match.
+Compare against the paper's Figures 4a/4b/4c/5. Reference PDFs from our own runs are in [`reference_pdfs/`](../reference_pdfs/); shapes should match.
 
 ### Expected shapes
 
@@ -141,7 +141,7 @@ bash run_ae.sh <your-cloudlab-username> <node0-hostname> status          # any t
 bash run_ae.sh <your-cloudlab-username> <node0-hostname> fetch           # PDFs -> ~/Desktop/smaran-ae-output
 ```
 
-Same `run.sh` on node0, driven over SSH — start, check progress, and copy the figures back without ever logging in yourself.
+Same `run.sh` on node0, driven over SSH: start, check progress, and copy the figures back without ever logging in yourself.
 
 ---
 

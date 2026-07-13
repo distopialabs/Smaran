@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Smaran AE — drive the artifact from your LAPTOP.
+# Smaran AE: drive the artifact from your LAPTOP.
 # Thin remote wrapper around ./run.sh on node0; no prior login to node0 is
 # needed (CloudLab installs your SSH key on the nodes at boot).
 #

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Smaran artifact — single entry point for running experiments.
+# Smaran artifact: single entry point for running experiments.
 #
 #   ./run.sh                          interactive (menus, then runs detached)
 #   ./run.sh start <mode> <scope...>  start a run (detached by default)
@@ -9,8 +9,8 @@
 #   ./run.sh results [dest-dir]       list figures, or copy them to dest-dir
 #   ./run.sh setup                    environment prep only (start runs it anyway)
 #
-#   mode:  smoke   pipeline check (KT ~4 min; DL ~1 min, plots from paper logs)
-#          quick   reduced sweeps, same qualitative trends (KT ~90 min; DL ~50 min)
+#   mode:  smoke   pipeline check (KT ~5 min; DL ~2 min, plots from paper logs)
+#          quick   reduced sweeps, same qualitative trends (KT ~2 h; DL ~50 min)
 #          full    paper-scale sweeps (KT ~3 h; DL tens of hours)
 #   scope: all | kt | dl | one or more figures:
 #          fig4a fig4b fig4c fig5 (KT)   fig6a fig6b fig6c fig7a fig7b fig7c (DL)
@@ -44,8 +44,8 @@ script_for() { # <mode> <fig>
 eta_minutes() { # <mode> <fig>  -> rough minutes (from measured quick-tier times)
     local mode=$1 fig=$2
     case "$mode:$fig" in
-        quick:fig4a|quick:fig4b|quick:fig4c) echo 25 ;;
-        quick:fig5) echo 15 ;;
+        quick:fig4a|quick:fig4b|quick:fig4c) echo 20 ;;
+        quick:fig5) echo 55 ;;
         quick:fig6a) echo 16 ;;   quick:fig6b|quick:fig6c) echo 1 ;;
         quick:fig7a) echo 11 ;;   quick:fig7b) echo 9 ;;   quick:fig7c) echo 12 ;;
         full:fig4a|full:fig4b|full:fig4c) echo 50 ;;
@@ -191,7 +191,7 @@ do_start() { # <mode> <scope...>
     [ $# -ge 1 ] || { echo "Missing scope (all|kt|dl|figure ids)"; exit 2; }
 
     if [ -n "$(running_pid)" ]; then
-        echo "A run is already active — './run.sh status' to inspect, './run.sh stop' to abort."
+        echo "A run is already active: './run.sh status' to inspect, './run.sh stop' to abort."
         exit 1
     fi
 
@@ -218,7 +218,7 @@ do_start() { # <mode> <scope...>
     state_set pid $!
 
     echo
-    echo "Started ($mode: $figs) — detached; safe to close this terminal."
+    echo "Started ($mode: $figs), detached; safe to close this terminal."
     if [ "$eta" -ge 120 ]; then printf 'Estimated: ~%.1f hours\n' "$(echo "$eta/60" | bc -l)"; else echo "Estimated: ~$eta minutes"; fi
     echo "  ./run.sh status    progress check"
     echo "  ./run.sh follow    watch the log live"
@@ -234,7 +234,7 @@ do_status() {
     if [ "$st" = running ] && [ -z "$(running_pid)" ]; then st="died (see ./run.sh follow for the log)"; fi
     now=$(date +%s); elapsed=$(( (now - ${started:-$now}) / 60 ))
     echo "state:    $st"
-    echo "run:      $mode — $figs"
+    echo "run:      $mode ($figs)"
     echo "current:  $(state_get current)"
     echo "elapsed:  ${elapsed} min (estimate was ~${eta} min)"
     [ "$st" = failed ] && echo "failed:   $(state_get failed_step)"
@@ -249,7 +249,7 @@ do_stop() {
     sleep 2
     sudo pkill -9 coniksserver ktserver ktbench coniksbench 2>/dev/null || true
     state_set state stopped
-    echo "Stopped. Rerunning is safe — finished figures are cached, unfinished ones redo from clean state."
+    echo "Stopped. Rerunning is safe: finished figures are cached, unfinished ones redo from clean state."
 }
 
 do_results() { # [dest]
@@ -285,8 +285,8 @@ do_menu() {
     case "$s" in 1) scope=all;; 2) scope=kt;; 3) scope=dl;; fig*) scope="$s";; *) echo 'Unrecognized.'; exit 2;; esac
     echo
     echo 'At what scale?'
-    echo '    [0] SMOKE  pipeline check     (KT ~4 min / DL ~1 min)'
-    echo '    [1] QUICK  reduced sweep      (KT ~90 min / DL ~50 min; same trends)'
+    echo '    [0] SMOKE  pipeline check     (KT ~5 min / DL ~2 min)'
+    echo '    [1] QUICK  reduced sweep      (KT ~2 h / DL ~50 min; same trends)'
     echo '    [2] FULL   paper scale        (KT ~3 h / DL tens of hours)'
     read -rp '> Mode [0/1/2]: ' m
     case "$m" in 0) mode=smoke;; 1) mode=quick;; 2) mode=full;; *) echo 'Unrecognized.'; exit 2;; esac

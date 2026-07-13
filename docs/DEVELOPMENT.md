@@ -15,10 +15,10 @@ This produces six binaries in `bin/`:
 
 | Binary | Description |
 |--------|-------------|
-| `samurai` | Samurai (KZG + MPT) — ingest blocks, generate proofs, serve gRPC |
-| `merkle` | Baseline MPT — ingest, proof gen, gRPC server |
-| `verkle` | Baseline Verkle tree — ingest, proof gen, gRPC server |
-| `verklekzg` | Verkle-KZG tree (BLS12-381 + KZG commitments) — ingest, proof gen, gRPC server |
+| `samurai` | Samurai (KZG + MPT): ingest blocks, generate proofs, serve gRPC |
+| `merkle` | Baseline MPT: ingest, proof gen, gRPC server |
+| `verkle` | Baseline Verkle tree: ingest, proof gen, gRPC server |
+| `verklekzg` | Verkle-KZG tree (BLS12-381 + KZG commitments): ingest, proof gen, gRPC server |
 | `proofc` | gRPC proof client for samurai |
 | `merkle-proofc` | gRPC proof client for merkle |
 | `verkle-proofc` | gRPC proof client for verkle |

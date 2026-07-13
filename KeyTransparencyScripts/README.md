@@ -43,7 +43,7 @@ Run these on **both** nodes:
 ./install_smaran.sh    # prints "Installing Smaran"
 ```
 
-All three installers are idempotent — they detect existing Go/apt packages and
+All three installers are idempotent: they detect existing Go/apt packages and
 skip the reinstall.
 
 ## Running the experiments
@@ -51,17 +51,17 @@ skip the reinstall.
 From either node (or a laptop that can SSH to both):
 
 ```
-./run_fig4a.sh       # Figure 4a — latency vs versions
-./run_fig4b.sh       # Figure 4b — throughput vs versions
-./run_fig4c.sh       # Figure 4c — payload vs versions
-./run_fig5.sh        # Figure 5  — put throughput vs users
+./run_fig4a.sh       # Figure 4a: latency vs versions
+./run_fig4b.sh       # Figure 4b: throughput vs versions
+./run_fig4c.sh       # Figure 4c: payload vs versions
+./run_fig5.sh        # Figure 5:  put throughput vs users
 ```
 
 Each script prints:
 
-- `Running experiment Figure <yy>` — banner on first line.
-- `Running <Protocol> with <x> versions` (or `users` for Fig 5) — per data point.
-- `Plotting` — followed by the resulting PDF.
+- `Running experiment Figure <yy>`: banner on first line.
+- `Running <Protocol> with <x> versions` (or `users` for Fig 5): per data point.
+- `Plotting`: followed by the resulting PDF.
 
 Output PDFs land in `<repo>/output/` by default. Override with
 `KT_OUTPUT_DIR=/some/dir ./run_fig4a.sh`.
@@ -75,10 +75,11 @@ and only re-plot (30 seconds). Set `KT_FORCE_RERUN=1` to force a fresh sweep.
 ## Quick-turnaround variants
 
 See [`../QuickTesting-KeyTransparency/`](../QuickTesting-KeyTransparency/) for
-scripts that run a reduced sweep — enough to see the trend without waiting
+scripts that run a reduced sweep: enough to see the trend without waiting
 for the full sweep to complete.
 
 ## Time estimates
 
-See the top-of-repo [`../README-AE.md`](../README-AE.md) for a table of
-human + compute time per experiment.
+See the [root README](../README.md) and the
+[KT guide](../docs/kt-artifact-guide.md) for a table of human + compute time
+per experiment.
