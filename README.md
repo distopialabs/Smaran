@@ -20,7 +20,7 @@ reproduces both evaluation usecases with one standard workflow:
 
 | Setup | What you do |
 |---|---|
-| **A. CloudLab, our profile** *(recommended — zero install)* | Instantiate [the profile](https://www.cloudlab.us/p/distopialabs-PG0/smaran-artifact); both nodes self-configure at boot ([Quick start](#quick-start-cloudlab-profile)) |
+| **A. CloudLab, our profile** *(recommended — zero install)* | Instantiate [the profile](https://www.cloudlab.us/p/DistopiaLabs/smaran-artifact); both nodes self-configure at boot ([Quick start](#quick-start-cloudlab-profile)) |
 | **B. CloudLab, manual** | Instantiate any two-node Ubuntu 22.04 experiment, then follow the same steps as C — except inter-node SSH is automatic: `./run.sh setup` fetches the experiment key on any CloudLab node (run it once per node) |
 | **C. Your own servers** | Two Ubuntu 22.04 machines that can SSH each other; see [Install](#install-paths-bc--one-time). DL needs the dataset ([Zenodo DOI 10.5281/zenodo.21317398](https://doi.org/10.5281/zenodo.21317398)); KT needs no dataset |
 
