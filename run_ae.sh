@@ -23,7 +23,7 @@ if [ $# -lt 3 ]; then
 fi
 
 USER=$1; HOST=$2; shift 2
-BRANCH=unified-artifact
+BRANCH=main
 SSH=(ssh -o StrictHostKeyChecking=accept-new "${USER}@${HOST}")
 
 # The profile clones the repo to /local/repository at boot; on a bare machine

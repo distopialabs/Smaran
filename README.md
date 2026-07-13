@@ -1,5 +1,11 @@
 # Smaran — Artifact Evaluation
 
+Smaran is an authenticated data structure that serves time-travel queries —
+over a single point in the past or an interval — with a constant number of
+fixed-size proofs, independent of the query range or history length. It
+combines segment trees with cryptographic vector commitments, integrated
+into two applications: key transparency and decentralized ledgers.
+
 This repository is the artifact for the SOSP paper on **Smaran**. It
 reproduces both evaluation usecases with one standard workflow:
 

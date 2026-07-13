@@ -28,7 +28,7 @@ DEFAULTS = {
         os.path.expanduser("~/.ssh/id_ed25519"),
     ),
     "KT_REMOTE_DIR": "/users/" + os.environ.get("USER", "shistuu"),
-    "KT_REPO_BRANCH": "unified-artifact",
+    "KT_REPO_BRANCH": "main",
     "KT_REPO_URL": "https://github.com/distopialabs/Smaran",
 }
 

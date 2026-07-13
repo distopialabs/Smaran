@@ -67,7 +67,7 @@ IMAGE = {
 # repo's git history exceeds CloudLab's 500 MiB clone limit), so the clone
 # is ours to do. At submission time, flip REPO_REF to the artifact tag.
 REPO_URL = "https://github.com/distopialabs/Smaran.git"
-REPO_REF = "unified-artifact"
+REPO_REF = "main"
 
 # Experiment-LAN addresses; setup-node.sh writes the server's address into
 # /local/cluster.env so the scripts find it (benchmark traffic crosses the

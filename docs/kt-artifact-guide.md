@@ -58,7 +58,7 @@ cd /local/repository
 ```
 
 (On a machine without the profile, clone it yourself first:
-`git clone --branch unified-artifact --recurse-submodules https://github.com/distopialabs/Smaran.git`.)
+`git clone --branch main --recurse-submodules https://github.com/distopialabs/Smaran.git`.)
 
 `./run.sh` prepares the environment (inter-node SSH, PATHs, cleans stale
 state), asks two questions — what (`kt`) and at which scale — then starts the
@@ -135,7 +135,7 @@ Compare against the paper's Figures 4a/4b/4c/5. Reference PDFs from our own runs
 If you'd rather skip logging into node0 yourself, run this on your laptop after Step 1:
 
 ```bash
-curl -sLO https://raw.githubusercontent.com/distopialabs/Smaran/unified-artifact/run_ae.sh
+curl -sLO https://raw.githubusercontent.com/distopialabs/Smaran/main/run_ae.sh
 bash run_ae.sh <your-cloudlab-username> <node0-hostname> start full kt   # or quick/smoke
 bash run_ae.sh <your-cloudlab-username> <node0-hostname> status          # any time
 bash run_ae.sh <your-cloudlab-username> <node0-hostname> fetch           # PDFs -> ~/Desktop/smaran-ae-output
