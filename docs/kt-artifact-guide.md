@@ -7,7 +7,7 @@ Reproduces the paper's evaluation figures:
 
 **Total time:** ~30 min of your attention + ~3 hours of unattended compute for the full sweep, or ~90 min for the quick sweep.
 
-You will run **exactly three commands total** (git clone, cd, and `./setup_cloudlab.sh`). Everything else is menu-driven.
+You will run **exactly two commands total** (cd and `./run.sh`). Everything else is menu-driven — or copy-paste the one-line equivalents shown below.
 
 ---
 
@@ -54,58 +54,36 @@ On node0, run these two commands (the profile already cloned the repo):
 
 ```bash
 cd /local/repository
-./setup_cloudlab.sh
+./run.sh
 ```
 
 (On a machine without the profile, clone it yourself first:
 `git clone --branch unified-artifact --recurse-submodules https://github.com/distopialabs/Smaran.git`.)
 
-That's it. `setup_cloudlab.sh` prepares the environment (inter-node SSH, PATHs, cleans stale state), then walks you through two menus.
+`./run.sh` prepares the environment (inter-node SSH, PATHs, cleans stale
+state), asks two questions — what (`kt`) and at which scale — then starts the
+run **detached** and prints the one-line command that skips the menus next
+time. The KT sweeps:
 
-### Menu 1 — pick a domain
-
-At the end of setup, you will see:
-
-```
-=======================================================
-  Setup complete. Which experiment do you want to run?
-=======================================================
-   [1] Key Transparency  (Section 7.1: Figs 4a, 4b, 4c, 5)
-   [2] Decentralized Ledger  (Section 7.2: Figs 6, 7)
-   [q] Quit (I will run it later manually)
-> Choice [1/2/q]:
-```
-
-- **Type `1`** to run the Key-Transparency experiments. It chains into Menu 2 below.
-- **Type `2`** for Decentralized Ledger — it chains into the DL tier menu; the full DL guide is the [root README](../README.md).
-- **Type `q`** to stop here. You can rerun `./run_kt.sh` yourself later.
-
-### Menu 2 — pick a sweep depth (KT only)
-
-Once you pick `1` above, you'll see:
-
-```
-=======================================================
-  Smaran Key Transparency (Section 7.1)
-=======================================================
-   [1] FULL   sweep (~3 hours; reproduces every point from paper)
-                Fig 4: 11 versions {2,4,8,16,32,64,128,256,512,1024,2047}
-                Fig 5: 6 user counts {10k,50k,100k,200k,500k,1M}
-   [2] QUICK  sweep (~90 min; reduced points, same qualitative shape)
-                Fig 4: 5 versions {2,16,128,256,2047}
-                Fig 5: 3 user counts {10k,0.2M,1M}
-   [3] SMOKE  test (~3 min; validates pipeline only, one point)
-   [q] Quit
-> Choice [1/2/3/q]:
-```
-
-**Recommended first-timer flow:** `3` (smoke) → confirm you see `Saved: .../fig4a_latency.pdf` at the end → then rerun `./run_kt.sh` and pick `1` (full) or `2` (quick).
-
-| Choice | Compute time | What it does |
+| Command | Compute time | What it does |
 |---|---|---|
-| **[1] FULL** | ~3 hours | Every point from the paper. Highest fidelity. |
-| **[2] QUICK** | ~90 min | Reduced points but same trend and protocol ordering as the paper. |
-| **[3] SMOKE** | ~3 min | One sweep point across the three protocols. Just checks that the whole pipeline (build, SSH, server, bench, plotting) works end-to-end. |
+| `./run.sh start full kt` | ~3 hours | Every point from the paper: Fig 4 with 11 version counts {2 … 2047}, Fig 5 with 6 user counts {10k … 1M}. Highest fidelity. |
+| `./run.sh start quick kt` | ~90 min | Reduced points (Fig 4: 5 version counts; Fig 5: 3 user counts) but same trend and protocol ordering as the paper. |
+| `./run.sh start smoke kt` | ~4 min | One sweep point across the three protocols. Just checks that the whole pipeline (build, SSH, server, bench, plotting) works end-to-end. |
+
+Individual figures work too: `./run.sh start quick fig4a`.
+
+**Recommended first-timer flow:** `./run.sh start smoke kt` → wait ~4 min →
+`./run.sh status` shows `done` and `./run.sh results` lists
+`output/fig4a_latency.pdf` → then `./run.sh start full kt` (or `quick`).
+
+Because runs are detached, closing your terminal loses nothing:
+
+```bash
+./run.sh status    # which figure is running, elapsed vs. estimate
+./run.sh follow    # live log (Ctrl+C only stops watching)
+./run.sh stop      # abort; rerunning redoes only unfinished work
+```
 
 While a sweep runs you'll see a live ETA per point, e.g.:
 
@@ -158,17 +136,18 @@ If you'd rather skip logging into node0 yourself, run this on your laptop after 
 
 ```bash
 curl -sLO https://raw.githubusercontent.com/distopialabs/Smaran/unified-artifact/run_ae.sh
-chmod +x run_ae.sh
-bash run_ae.sh <your-cloudlab-username> <node0-hostname> full   # or 'quick'
+bash run_ae.sh <your-cloudlab-username> <node0-hostname> start full kt   # or quick/smoke
+bash run_ae.sh <your-cloudlab-username> <node0-hostname> status          # any time
+bash run_ae.sh <your-cloudlab-username> <node0-hostname> fetch           # PDFs -> ~/Desktop/smaran-ae-output
 ```
 
-Does the whole flow (SSH → setup → sweep → scp back) in one shot. Same result as Steps 2–4.
+Same `run.sh` on node0, driven over SSH — start, check progress, and copy the figures back without ever logging in yourself.
 
 ---
 
 ## Install from source 🖥️ *(only if you unchecked the pre-built image at Step 1)*
 
-Before Menu 2, run:
+Before running the sweeps, run:
 
 ```bash
 ./KeyTransparencyScripts/install_coniks.sh    # prints "Installing Coniks"
@@ -187,7 +166,7 @@ Before Menu 2, run:
 
 ## Decentralized Ledger (§7.2)
 
-The Decentralized-Ledger portion of the artifact lives in this same repo. Its full reviewer guide is the [root README](../README.md); the quick entry point is `./run_dl.sh` (or option `2` in `setup_cloudlab.sh`).
+The Decentralized-Ledger portion of the artifact lives in this same repo. Its full reviewer guide is the [root README](../README.md); the quick entry point is `./run.sh start quick dl`.
 
 ---
 
@@ -197,7 +176,7 @@ Every experiment script auto-cleans stale processes and `/tmp/coniks.sock` at st
 
 | Issue | Fix |
 |---|---|
-| `Permission denied (publickey)` between nodes | Rerun `./setup_cloudlab.sh` on node0. |
+| `Permission denied (publickey)` between nodes | Rerun `./run.sh setup` on node0. |
 | `no free nodes of type r6615/c6420` at Instantiate | On the profile parameter form, switch to `r6525` / `r6520`. Same qualitative results. |
 | Experiment hangs > 5 min | Ctrl-C, delete the newest directory under `logs/2026-*` in the repo, rerun. |
 | Anything else | Open an issue at <https://github.com/distopialabs/Smaran/issues>. |

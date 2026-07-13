@@ -4,7 +4,8 @@
 One profile serves both usecases: Key Transparency (Section 7.1, Figs 4-5;
 ktserver on node1, ktbench on node0) and Decentralized Ledger (Section 7.2,
 Figs 6-7). After setup finishes, SSH into node0 and run
-`/local/repository/setup_cloudlab.sh` to pick one.
+`/local/repository/run.sh` to pick one (or drive it from your laptop with
+run_ae.sh — see the repo README).
 
 This profile reproduces the paper's benchmark topology:
 

@@ -78,7 +78,7 @@ Only edits allowed: package clause / import paths (`internal/tree` →
 | `KeyTransparencyScripts/`, `QuickTesting-KeyTransparency/` | top-level siblings of the DL script dirs |
 | `experiments/` (kt.py, kt_plot.py, kt_put_plot.py, common.py, …) | KT sweep driver; also contains dl_query_plot.py/optimus.py (already known from kt-put-throughput) |
 | `reference_pdfs/` | KT expected-output PDFs |
-| `run_kt.sh`, `run_ae.sh`, `setup_cloudlab.sh`, `run_dl.sh` | top-level menus — adapted in Phase 5 |
+| `run_kt.sh`, `run_ae.sh`, `setup_cloudlab.sh`, `run_dl.sh` | top-level menus — adapted in Phase 5, then superseded by the unified `run.sh` + thin `run_ae.sh` (2026-07-13 UX standardization) |
 | `KT.md`, `KT_Samurai.md` | design notes → `docs/` |
 
 ### R2 — additive ports into shared files
