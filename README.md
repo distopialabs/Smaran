@@ -460,3 +460,8 @@ variants of the same scripts). The CloudLab profile is **`profile.py`** at
 the repo root (where CloudLab requires it); node setup and the image recipe
 live in **`cloudlab/`**. All experiment output is written under **`results/`**
 (gitignored). `docs/DEVELOPMENT.md` documents every binary and subcommand.
+
+## License
+
+This artifact is released under the MIT License (see [LICENSE](LICENSE)).
+The `Coniks/` submodule carries its own upstream license.
