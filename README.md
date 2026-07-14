@@ -1,6 +1,6 @@
 # Smaran
 
-Smaran is an authenticated data structure that serves time-travel queries
+[Smaran](SmaranFullPaper.pdf) is an authenticated data structure that serves time-travel queries
 (over a single point in the past or an interval) with a constant number of
 fixed-size proofs, independent of the query range or history length. It
 combines segment trees with cryptographic vector commitments, integrated
