@@ -202,8 +202,11 @@ criteria.
   each point once to fit the time budget, so individual points may look
   noisier than the paper (Fig 4a Smaran at 700 and 1500 versions, Fig 5
   Optiks between 50k and 1M users). Shape and ordering are preserved.
-- **Coniks fork.** The `Coniks/` submodule is `coniks-history-extension`, a
-  fork of official CONIKS with a Merkle Patricia Trie extension. Its
+- **Coniks fork.** The `Coniks/` submodule is
+  [`coniks-history-extension`](https://github.com/Shistuu/coniks-history-extension),
+  a fork of [official CONIKS](https://github.com/coniks-sys/coniks-go) with a
+  Merkle Patricia Trie extension (our modifications are the fork's commits on
+  top of upstream). Its
   per-request cost is user-count-independent, which is why our Fig 5 Coniks
   curve is flat while the paper's declines slightly. Fig 4 shape matches
   the paper.
