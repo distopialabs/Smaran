@@ -6,7 +6,11 @@ fixed-size proofs, independent of the query range or history length. It
 combines segment trees with cryptographic vector commitments, integrated
 into two applications: key transparency and decentralized ledgers.
 
-This repository is the artifact for the SOSP paper on **Smaran**. It
+This repository is the artifact for the SOSP paper on **Smaran**, permanently
+archived on Zenodo at
+[DOI 10.5281/zenodo.21351393](https://doi.org/10.5281/zenodo.21351393)
+(the experiment dataset is archived separately, see
+[DOI 10.5281/zenodo.21317398](https://doi.org/10.5281/zenodo.21317398)). It
 reproduces both evaluation usecases with one standard workflow:
 
 | Usecase | Figures | Scope name | Guide |
