@@ -7,7 +7,7 @@ sweep across `{Smaran, Optiks, Coniks}`, and produces a single PDF.
 ## Two ways to run
 
 1. **Use the CloudLab profile** (fastest): instantiate
-   [the unified profile](https://www.cloudlab.us/p/distopialabs-PG0/smaran-artifact)
+   [the unified profile](https://www.cloudlab.us/p/DistopiaLabs/smaran-artifact)
    (see the [root README](../README.md)). Smaran is
    built at boot; Coniks/Optiks install on first use. Skip to *Running the
    experiments* below.

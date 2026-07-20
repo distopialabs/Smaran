@@ -100,7 +100,7 @@ the browser shell on the experiment page (per-node menu → **Shell**, no key
 needed) to append your public key to `~/.ssh/authorized_keys` on node0
 yourself.
 
-1. **Instantiate** [the profile](https://www.cloudlab.us/p/distopialabs-PG0/smaran-artifact).
+1. **Instantiate** [the profile](https://www.cloudlab.us/p/DistopiaLabs/smaran-artifact).
    The defaults are the paper's node pair (r6615 server + c6420 client at
    Clemson); if unavailable, pick a fallback pair from the parameter
    dropdowns (kept in the same cluster, because the dataset is
