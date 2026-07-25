@@ -20,6 +20,14 @@ DEFAULT_DB_ROOT=/data/local/artifact-dbs   # ingested-DB cache location
 # Blocks ingested into each protocol's query DB (range size must not exceed it)
 FULL_N_BLOCKS=2616996               # full dataset window
 QUICK_N_BLOCKS=10000
+# Per-protocol full-scale ingest windows, as in the paper: each protocol only
+# ingests enough blocks to cover its largest query range below. Smaran uses
+# the full window (FULL_N_BLOCKS); a full Merkle/Verkle archive of the whole
+# window would take far longer and overflow the server's blockstore.
+FULL_N_BLOCKS_MERKLE=610000
+FULL_N_BLOCKS_VERKLE=10000
+QUICK_N_BLOCKS_MERKLE="$QUICK_N_BLOCKS"
+QUICK_N_BLOCKS_VERKLE="$QUICK_N_BLOCKS"
 
 # Wall time per benchmark point (in-flight requests finish after it elapses)
 FULL_PROOF_DURATION=2m

@@ -230,7 +230,7 @@ scripts; `./run.sh` invokes these same scripts (`start smoke dl` =
 | Script | Shows | Quick | Full scale (extrapolated) |
 |---|---|---|---|
 | `plot_paper_figures.sh` | all six, from paper logs | ~1 min | n/a |
-| `run_fig6a.sh` (first of 6a/6b/6c) | query latency vs range | ~16 min first run; ~9 min on cached DBs | one-time full ingest per protocol: tens of hours; then ~25 min per protocol |
+| `run_fig6a.sh` (first of 6a/6b/6c) | query latency vs range | ~16 min first run; ~9 min on cached DBs | one-time ingest per protocol, sized to its ranges (Smaran full window: tens of hours; Merkle 610k blocks: ~5 h; Verkle 10k: minutes); then ~25 min per protocol |
 | `run_fig6b.sh` / `run_fig6c.sh` | throughput / payload size | seconds (re-plot of 6a's sweep) | seconds |
 | `run_fig7a.sh` | ingestion throughput | ~11 min | ~19 h |
 | `run_fig7b.sh` | archival storage impact | ~9 min (reuses fig6's DB) | ~1.5 h after fig6's ingest |
@@ -270,6 +270,13 @@ smoke tier).
   (`FORCE_RERUN=1` to redo).
 - **Ingested databases are cached** under `/data/local/artifact-dbs` and
   reused across runs (Figure 7b reuses Figure 6's Smaran database).
+  Incomplete databases left by an interrupted run are removed automatically
+  at the start of the next run.
+- **Full-scale query databases are sized per protocol**, as in the paper:
+  Smaran ingests the full 2.6M-block window, Merkle 610k blocks (its largest
+  query range is 600k), Verkle 10k (largest range 7k). Together they fit on
+  the server's blockstore with room to spare; benchmarks for the smaller
+  windows automatically use an accounts list matched to that window.
 - **Smaran runs have a fixed setup cost:** creating/opening its ~1000 shard
   databases adds a delay before ingestion or serving begins (about a minute
   on NVMe, several minutes on slower disks), and again at teardown. The

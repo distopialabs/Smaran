@@ -29,6 +29,9 @@ PORT_SMARAN=50063
 # _pick <name>: value of QUICK_<name> or FULL_<name> depending on tier
 _pick() { local v="FULL_$1"; [ "$QUICK" = "1" ] && v="QUICK_$1"; echo "${!v}"; }
 
+# An explicit N_BLOCKS from the environment overrides every protocol's window
+# (per-protocol config values included); capture it before defaulting.
+_N_BLOCKS_ENV="${N_BLOCKS:-}"
 N_BLOCKS="${N_BLOCKS:-$(_pick N_BLOCKS)}"
 PROOF_DURATION="${PROOF_DURATION:-$(_pick PROOF_DURATION)}"
 RANGES_SMARAN=(${RANGES_SMARAN:-$(_pick RANGES_SMARAN)})
@@ -49,7 +52,7 @@ FIGURE_ID="$(basename "$0" .sh)"
 FIGURE_ID="${FIGURE_ID#run_}"
 case "$FIGURE_ID" in
     fig6a | fig6b | fig6c | fig7b)
-        require_setup binaries data-local blocks account-stats params plot-deps server ;;
+        require_setup binaries go data-local blocks account-stats params plot-deps server ;;
     fig7a | fig7c)
         require_setup binaries data-local blocks account-stats-50k plot-deps server ;;
 esac
@@ -86,31 +89,77 @@ proto_port()  { case "$1" in smaran) echo "$PORT_SMARAN";; merkle) echo "$PORT_M
 proto_client(){ case "$1" in smaran) echo "$REPO_ROOT/bin/proofc";; merkle) echo "$REPO_ROOT/bin/merkle-proofc";; verkle) echo "$REPO_ROOT/bin/verkle-proofc";; esac; }
 proto_ranges(){ case "$1" in smaran) echo "${RANGES_SMARAN[@]}";; merkle) echo "${RANGES_MERKLE[@]}";; verkle) echo "${RANGES_VERKLE[@]}";; esac; }
 
+# proto_n_blocks <protocol>: blocks ingested into that protocol's query DB.
+# Each protocol only needs to cover its largest query range (the paper's
+# setup: Smaran the full window, Merkle 610k, Verkle 10k). Precedence:
+# per-protocol env (N_BLOCKS_MERKLE=...) > global env (N_BLOCKS=...) >
+# per-protocol config (FULL_/QUICK_N_BLOCKS_*) > tier default (N_BLOCKS).
+proto_n_blocks() {
+    case "$1" in
+        merkle) echo "${N_BLOCKS_MERKLE:-${_N_BLOCKS_ENV:-$(_pick N_BLOCKS_MERKLE)}}" ;;
+        verkle) echo "${N_BLOCKS_VERKLE:-${_N_BLOCKS_ENV:-$(_pick N_BLOCKS_VERKLE)}}" ;;
+        *)      echo "${N_BLOCKS_SMARAN:-${_N_BLOCKS_ENV:-$N_BLOCKS}}" ;;
+    esac
+}
+
 # --- Accounts list ----------------------------------------------------------
 # Query benchmarks pick accounts from a stats CSV; the accounts must exist in
-# the ingested block window or the client reports NotFound errors. Full-scale
-# runs use the repo's account_stats_all.csv; quick runs generate a list
+# the ingested block window or the client reports NotFound errors. A window
+# covering the full dataset uses the repo's account_stats_all.csv; smaller
+# windows (the quick tier, and full-scale Merkle/Verkle) generate a list
 # matched to the exact ingested window (cached).
 accounts_list_for_window() {
-    if [ "$QUICK" != "1" ]; then
+    local nblocks="${1:-$N_BLOCKS}"
+    if [ "$QUICK" != "1" ] && [ "$nblocks" -ge "$FULL_N_BLOCKS" ]; then
         echo "$REPO_ROOT/account_stats_all.csv"
         return
     fi
-    local out="$RESULTS_DIR/accounts/account_stats_first${N_BLOCKS}.csv"
+    local out="$RESULTS_DIR/accounts/account_stats_first${nblocks}.csv"
     if [ ! -f "$out" ]; then
-        say "Generating accounts list for the first $N_BLOCKS blocks (one-time, cached)" >&2
+        say "Generating accounts list for the first $nblocks blocks (one-time, cached)" >&2
         mkdir -p "$(dirname "$out")"
-        (cd "$REPO_ROOT" && go run ./cmd/tools/count_account_updates -n "$N_BLOCKS" -o "$out") >&2
+        (cd "$REPO_ROOT" && go run ./cmd/tools/count_account_updates -n "$nblocks" -o "$out") >&2
     fi
     echo "$out"
 }
 
 # --- Ingested-DB cache ------------------------------------------------------
-# ensure_ingested <protocol>: ingest N_BLOCKS once per (protocol, N_BLOCKS);
-# later runs reuse the DB. Prints the DB dir.
+
+# Before (re)ingesting a protocol, make sure nothing is left over from an
+# interrupted run: an orphaned ingest process would race the rebuild below,
+# and a DB directory without .ingest-complete is never valid — stale ones
+# (from any window size) only waste blockstore space. Runs on the node that
+# holds the DBs.
+_INGEST_CLEANUP_SCRIPT='
+if pkill -f "$BIN ingest" 2>/dev/null; then
+    echo "Stopping stale $LABEL ingest left by an interrupted run"
+    sleep 3
+    pkill -9 -f "$BIN ingest" 2>/dev/null
+fi
+for d in "$DB_ROOT_DIR/${PROTO}_n"*; do
+    if [ -d "$d" ] && [ ! -f "$d/.ingest-complete" ]; then
+        echo "Removing incomplete $LABEL database $d"
+        rm -rf "$d"
+    fi
+done
+true
+'
+
+clean_stale_ingest() {
+    local proto="$1"
+    if is_remote; then
+        server_ctl "BIN='$(proto_bin "$proto")' PROTO='$proto' DB_ROOT_DIR='$DB_ROOT' LABEL='$(proto_label "$proto")' bash -s" <<<"$_INGEST_CLEANUP_SCRIPT"
+    else
+        BIN="$(proto_bin "$proto")" PROTO="$proto" DB_ROOT_DIR="$DB_ROOT" LABEL="$(proto_label "$proto")" bash -s <<<"$_INGEST_CLEANUP_SCRIPT"
+    fi
+}
+
+# ensure_ingested <protocol>: ingest that protocol's block window once per
+# (protocol, window); later runs reuse the DB. Prints the DB dir.
 ensure_ingested() {
     local proto="$1"
-    local db="$DB_ROOT/${proto}_n${N_BLOCKS}"
+    local nblocks; nblocks="$(proto_n_blocks "$proto")"
+    local db="$DB_ROOT/${proto}_n${nblocks}"
     local marker="$db/.ingest-complete"
     # The DB (and so the marker) lives on the server node in remote mode.
     local have_marker=1
@@ -124,17 +173,18 @@ ensure_ingested() {
         echo "$db"
         return
     fi
-    say "Ingesting $N_BLOCKS blocks into a fresh $(proto_label "$proto") database (one-time; cached at $db)" >&2
+    clean_stale_ingest "$proto" >&2
+    say "Ingesting $nblocks blocks into a fresh $(proto_label "$proto") database (one-time; cached at $db)" >&2
     if [ "$proto" = "smaran" ]; then
         say "NOTE: Smaran creates ~1000 shard databases before ingesting — expect several minutes of setup and teardown around the ingest itself." >&2
     fi
     if is_remote; then
         server_ctl "rm -rf '$db'"
-        server_run "cd '$REPO_ROOT' && '$(proto_bin "$proto")' ingest --db-dir '$db' -n $N_BLOCKS --fresh" >&2
+        server_run "cd '$REPO_ROOT' && '$(proto_bin "$proto")' ingest --db-dir '$db' -n $nblocks --fresh" >&2
         server_ctl "touch '$marker'"
     else
         rm -rf "$db"
-        (cd "$REPO_ROOT" && "$(proto_bin "$proto")" ingest --db-dir "$db" -n "$N_BLOCKS" --fresh) >&2
+        (cd "$REPO_ROOT" && "$(proto_bin "$proto")" ingest --db-dir "$db" -n "$nblocks" --fresh) >&2
         touch "$marker"
     fi
     echo "$db"
@@ -152,11 +202,12 @@ run_proof_sweep() {
     shift $(( $# < 3 ? $# : 3 ))
     local ranges=("$@")
     [ ${#ranges[@]} -gt 0 ] || ranges=($(proto_ranges "$proto"))
-    local db port client accounts label
+    local db port client accounts label nblocks
+    nblocks="$(proto_n_blocks "$proto")"
     db="$(ensure_ingested "$proto")"
     port="$(proto_port "$proto")"
     client="$(proto_client "$proto")"
-    accounts="$(accounts_list_for_window)"
+    accounts="$(accounts_list_for_window "$nblocks")"
     label="$(proto_label "$proto")"
 
     start_server "$(proto_bin "$proto")" "$db" "$port"
@@ -276,11 +327,18 @@ run_fig6_pipeline() {
     local out="$RESULTS_DIR/fig6"
     local clients_dir="$logs/numclients${NUM_CLIENTS}"
     # The marker names every knob that shapes the sweep's CSVs — including
-    # the per-protocol range lists, so changed ranges redo the sweep instead
-    # of silently re-plotting stale logs.
+    # the per-protocol range lists and ingest windows, so changed ranges or
+    # windows redo the sweep instead of silently re-plotting stale logs.
+    # (When all protocols share one window, the id reduces to the historical
+    # format, so existing cached sweeps stay valid.)
+    local nb_s nb_m nb_v per_proto_n=""
+    nb_s="$(proto_n_blocks smaran)"; nb_m="$(proto_n_blocks merkle)"; nb_v="$(proto_n_blocks verkle)"
+    if [ "$nb_m" != "$nb_s" ] || [ "$nb_v" != "$nb_s" ]; then
+        per_proto_n="|nm${nb_m}|nv${nb_v}"
+    fi
     local ranges_id
-    ranges_id="$(echo "${RANGES_SMARAN[*]}|${RANGES_MERKLE[*]}|${RANGES_VERKLE[*]}" | md5sum | cut -c1-8)"
-    local marker="$logs/.complete-n${N_BLOCKS}-c${NUM_CLIENTS}-d${PROOF_DURATION}-r${ranges_id}"
+    ranges_id="$(echo "${RANGES_SMARAN[*]}|${RANGES_MERKLE[*]}|${RANGES_VERKLE[*]}${per_proto_n}" | md5sum | cut -c1-8)"
+    local marker="$logs/.complete-n${nb_s}-c${NUM_CLIENTS}-d${PROOF_DURATION}-r${ranges_id}"
 
     if [ -f "$marker" ] && [ "${FORCE_RERUN:-0}" != "1" ]; then
         say "Reusing benchmark logs from a previous Figure 6 run ($logs; FORCE_RERUN=1 to redo)"
