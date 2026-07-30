@@ -3,6 +3,7 @@ package proof
 import (
 	"errors"
 	"fmt"
+	"log"
 	"math"
 	"sync"
 	"time"
@@ -144,8 +145,23 @@ func GetLatestTopLayerCommitmentAsRangeProof(account common.Address, cbInfo *tre
 	}}
 }
 
-// GetNewProofRange generates range proofs for a given account and version range.
+// GetNewProofRange generates range proofs for a given account and version range,
+// sourcing segment-tree data with the help of the stored root hashes
+// (archival storage).
 func GetNewProofRange(account common.Address, startingVersion, endingVersion uint64, precomputedData *config.PrecomputedData, db *db.SamuraiStore) ([]*RangeProof, []*tree.HistoricalBalance) {
+	return getProofRange(account, startingVersion, endingVersion, precomputedData, db, false)
+}
+
+// GetOldProofRange generates the same proofs as GetNewProofRange but without
+// using stored root hashes: the segment trees are rebuilt from their leaves
+// (the pre-archival-storage configuration, served by GetOldProofStream for
+// the Figure 7b comparison). Proof computation, output, and verification are
+// identical to the new path; only the source of the tree data differs.
+func GetOldProofRange(account common.Address, startingVersion, endingVersion uint64, precomputedData *config.PrecomputedData, db *db.SamuraiStore) ([]*RangeProof, []*tree.HistoricalBalance) {
+	return getProofRange(account, startingVersion, endingVersion, precomputedData, db, true)
+}
+
+func getProofRange(account common.Address, startingVersion, endingVersion uint64, precomputedData *config.PrecomputedData, db *db.SamuraiStore, rebuildFromLeaves bool) ([]*RangeProof, []*tree.HistoricalBalance) {
 	reqCommits := findCommitmentsCoveringRange(int(startingVersion), int(endingVersion))
 
 	lxRequiredBatchIdxs := make(map[uint64][]uint64)
@@ -157,9 +173,16 @@ func GetNewProofRange(account common.Address, startingVersion, endingVersion uin
 		lxRequiredBatchIdxs[uint64(reqCommit.layer)] = append(lxRequiredBatchIdxs[uint64(reqCommit.layer)], uint64(reqCommit.idx))
 		// fmt.Printf("layer: %d, idx: %d\n", reqCommit.layer, reqCommit.idx)
 	}
-	// start := time.Now()
-	requiredTreeBatchesMap, requiredHBInfos, cachedCommitments := RebuildSegmentTreeForProof(account, lxRequiredBatchIdxs, startingVersion, endingVersion, db, precomputedData)
-	// log.Printf("Time taken to rebuild segment tree: %dms", time.Since(start).Milliseconds())
+	var requiredTreeBatchesMap map[string]tree.BatchTree
+	var requiredHBInfos []*tree.HistoricalBalance
+	var cachedCommitments map[string]gnark_kzg.Digest
+	if rebuildFromLeaves {
+		start := time.Now()
+		requiredTreeBatchesMap, requiredHBInfos = OldRebuildSegmentTreeForProof(account, lxRequiredBatchIdxs, startingVersion, endingVersion, db, precomputedData)
+		log.Printf("rebuilt segment trees from leaves (no stored roots): %dms", time.Since(start).Milliseconds())
+	} else {
+		requiredTreeBatchesMap, requiredHBInfos, cachedCommitments = RebuildSegmentTreeForProof(account, lxRequiredBatchIdxs, startingVersion, endingVersion, db, precomputedData)
+	}
 
 	allRangeProofs := make([]*RangeProof, len(reqCommits))
 	var wg sync.WaitGroup

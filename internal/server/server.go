@@ -65,7 +65,11 @@ type proofResult struct {
 //   - version>0 && cbInfo.StartBlock <= startBlock: top-layer commitment + cbInfo + MPT
 //   - version>0 && endBlock < firstHB.StartBlock:   OutOfRange error
 //   - version>0 && normal range:                    full range proofs + cbInfo + MPT
-func (s *ProofServer) generateProof(ctx context.Context, addr common.Address, startBlock, endBlock uint64) (*proofResult, error) {
+//
+// useOldPath selects the pre-archival-storage generation for the full-range
+// case: segment trees are rebuilt from their leaves instead of using stored
+// root hashes (served by GetOldProofStream for the Figure 7b comparison).
+func (s *ProofServer) generateProof(ctx context.Context, addr common.Address, startBlock, endBlock uint64, useOldPath bool) (*proofResult, error) {
 	shardIdx := utils.AddressToShardIndex(addr, len(s.dbs))
 	sdb := s.dbs[shardIdx]
 
@@ -154,7 +158,13 @@ func (s *ProofServer) generateProof(ctx context.Context, addr common.Address, st
 
 	// Generate full range proofs.
 	start := time.Now()
-	rangeProofs, balanceInfos := proof.GetNewProofRange(addr, startVersion, endVersion, s.precomputedData, sdb)
+	var rangeProofs []*proof.RangeProof
+	var balanceInfos []*tree.HistoricalBalance
+	if useOldPath {
+		rangeProofs, balanceInfos = proof.GetOldProofRange(addr, startVersion, endVersion, s.precomputedData, sdb)
+	} else {
+		rangeProofs, balanceInfos = proof.GetNewProofRange(addr, startVersion, endVersion, s.precomputedData, sdb)
+	}
 	proofgenDurationNs := time.Since(start).Nanoseconds()
 
 	// log.Printf("Generated %d range proofs and %d balance infos in %dns",
@@ -202,7 +212,7 @@ func (s *ProofServer) GetProof(ctx context.Context, req *proofpb.GetProofRequest
 		return nil, status.FromContextError(err).Err()
 	}
 
-	res, err := s.generateProof(ctx, common.HexToAddress(req.Account), req.StartBlock, req.EndBlock)
+	res, err := s.generateProof(ctx, common.HexToAddress(req.Account), req.StartBlock, req.EndBlock, false)
 	if err != nil {
 		return nil, err
 	}
@@ -283,7 +293,7 @@ func (s *ProofServer) GetProofStream(req *proofpb.GetProofRequest, stream proofp
 		return status.FromContextError(err).Err()
 	}
 
-	res, err := s.generateProof(stream.Context(), common.HexToAddress(req.Account), req.StartBlock, req.EndBlock)
+	res, err := s.generateProof(stream.Context(), common.HexToAddress(req.Account), req.StartBlock, req.EndBlock, false)
 	if err != nil {
 		return err
 	}
@@ -291,7 +301,10 @@ func (s *ProofServer) GetProofStream(req *proofpb.GetProofRequest, stream proofp
 	return streamProofResult(res, stream)
 }
 
-// GetOldProofStream is a legacy alias for GetProofStream.
+// GetOldProofStream streams the same proofs as GetProofStream but generated
+// without stored root hashes (segment trees rebuilt from leaves) — the
+// non-archival-storage configuration measured by Figure 7b. Selected by the
+// proof client's --old flag.
 func (s *ProofServer) GetOldProofStream(req *proofpb.GetProofRequest, stream proofpb.ProofService_GetProofStreamServer) error {
 	var benchStartNs int64
 	if s.benchLog != nil {
@@ -315,7 +328,7 @@ func (s *ProofServer) GetOldProofStream(req *proofpb.GetProofRequest, stream pro
 		return status.FromContextError(err).Err()
 	}
 
-	res, err := s.generateProof(stream.Context(), common.HexToAddress(req.Account), req.StartBlock, req.EndBlock)
+	res, err := s.generateProof(stream.Context(), common.HexToAddress(req.Account), req.StartBlock, req.EndBlock, true)
 	if err != nil {
 		return err
 	}
