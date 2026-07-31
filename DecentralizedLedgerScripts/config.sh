@@ -45,8 +45,9 @@ QUICK_RANGES_SMARAN="1 100 1000 10000"
 QUICK_RANGES_MERKLE="1 100 1000 10000"
 QUICK_RANGES_VERKLE="1 100 1000"
 
-# Figure 7b sweeps Smaran twice (optimus + non_optimus) over these ranges
-FULL_RANGES_7B="$FULL_RANGES_SMARAN"
+# Figure 7b sweeps Smaran twice (optimus + non_optimus) over these ranges.
+# The paper's Figure 7b starts at range 500 (unlike the Figure 6 sweep).
+FULL_RANGES_7B="500 1000 5000 7000 50000 200000 600000 1200000 2600000"
 QUICK_RANGES_7B="1 100 500 1000 5000 7000"   # the paper's points < 10k
 
 # --- Figure 7a: ingestion throughput ------------------------------------------
